@@ -1,0 +1,51 @@
+# Caddyfile — production reverse proxy for the scraper API.
+#
+# Caddy automatically obtains and renews a Let's Encrypt TLS cert for the
+# domain below. Just make sure:
+#   1. The domain's A record points at this server's public IP
+#   2. Ports 80 and 443 are open in the security group + UFW
+#
+# Apply changes:
+#   sudo cp Caddyfile /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# Tail logs:
+#   sudo journalctl -u caddy -f
+
+# -----------------------------------------------------------------------------
+# REPLACE `api.example.com` with your real domain (e.g. api.megaanalytics.com)
+# before reloading Caddy. This is the only line you need to edit.
+# -----------------------------------------------------------------------------
+api.example.com {
+	# Forward everything to the local Express API
+	reverse_proxy localhost:3000 {
+		# Pass real client IP through to the API logs
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Compress responses where it makes sense
+	encode zstd gzip
+
+	# Reasonable security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Hide which proxy/server we are
+		-Server
+	}
+
+	# Structured access log written to disk; rotated by Caddy automatically.
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50mb
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format json
+		# Don't log health checks (cuts noise from uptime monitors)
+		level INFO
+	}
+}

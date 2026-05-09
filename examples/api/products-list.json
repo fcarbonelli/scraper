@@ -1,0 +1,72 @@
+{
+  "data": [
+    {
+      "id": "50bb31b8-5b6d-4a37-8905-ff3de2c6ffb9",
+      "name": "Lavandina Original Ayudin 2L",
+      "category": "Lavandinas Liquidas",
+      "brand": "AYUDIN",
+      "unit": "2 Litro",
+      "ean": "7793253006709",
+      "metadata": {
+        "imageUrl": "https://static.cotodigital.com.ar/sitios/cdigi/productos/00591050.jpg",
+        "department": "LIMPIEZA"
+      },
+      "created_at": "2026-04-29T22:09:33.972Z",
+      "updated_at": "2026-04-29T22:09:33.972Z"
+    },
+    {
+      "id": "9ff24483-fbc8-49e7-a35e-cc11e26a6cb0",
+      "name": "Lavandina Ayudín original 1 L",
+      "category": "Lavandinas",
+      "brand": "Ayudín",
+      "unit": "1 L.",
+      "ean": "7790132098459",
+      "metadata": {
+        "imageUrl": "https://carrefourar.vteximg.com.br/arquivos/ids/795358/7790132098459_01.jpg",
+        "linkText": "lavandina-ayudin-original-1-l"
+      },
+      "created_at": "2026-04-29T22:51:08.566Z",
+      "updated_at": "2026-04-29T22:51:08.566Z"
+    },
+    {
+      "id": "11d2cabb-0e87-49ad-bf86-c0c87a8b2a91",
+      "name": "Coca Cola Original 2.25 L",
+      "category": "Gaseosas",
+      "brand": "Coca-Cola",
+      "unit": "2.25 L",
+      "ean": "7790895000478",
+      "metadata": {
+        "imageUrl": "https://static.cotodigital.com.ar/sitios/cdigi/productos/00012345.jpg",
+        "department": "BEBIDAS"
+      },
+      "created_at": "2026-05-01T10:11:02.114Z",
+      "updated_at": "2026-05-01T10:11:02.114Z"
+    },
+    {
+      "id": "7c8d6fb0-3e02-4d2a-9faa-c0d4e0aa18a1",
+      "name": "Yerba Mate Taragüi Tradicional 1Kg",
+      "category": "Yerba Mate",
+      "brand": "Taragüi",
+      "unit": "1 Kg",
+      "ean": "7790387000168",
+      "metadata": {
+        "imageUrl": "https://carrefourar.vteximg.com.br/arquivos/ids/642190/7790387000168_01.jpg"
+      },
+      "created_at": "2026-05-02T08:42:21.000Z",
+      "updated_at": "2026-05-02T08:42:21.000Z"
+    },
+    {
+      "id": "f5b53041-5ccc-4d3e-9f1c-2c0c3a45d2cf",
+      "name": "Galletitas Oreo Original 118g",
+      "category": "Galletitas Dulces",
+      "brand": "Oreo",
+      "unit": "118 g",
+      "ean": null,
+      "metadata": {},
+      "created_at": "2026-05-03T11:00:00.000Z",
+      "updated_at": "2026-05-03T11:00:00.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 5, "totalPages": 1 },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}

@@ -1,0 +1,75 @@
+{
+  "data": [
+    {
+      "id": "a8b9c1d2-1234-4567-89ab-cdef01234567",
+      "severity": "critical",
+      "type": "supermarket_degraded",
+      "supermarket_id": "jumbo",
+      "product_id": null,
+      "title": "Jumbo degraded",
+      "message": "50/50 products failing. Top errors: selector_failed (50)",
+      "context": {
+        "run_id": "7a02d4f8-2bc1-46e2-9012-001122334455",
+        "failure_rate": "100%",
+        "total": 50,
+        "succeeded": 0,
+        "failed": 50,
+        "top_errors": "selector_failed (50)"
+      },
+      "status": "open",
+      "created_at": "2026-05-07T09:32:14.000Z",
+      "resolved_at": null
+    },
+    {
+      "id": "b9c0d2e3-2345-4678-9abc-def012345678",
+      "severity": "warning",
+      "type": "supermarket_unstable",
+      "supermarket_id": "disco",
+      "product_id": null,
+      "title": "Disco unstable",
+      "message": "28/50 products failing (56%). Top errors: rate_limited (18), network_timeout (8)",
+      "context": {
+        "run_id": "7a02d4f8-2bc1-46e2-9012-001122334455",
+        "failure_rate": "56%",
+        "total": 50,
+        "succeeded": 22,
+        "failed": 28,
+        "top_errors": "rate_limited (18), network_timeout (8)"
+      },
+      "status": "acknowledged",
+      "created_at": "2026-05-07T09:33:01.000Z",
+      "resolved_at": null
+    },
+    {
+      "id": "c0d1e3f4-3456-4789-abcd-ef0123456789",
+      "severity": "info",
+      "type": "product_not_found",
+      "supermarket_id": "carrefour",
+      "product_id": "f5b53041-5ccc-4d3e-9f1c-2c0c3a45d2cf",
+      "title": "Product 404 on Carrefour",
+      "message": "Galletitas Oreo Original 118g returned 404 — possibly delisted by the supermarket",
+      "context": {
+        "external_id": "94512",
+        "external_url": "https://www.carrefour.com.ar/galletitas-oreo-original-118g/p"
+      },
+      "status": "open",
+      "created_at": "2026-05-07T09:33:42.000Z",
+      "resolved_at": null
+    },
+    {
+      "id": "d1e2f4a5-4567-489a-bcde-f01234567890",
+      "severity": "critical",
+      "type": "selector_broken",
+      "supermarket_id": "disco",
+      "product_id": null,
+      "title": "Disco selector broken (resolved)",
+      "message": "selector_failed dominated yesterday's run. Adapter updated.",
+      "context": { "run_id": "8b1c5e30-3c8a-4933-8c11-eeff99887766" },
+      "status": "resolved",
+      "created_at": "2026-05-06T09:32:14.000Z",
+      "resolved_at": "2026-05-06T14:10:08.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 4, "totalPages": 1 },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}

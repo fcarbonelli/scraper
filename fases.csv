@@ -1,0 +1,9 @@
+#,Fase,Estado,Qué,Por qué en este orden
+1,Fundamentos,✓,"Esquema de base de datos, infra compartida (logs, colas, validación)","Todo lo demás depende de esto"
+2,"Motor + Coto",✓,"Pipeline completo (orquestador, worker, reintentos, alertas Telegram) + 1er adapter","Coto tiene una API JSON limpia: el target más fácil para probar que el motor funciona"
+4,"API REST",✓,"Endpoints documentados con auth por API key","Adelantamos esta fase para tener un contrato estable contra el cual construir el frontend"
+3,Carrefour,✓,"2do adapter (basado en VTEX)","~La mitad de los supermercados de la lista usan VTEX (Disco, Jumbo, Vea, Día, etc.), así que Carrefour funciona como plantilla"
+5,"Deploy a AWS",◐,"Server EC2 con HTTPS y deploy automático en cada git push","Hasta que no esté en producción, el scraper diario no corre y el frontend no tiene API a la que apuntar"
+6,"Frontend Dashboard",—,"UI para visualizar precios, comparativas, alertas","Construir contra una API ya desplegada es mucho más rápido. Va en paralelo con Fase 7"
+7,"Más supermercados",—,"Los ~15 restantes","Con alertas ya en producción, sabemos cuándo se rompe alguno. Trabajo mecánico, en paralelo con Fase 6"
+8,Hardening,—,"Rate limiting, detección de anomalías, métricas","Se agrega de forma reactiva según lo que muestre la producción"

@@ -1,0 +1,71 @@
+{
+  "data": [
+    {
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "external_id": "51090",
+      "external_url": "https://www.carrefour.com.ar/lavandina-ayudin-original-1-l/p",
+      "product": {
+        "id": "9ff24483-fbc8-49e7-a35e-cc11e26a6cb0",
+        "name": "Lavandina Ayudín original 1 L",
+        "category": "Lavandinas",
+        "brand": "Ayudín",
+        "unit": "1 L.",
+        "ean": "7790132098459",
+        "metadata": {
+          "imageUrl": "https://carrefourar.vteximg.com.br/arquivos/ids/795358/7790132098459_01.jpg"
+        }
+      },
+      "latest_snapshot": {
+        "price": 1455.00,
+        "in_stock": true,
+        "currency": "ARS",
+        "scraped_at": "2026-05-07T09:21:34.781Z",
+        "promotions": [
+          { "type": "payment_method", "description": "Tarjeta Carrefour 15%", "discountPct": 15 }
+        ]
+      }
+    },
+    {
+      "supermarket_product_id": "2d3a4f50-bcde-4f12-a000-988877665544",
+      "external_id": "62114",
+      "external_url": "https://www.carrefour.com.ar/coca-cola-original-2-25-l/p",
+      "product": {
+        "id": "11d2cabb-0e87-49ad-bf86-c0c87a8b2a91",
+        "name": "Coca Cola Original 2.25 L",
+        "category": "Gaseosas",
+        "brand": "Coca-Cola",
+        "unit": "2.25 L",
+        "ean": "7790895000478",
+        "metadata": {
+          "imageUrl": "https://carrefourar.vteximg.com.br/arquivos/ids/642190/coca-cola-2.25.jpg"
+        }
+      },
+      "latest_snapshot": {
+        "price": 2890.00,
+        "in_stock": true,
+        "currency": "ARS",
+        "scraped_at": "2026-05-07T09:22:02.114Z",
+        "promotions": []
+      }
+    },
+    {
+      "supermarket_product_id": "3e4b5c61-cdef-4567-bbbb-aabbccddeeff",
+      "external_id": "78922",
+      "external_url": "https://www.carrefour.com.ar/yerba-mate-taragui-tradicional-1kg/p",
+      "product": {
+        "id": "7c8d6fb0-3e02-4d2a-9faa-c0d4e0aa18a1",
+        "name": "Yerba Mate Taragüi Tradicional 1Kg",
+        "category": "Yerba Mate",
+        "brand": "Taragüi",
+        "unit": "1 Kg",
+        "ean": "7790387000168",
+        "metadata": {
+          "imageUrl": "https://carrefourar.vteximg.com.br/arquivos/ids/642190/7790387000168_01.jpg"
+        }
+      },
+      "latest_snapshot": null
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 3, "totalPages": 1 },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}

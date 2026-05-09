@@ -1,0 +1,30 @@
+{
+  "data": {
+    "run": {
+      "id": "7a02d4f8-2bc1-46e2-9012-001122334455",
+      "started_at": "2026-05-05T09:00:00.000Z",
+      "finished_at": "2026-05-05T09:38:07.000Z",
+      "status": "completed",
+      "total_jobs": 200,
+      "succeeded": 121,
+      "failed": 79,
+      "retried": 12
+    },
+    "breakdown": {
+      "bySupermarket": {
+        "coto":      { "total": 50, "succeeded": 50, "failed": 0 },
+        "carrefour": { "total": 50, "succeeded": 49, "failed": 1 },
+        "disco":     { "total": 50, "succeeded": 22, "failed": 28 },
+        "jumbo":     { "total": 50, "succeeded": 0,  "failed": 50 }
+      },
+      "byTier": { "api": 121, "html": 0, "ai": 0 },
+      "topErrors": [
+        { "type": "selector_failed", "count": 50 },
+        { "type": "rate_limited",    "count": 18 },
+        { "type": "network_timeout", "count": 8  },
+        { "type": "product_not_found", "count": 3 }
+      ]
+    }
+  },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}

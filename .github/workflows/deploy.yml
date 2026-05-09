@@ -1,0 +1,114 @@
+name: Deploy to EC2
+
+# Auto-deploy on every push to main, plus a manual trigger button in the
+# Actions tab for re-deploys without a code change.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Don't run two deploys at once; queue them. The second push waits for the
+# first to finish (cancel-in-progress: false) — we never want to interrupt a
+# running pm2 reload mid-flight.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  deploy:
+    name: SSH + reload
+    runs-on: ubuntu-latest
+    needs: typecheck
+    timeout-minutes: 10
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # 5min should be plenty; pm2 reload is normally <10s
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd /home/ubuntu/scraper
+
+            echo "==> Fetching latest from origin/main"
+            git fetch --all --quiet
+            git reset --hard origin/main
+
+            echo "==> Installing dependencies"
+            npm ci
+
+            echo "==> Building TypeScript"
+            npm run build
+
+            echo "==> Reloading PM2 (zero-downtime)"
+            # `pm2 reload` will start processes that aren't running yet,
+            # so this works for both first deploy and subsequent ones.
+            pm2 reload ecosystem.config.cjs --update-env
+            pm2 save
+
+            echo "==> Deploy complete"
+            pm2 status
+
+      - name: Notify Telegram on success
+        if: success()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "${BOT_TOKEN:-}" ] || [ -z "${CHAT_ID:-}" ]; then
+            echo "Telegram secrets not configured; skipping notification."
+            exit 0
+          fi
+          # Trim commit message to 200 chars to keep the alert readable
+          MSG=$(echo "${{ github.event.head_commit.message }}" | head -n1 | cut -c1-200)
+          TEXT=$(printf '<b>Deploy succeeded</b>\n<b>Commit:</b> %s\n<b>By:</b> %s\n<a href="%s/%s/commit/%s">View commit</a>' \
+                  "$MSG" "${{ github.actor }}" \
+                  "${{ github.server_url }}" "${{ github.repository }}" "${{ github.sha }}")
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=${TEXT}" \
+            > /dev/null
+
+      - name: Notify Telegram on failure
+        if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "${BOT_TOKEN:-}" ] || [ -z "${CHAT_ID:-}" ]; then
+            echo "Telegram secrets not configured; skipping notification."
+            exit 0
+          fi
+          TEXT=$(printf '<b>DEPLOY FAILED</b>\n<b>Repo:</b> %s\n<b>By:</b> %s\n<b>Commit:</b> <code>%s</code>\n<a href="%s/%s/actions/runs/%s">View logs</a>' \
+                  "${{ github.repository }}" "${{ github.actor }}" \
+                  "${{ github.sha }}" \
+                  "${{ github.server_url }}" "${{ github.repository }}" "${{ github.run_id }}")
+          curl -fsS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "disable_web_page_preview=true" \
+            --data-urlencode "text=${TEXT}" \
+            > /dev/null

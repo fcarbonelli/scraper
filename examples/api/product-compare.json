@@ -1,0 +1,100 @@
+{
+  "data": {
+    "product": {
+      "id": "9ff24483-fbc8-49e7-a35e-cc11e26a6cb0",
+      "name": "Lavandina Ayudín original 1 L",
+      "category": "Lavandinas",
+      "brand": "Ayudín",
+      "unit": "1 L.",
+      "ean": "7790132098459",
+      "metadata": {
+        "imageUrl": "https://carrefourar.vteximg.com.br/arquivos/ids/795358/7790132098459_01.jpg"
+      },
+      "created_at": "2026-04-29T22:51:08.566Z",
+      "updated_at": "2026-04-29T22:51:08.566Z"
+    },
+    "summary": {
+      "minPrice": 1380.99,
+      "maxPrice": 1599.00,
+      "avgPrice": 1478.33,
+      "supermarketsCount": 3,
+      "inStockCount": 2
+    },
+    "results": [
+      {
+        "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+        "supermarket": {
+          "id": "carrefour",
+          "name": "Carrefour Argentina",
+          "healthStatus": "healthy"
+        },
+        "external_id": "51090",
+        "external_url": "https://www.carrefour.com.ar/lavandina-ayudin-original-1-l/p",
+        "snapshot": {
+          "id": 2031,
+          "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+          "price": 1455.00,
+          "list_price": null,
+          "unit_price": 1455.00,
+          "unit_price_per": "1 L.",
+          "in_stock": true,
+          "currency": "ARS",
+          "tier_used": "api",
+          "promotions": [
+            { "type": "payment_method", "description": "Tarjeta Carrefour 15%", "discountPct": 15 }
+          ],
+          "scraped_at": "2026-05-07T09:21:34.781Z"
+        }
+      },
+      {
+        "supermarket_product_id": "8e9bcc71-aaaa-4444-bbbb-1111aaaa2222",
+        "supermarket": {
+          "id": "coto",
+          "name": "Coto Digital",
+          "healthStatus": "healthy"
+        },
+        "external_id": "00591051-00591051-200",
+        "external_url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/lavandina-original-ayudin-1l/_/R-00591051-00591051-200",
+        "snapshot": {
+          "id": 2030,
+          "supermarket_product_id": "8e9bcc71-aaaa-4444-bbbb-1111aaaa2222",
+          "price": 1380.99,
+          "list_price": 1599.00,
+          "unit_price": 1380.99,
+          "unit_price_per": "Litro",
+          "in_stock": true,
+          "currency": "ARS",
+          "tier_used": "api",
+          "promotions": [
+            { "type": "discount", "description": "13% off", "discountPct": 13 }
+          ],
+          "scraped_at": "2026-05-07T09:18:02.114Z"
+        }
+      },
+      {
+        "supermarket_product_id": "5577ccdd-eeee-4444-aaaa-bbbbccccdddd",
+        "supermarket": {
+          "id": "disco",
+          "name": "Disco",
+          "healthStatus": "degraded"
+        },
+        "external_id": "184223",
+        "external_url": "https://www.disco.com.ar/lavandina-ayudin-original-1-l/p",
+        "snapshot": {
+          "id": 2025,
+          "supermarket_product_id": "5577ccdd-eeee-4444-aaaa-bbbbccccdddd",
+          "price": 1599.00,
+          "list_price": null,
+          "unit_price": 1599.00,
+          "unit_price_per": "1 L.",
+          "in_stock": false,
+          "currency": "ARS",
+          "tier_used": "api",
+          "promotions": [],
+          "scraped_at": "2026-05-06T09:32:45.000Z"
+        }
+      }
+    ]
+  },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}

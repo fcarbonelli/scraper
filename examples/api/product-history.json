@@ -1,0 +1,195 @@
+{
+  "data": [
+    {
+      "id": 2031,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1455.00,
+      "list_price": null,
+      "unit_price": 1455.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [
+        { "type": "payment_method", "description": "Tarjeta Carrefour 15%", "discountPct": 15 }
+      ],
+      "scraped_at": "2026-05-07T09:21:34.781Z"
+    },
+    {
+      "id": 1998,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1455.00,
+      "list_price": null,
+      "unit_price": 1455.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-05-06T09:18:01.522Z"
+    },
+    {
+      "id": 1965,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1299.00,
+      "list_price": 1599.00,
+      "unit_price": 1299.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [
+        { "type": "discount", "description": "Hasta 35% off en seleccionados", "discountPct": 19 },
+        { "type": "payment_method", "description": "Tarjeta Carrefour 15%", "discountPct": 15 }
+      ],
+      "scraped_at": "2026-05-05T09:14:55.211Z"
+    },
+    {
+      "id": 1932,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1299.00,
+      "list_price": 1599.00,
+      "unit_price": 1299.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [
+        { "type": "discount", "description": "Hasta 35% off en seleccionados", "discountPct": 19 }
+      ],
+      "scraped_at": "2026-05-04T09:21:14.118Z"
+    },
+    {
+      "id": 1899,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1599.00,
+      "list_price": null,
+      "unit_price": 1599.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-05-03T09:11:09.732Z"
+    },
+    {
+      "id": 1866,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1599.00,
+      "list_price": null,
+      "unit_price": 1599.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-05-02T09:18:33.000Z"
+    },
+    {
+      "id": 1833,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1599.00,
+      "list_price": null,
+      "unit_price": 1599.00,
+      "unit_price_per": "1 L.",
+      "in_stock": false,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-05-01T09:14:11.000Z"
+    },
+    {
+      "id": 1800,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1499.00,
+      "list_price": null,
+      "unit_price": 1499.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-04-30T09:21:18.000Z"
+    },
+    {
+      "id": 1767,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1499.00,
+      "list_price": null,
+      "unit_price": 1499.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-04-29T09:18:54.000Z"
+    },
+    {
+      "id": 1734,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1399.00,
+      "list_price": null,
+      "unit_price": 1399.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-04-28T09:14:02.000Z"
+    },
+    {
+      "id": 1701,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1399.00,
+      "list_price": null,
+      "unit_price": 1399.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-04-27T09:21:50.000Z"
+    },
+    {
+      "id": 1668,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1399.00,
+      "list_price": null,
+      "unit_price": 1399.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-04-26T09:18:33.000Z"
+    },
+    {
+      "id": 1635,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1349.00,
+      "list_price": null,
+      "unit_price": 1349.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-04-25T09:14:21.000Z"
+    },
+    {
+      "id": 1602,
+      "supermarket_product_id": "1c1f3a37-5ae3-46e3-9537-1830e7e803e7",
+      "price": 1349.00,
+      "list_price": null,
+      "unit_price": 1349.00,
+      "unit_price_per": "1 L.",
+      "in_stock": true,
+      "currency": "ARS",
+      "tier_used": "api",
+      "promotions": [],
+      "scraped_at": "2026-04-24T09:21:11.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 200, "total": 14, "totalPages": 1 },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}

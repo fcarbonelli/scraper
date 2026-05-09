@@ -1,0 +1,8 @@
+{
+  "data": {
+    "status": "ok",
+    "uptimeSeconds": 84231,
+    "services": { "db": true }
+  },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}
