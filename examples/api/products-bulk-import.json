@@ -1,0 +1,46 @@
+{
+  "data": {
+    "summary": {
+      "total": 4,
+      "imported": 2,
+      "skipped": 1,
+      "failed": 1
+    },
+    "results": [
+      {
+        "url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/yerba-mate-taragui-1kg/_/R-00045678-00045678-200",
+        "canonical_url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/yerba-mate-taragui-1kg/_/R-00045678-00045678-200",
+        "supermarket_id": "coto",
+        "supermarket_product_id": "1f2bca34-9817-4d20-b6f1-d0e7e3cf90a1",
+        "external_id": "00045678-00045678-200",
+        "already_existed": false,
+        "scrape": null
+      },
+      {
+        "url": "https://www.carrefour.com.ar/aceite-de-girasol-natura-900ml/p",
+        "canonical_url": "https://www.carrefour.com.ar/aceite-de-girasol-natura-900ml/p",
+        "supermarket_id": "carrefour",
+        "supermarket_product_id": "63cf01d2-8a31-4c70-a42e-9b4a7d2fa0e4",
+        "external_id": "8472",
+        "already_existed": false,
+        "scrape": null
+      },
+      {
+        "url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/lavandina-original-ayudin-2l/_/R-00591050-00591050-200",
+        "canonical_url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/lavandina-original-ayudin-2l/_/R-00591050-00591050-200",
+        "supermarket_id": "coto",
+        "supermarket_product_id": "8e9bcc71-aaaa-4cf1-9b59-3a0f8e7d1c22",
+        "external_id": "00591050-00591050-200",
+        "already_existed": true,
+        "scrape": null
+      }
+    ],
+    "failures": [
+      {
+        "url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/non-existent/_/R-99999999-99999999-200",
+        "error": "product_not_found: 404 from cotodigital JSON endpoint"
+      }
+    ]
+  },
+  "meta": { "ts": "2026-05-09T15:43:02.116Z" }
+}

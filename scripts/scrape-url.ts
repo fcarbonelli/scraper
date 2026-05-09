@@ -17,7 +17,7 @@
  */
 
 import { logger } from '../src/shared/logger.js';
-import { ingestUrl } from './lib/ingest.js';
+import { ingestUrl } from '../src/ingest/index.js';
 
 const DEFAULT_URL =
   'https://www.cotodigital.com.ar/sitios/cdigi/productos/lavandina-original-ayudin-2l/_/R-00591050-00591050-200';

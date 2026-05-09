@@ -72,7 +72,6 @@ scraper/
 │   ├── setup-db.ts                    ← seed supermarket rows
 │   ├── scrape-url.ts                  ← full pipeline test for any URL
 │   ├── import-urls.ts                 ← bulk-import URLs from a text file
-│   ├── lib/ingest.ts                  ← shared ingest logic used by the two scripts above
 │   └── setup-ec2.sh                   ← one-shot bootstrap for a fresh Ubuntu EC2 (Phase 5)
 └── src/
     ├── adapters/
@@ -91,6 +90,8 @@ scraper/
     │   ├── notify.ts                  ← Telegram bot sender
     │   ├── createAlert.ts             ← DB insert + optional Telegram
     │   └── aggregate.ts               ← per-supermarket aggregation
+    ├── ingest/
+    │   └── index.ts                   ← detect supermarket + ensure rows + optional first scrape (used by scripts AND POST /v1/products)
     ├── orchestrator/
     │   ├── index.ts                   ← cron + finalizer interval
     │   ├── enqueue.ts                 ← create scrape_run, enqueue jobs
@@ -116,7 +117,7 @@ scraper/
         │   └── requestLogger.ts       ← per-request structured logs
         └── routes/
             ├── health.ts              ← GET /v1/health (public)
-            ├── products.ts            ← list, detail, compare, history
+            ├── products.ts            ← list, detail, compare, history, POST (add new URL to scrape list)
             ├── supermarkets.ts        ← list, detail, products
             ├── snapshots.ts           ← raw feed with filters
             ├── runs.ts                ← list, detail with breakdown

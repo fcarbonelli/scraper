@@ -2,8 +2,9 @@
  * Shared ingest logic — turn a product URL into rows in the database.
  *
  * Used by:
- *   - scripts/scrape-url.ts  (one URL on the command line)
- *   - scripts/import-urls.ts (bulk file)
+ *   - scripts/scrape-url.ts   (one URL on the command line)
+ *   - scripts/import-urls.ts  (bulk file)
+ *   - src/api/routes/products (POST endpoints used by the frontend)
  *
  * Per-URL flow:
  *   1. Detect which supermarket adapter handles this hostname
@@ -14,11 +15,11 @@
  *   5. Optionally run processJob to capture a first price snapshot
  */
 
-import { db } from '../../src/shared/db.js';
-import { logger } from '../../src/shared/logger.js';
-import { getAdapter } from '../../src/adapters/registry.js';
-import type { ScrapeContext } from '../../src/adapters/types.js';
-import { processJob, type ProcessJobResult } from '../../src/worker/processJob.js';
+import { db } from '../shared/db.js';
+import { logger } from '../shared/logger.js';
+import { getAdapter } from '../adapters/registry.js';
+import type { ScrapeContext } from '../adapters/types.js';
+import { processJob, type ProcessJobResult } from '../worker/processJob.js';
 
 export interface SupermarketConfig {
   id: string;
@@ -44,6 +45,12 @@ export interface IngestOptions {
    * (single-URL CLI behavior).
    */
   skipScrapeIfExists?: boolean;
+  /**
+   * If false, never run the initial price scrape — just probe + seed rows.
+   * Default: true. The API uses `false` so adding products from the UI is
+   * fast and just registers them for the next scheduled run.
+   */
+  runInitialScrape?: boolean;
 }
 
 export interface IngestResult {
@@ -126,7 +133,6 @@ export async function ensureSupermarketProduct(
   // pagetype API call for Carrefour, etc.). Done once per URL.
   const externalId = await resolveExternalIdForUrl(supermarketId, canonical);
 
-  // Already mapped?
   const existing = await db
     .from('supermarket_products')
     .select('id')
@@ -218,6 +224,10 @@ export async function ensureSupermarketProduct(
  * For URLs already in the DB, the scrape runs only when
  * `opts.skipScrapeIfExists` is false. Default is true, so bulk imports
  * don't pay for unnecessary repeated scrapes.
+ *
+ * Set `opts.runInitialScrape: false` to skip the first scrape entirely
+ * (used by the API — newly-added products are picked up by the next
+ * scheduled run instead).
  */
 export async function ingestUrl(
   url: string,
@@ -227,7 +237,9 @@ export async function ingestUrl(
   const ensured = await ensureSupermarketProduct(supermarketId, url);
 
   const skipScrape = opts.skipScrapeIfExists ?? true;
-  const shouldScrape = !ensured.alreadyExisted || !skipScrape;
+  const runInitialScrape = opts.runInitialScrape ?? true;
+  const shouldScrape =
+    runInitialScrape && (!ensured.alreadyExisted || !skipScrape);
 
   let scrape: ProcessJobResult | null = null;
   if (shouldScrape) {

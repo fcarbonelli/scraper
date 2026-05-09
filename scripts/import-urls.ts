@@ -27,7 +27,7 @@
 
 import { readFileSync } from 'node:fs';
 import { logger } from '../src/shared/logger.js';
-import { ingestUrl } from './lib/ingest.js';
+import { ingestUrl } from '../src/ingest/index.js';
 
 /** Polite delay between requests so we don't hammer the supermarket sites. */
 const DELAY_BETWEEN_URLS_MS = 500;

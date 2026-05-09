@@ -330,6 +330,22 @@ export interface SupermarketProductRow {
   latest_snapshot: Snapshot | null;      // null if never successfully scraped
 }
 
+export interface IngestResult {
+  url: string;                           // URL as submitted
+  canonical_url: string;                 // adapter-canonicalized URL stored in DB
+  supermarket_id: string;
+  supermarket_product_id: string;
+  external_id: string;
+  already_existed: boolean;              // true => idempotent re-add
+  scrape: { status: 'success' | 'failed' | 'retry_scheduled' } | null;
+}
+
+export interface BulkImportResult {
+  summary: { total: number; imported: number; skipped: number; failed: number };
+  results: IngestResult[];               // successful registrations (new or already existed)
+  failures: Array<{ url: string; error: string }>;
+}
+
 export interface CompareSummary {
   minPrice: number;
   maxPrice: number;
@@ -430,6 +446,16 @@ export const api = {
     request<ApiPaginated<Product>>(
       `/products?${new URLSearchParams(q as Record<string, string>)}`,
     ),
+  addProduct: (url: string, scrapeImmediately = false) =>
+    request<ApiSuccess<IngestResult>>(`/products`, {
+      method: 'POST',
+      body: JSON.stringify({ url, scrape_immediately: scrapeImmediately }),
+    }),
+  bulkImportProducts: (urls: string[], scrapeImmediately = false) =>
+    request<ApiSuccess<BulkImportResult>>(`/products/bulk-import`, {
+      method: 'POST',
+      body: JSON.stringify({ urls, scrape_immediately: scrapeImmediately }),
+    }),
   getProduct: (id: string) =>
     request<ApiSuccess<Product>>(`/products/${id}`),
   compareProduct: (id: string) =>
@@ -528,6 +554,113 @@ List products with optional filters. Paginated.
 curl -H "X-API-Key: <key>" \
   "https://api.yourdomain.com/v1/products?search=lavandina&limit=10"
 ```
+
+---
+
+### `POST /v1/products`
+
+Add a new product URL to the scrape list. The supermarket is detected from the URL's hostname.
+
+By default, this is a **lightweight registration** — the API probes the supermarket once to seed the master product record (name, brand, EAN, image), then returns. The product's first price snapshot is captured by the **next scheduled scrape run**, not by this call. Pass `scrape_immediately: true` if you want a snapshot right away (slower; ~1–3s extra).
+
+The endpoint is **idempotent**: re-posting an already-imported URL returns `already_existed: true` and a `200` (instead of `201`).
+
+#### Body
+
+```json
+{ "url": "https://www.cotodigital.com.ar/.../R-00012345-00012345-200" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | yes | Full product URL on a supported supermarket |
+| `scrape_immediately` | boolean | no | If `true`, also take a price snapshot synchronously. Default `false` |
+
+#### Response — 201 Created (or 200 if already existed)
+
+```json
+{
+  "data": {
+    "url": "https://www.cotodigital.com.ar/.../R-00012345-00012345-200",
+    "canonical_url": "https://www.cotodigital.com.ar/.../R-00012345-00012345-200",
+    "supermarket_id": "coto",
+    "supermarket_product_id": "8e9bcc71-...",
+    "external_id": "00012345-00012345-200",
+    "already_existed": false,
+    "scrape": null
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+When `scrape_immediately: true`, the `scrape` field is an object like `{ "status": "success" }` (other values: `"failed"`, `"retry_scheduled"`).
+
+#### Errors
+
+- `400 INVALID_REQUEST` — bad URL, unsupported supermarket hostname, or the supermarket rejected the request (e.g., product not found / 404). The `message` field contains a human-readable explanation suitable for surfacing in the UI.
+
+#### Example
+
+```bash
+curl -X POST -H "X-API-Key: <key>" -H "Content-Type: application/json" \
+  -d '{"url":"https://www.cotodigital.com.ar/.../R-00012345-00012345-200"}' \
+  https://api.yourdomain.com/v1/products
+```
+
+---
+
+### `POST /v1/products/bulk-import`
+
+Add many product URLs in one request. Same per-URL behavior as the single-URL endpoint above — fast registration by default, opt-in immediate scraping. Per-URL failures are collected in `failures` and the request itself returns 200 (it only 4xx's on input validation).
+
+URLs are **deduped** within the request and processed **sequentially** so we respect each supermarket's rate limit.
+
+#### Body
+
+```json
+{
+  "urls": [
+    "https://www.cotodigital.com.ar/.../R-00012345-00012345-200",
+    "https://www.carrefour.com.ar/some-product/p"
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `urls` | string[] | yes | 1–25 URLs. Larger batches must be split client-side |
+| `scrape_immediately` | boolean | no | Same meaning as on the single-URL endpoint. Default `false` |
+
+#### Response — 200
+
+```json
+{
+  "data": {
+    "summary": { "total": 4, "imported": 2, "skipped": 1, "failed": 1 },
+    "results": [
+      {
+        "url": "...",
+        "canonical_url": "...",
+        "supermarket_id": "coto",
+        "supermarket_product_id": "...",
+        "external_id": "...",
+        "already_existed": false,
+        "scrape": null
+      }
+    ],
+    "failures": [
+      { "url": "...", "error": "product_not_found: 404 from cotodigital JSON endpoint" }
+    ]
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+`results` contains every URL that *registered successfully* (whether new or already existed). `failures` holds the rejects with the underlying error message.
+
+#### Errors
+
+- `400 INVALID_REQUEST` — empty array, more than 25 URLs, or any URL fails the URL/format check (the rest of the batch is **not** processed in that case)
 
 ---
 
@@ -1053,6 +1186,29 @@ GET /v1/runs/:id                 → expand into detail view (per-supermarket br
 ```
 
 The `breakdown.bySupermarket` map is perfect for a stacked bar chart of success/failure per site.
+
+### Add a product to the scrape list
+
+Single URL — typical "paste URL, click add" UI:
+
+```
+POST /v1/products  { "url": "..." }
+```
+
+The supermarket is detected from the hostname. The new product is registered immediately but the **first price snapshot only appears after the next daily scrape run** (around 06:00 ART). If you need an instant snapshot for the UX, send `{ "url": "...", "scrape_immediately": true }` (adds ~1–3s of latency).
+
+For "paste a list" UIs, use `POST /v1/products/bulk-import` with up to 25 URLs at once. Anything bigger should be chunked client-side:
+
+```ts
+async function addMany(urls: string[]) {
+  const CHUNK = 25;
+  for (let i = 0; i < urls.length; i += CHUNK) {
+    await api.bulkImportProducts(urls.slice(i, i + CHUNK));
+  }
+}
+```
+
+After a successful add, invalidate the `['products']` and (if shown) the `['supermarkets', id, 'products']` query keys to refresh the list views.
 
 ### Cross-supermarket compare table
 

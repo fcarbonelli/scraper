@@ -10,6 +10,8 @@ Each file is a complete response body — `data` + `meta` (and `pagination` for 
 | `health.json`               | `GET /v1/health`                          | Healthy API                                                           |
 | `products-list.json`        | `GET /v1/products?limit=20`               | 5 products with varied categories/brands, including one with no image |
 | `products-list-empty.json`  | `GET /v1/products?search=xyzz`            | Empty search result (UI empty state)                                  |
+| `product-create.json`       | `POST /v1/products`                       | Successful single-URL ingest (new product, no immediate scrape)       |
+| `products-bulk-import.json` | `POST /v1/products/bulk-import`           | Mixed bulk result: 2 imported, 1 already existed, 1 failed            |
 | `product-detail.json`       | `GET /v1/products/:id`                    | Single product detail                                                 |
 | `product-compare.json`      | `GET /v1/products/:id/compare`            | Same product across 3 supermarkets, with savings summary              |
 | `product-history.json`      | `GET /v1/products/:id/history`            | 14 days of price history including a price drop with promotions       |
