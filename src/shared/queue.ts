@@ -53,9 +53,12 @@ export type ScrapeJobName = 'scrape';
  * Naming convention: one queue per supermarket. This is intentional —
  * BullMQ rate-limits and concurrency are per-queue, so isolating per-site
  * gives us per-site control naturally.
+ *
+ * Separator is `-` (not `:`) because BullMQ v5+ rejects queue names
+ * containing `:` — it reserves the colon for internal Redis key namespacing.
  */
 export function queueNameFor(supermarketId: string): string {
-  return `scrape:${supermarketId}`;
+  return `scrape-${supermarketId}`;
 }
 
 /** Cache of Queue instances so we don't open new Redis connections per call. */
