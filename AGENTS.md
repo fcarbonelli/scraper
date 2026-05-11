@@ -77,8 +77,13 @@ scraper/
     ├── adapters/
     │   ├── types.ts                   ← SupermarketAdapter contract
     │   ├── registry.ts                ← maps id → adapter
-    │   ├── coto.ts                    ← Coto Digital adapter (reference, JSON API)
-    │   └── carrefour.ts               ← Carrefour adapter (reference, VTEX API)
+    │   ├── coto.ts                    ← Coto Digital (JSON API; SKU in URL)
+    │   ├── carrefour.ts               ← Carrefour (VTEX; slug→productId pagetype lookup)
+    │   ├── maxi-carrefour.ts          ← Carrefour Maxi Pedido (custom PHP; HTML fragment, gated prices)
+    │   ├── maxi-carrefour-auth.ts     ← Playwright self-healing PHPSESSID for Maxi Carrefour
+    │   ├── maxiconsumo.ts             ← Maxiconsumo (Magento 2; HTML microdata + dataLayer)
+    │   ├── atomo.ts                   ← Átomo Conviene (PrestaShop; HTML JSON-LD)
+    │   └── lacoopeencasa.ts           ← La Coope en Casa / Cooperativa Obrera (Be2 JSON API)
     ├── shared/
     │   ├── env.ts                     ← zod-validated env vars
     │   ├── logger.ts                  ← pino instance
@@ -204,22 +209,58 @@ All scripts that need env vars use `--env-file=.env` (Node ≥20.6 native flag).
 ## How to add a new supermarket
 
 1. **Write the adapter** at `src/adapters/<id>.ts` implementing the `SupermarketAdapter` interface.
-  - References:
+  - References (pick the closest one to the new site's stack):
     - `src/adapters/coto.ts` — single JSON API endpoint, id embedded in URL
-    - `src/adapters/carrefour.ts` — VTEX storefront, two-call ingestion (slug→id, then catalog)
-  - Always implement `canonicalizeUrl` if the site has scraping-only URL params.
+    - `src/adapters/lacoopeencasa.ts` — JSON API behind an Angular SPA; envelope-style `{ estado, mensaje, datos }`
+    - `src/adapters/carrefour.ts` — VTEX storefront, two-call ingestion (slug → productId pagetype, then catalog)
+    - `src/adapters/atomo.ts` — PrestaShop SSR HTML, parses `<script type="application/ld+json">`
+    - `src/adapters/maxiconsumo.ts` — Magento 2 SSR HTML, parses microdata (`itemprop=`) + inline GA4 `dataLayer`
+    - `src/adapters/maxi-carrefour.ts` — custom PHP backend returning HTML fragments, prices gated behind a session cookie
+  - Always implement `canonicalizeUrl` — strip ALL query/hash params and lowercase the host. Sites often pass tracking params in URLs (e.g. Coto's `?Dy=1&assemblerContentCollection=...`) that break the JSON endpoint if left intact.
   - Implement `resolveExternalId(url)` if the external_id can't be derived from URL alone (e.g. needs a network lookup). Steady-state daily scrapes never call this — it runs once when a URL is first ingested.
-  - Throw `ScrapeError` with the right type for known failure modes.
+  - Throw `ScrapeError` with the right type for known failure modes (`auth_required`, `product_not_found`, `price_missing`, `selector_failed`, ...).
   - Extract everything you can into `productInfo` and `rawData`.
 2. **Register it** in `src/adapters/registry.ts` (one line).
 3. **Seed the supermarket row** by adding it to `SUPERMARKETS` in `scripts/setup-db.ts` then running `npm run db:setup`.
-4. **Add URL detection** in `scripts/lib/ingest.ts` (the `detectSupermarket` function — match by hostname). Both `scrape:url` and `scrape:bulk` will pick it up automatically.
-5. **Smoke test**: `npm run scrape:url -- <a-product-url>`. Run it twice — the second run should skip the "adapter probe" line, confirming the cached external_id is being used.
-6. **Verify** the DB has rows in `supermarket_products` and `price_snapshots`.
+4. **Add URL detection** in `src/ingest/index.ts` (the `detectSupermarket` function — match by hostname; order matters when one host is a subdomain of another). Both `scrape:url` and `scrape:bulk` will pick it up automatically.
+5. **Smoke test (no DB needed)**: `npm run test:adapter -- <a-product-url>`. The script auto-detects the supermarket, runs canonicalize → resolve external_id → scrape, and prints the `ScrapeResult`.
+6. **End-to-end test**: `npm run scrape:url -- <a-product-url>`. Run it twice — the second run should skip the "adapter probe" line, confirming the cached external_id is being used. **Verify** the DB has rows in `supermarket_products` and `price_snapshots`.
+
+### Per-supermarket auth (cookies, tokens)
+
+Some sites gate prices behind a logged-in session (Carrefour Maxi Pedido is the canonical example: `data-price="private"` until you authenticate). For these adapters:
+
+- Read the secret from **`SupermarketConfig.config.<key>`** first (DB-driven; refresh without redeploy by updating `supermarkets.config` JSON).
+- Fall back to a typed env var in `src/shared/env.ts` for one-off operator runs (e.g. `MAXI_CARREFOUR_PHPSESSID`).
+- Throw `ScrapeError('auth_required', ...)` with a clear message when the session is missing or expired so an alert fires and the operator knows to refresh it.
+
+#### Self-healing auth via Playwright (Maxi Carrefour pattern)
+
+When the login form is reCAPTCHA-Enterprise-protected (so plain `fetch` can't pass it) we drive a real Chromium via Playwright to harvest a fresh cookie automatically. The flow lives in `src/adapters/maxi-carrefour-auth.ts` and is **purely event-driven — no cron**:
+
+1. `scrape()` tries the request with whatever cookie is in DB / env.
+2. If the response says "private" (auth required), it calls `refreshCookie()`.
+3. `refreshCookie()` is a process-level singleton: concurrent scrapes detecting expiry simultaneously share one Playwright run.
+4. The new cookie is written to `supermarkets.config.phpSessId` so the next run (and sibling workers) pick it up.
+5. `scrape()` retries once. Still private? → `auth_required` (login flow itself is broken or this product isn't carried by the picked sucursal).
+
+Bootstrap / debug: `npm run maxi-carrefour:login` runs the Playwright flow standalone, prints the cookie, and persists it (or `--dry-run` to skip the DB write). Useful flags:
+
+- `--headed` — open a visible Chrome window (great for diagnosing reCAPTCHA blocks).
+- `--no-chrome` — fall back to bundled Playwright Chromium when system Chrome isn't installed.
+- `--region=<value> --seller=<id>` — pin a specific sucursal. Use this if the default "first available seller" doesn't carry your products.
+
+**Seller / sucursal binding**: every PHPSESSID is bound to one sucursal, and not every sucursal carries every product (e.g. seller 217 / BS AS NORTE doesn't stock the Coto-canonical lavandina). When a freshly-harvested cookie still returns `data-price="private"`, the most common cause is sucursal mismatch — fix by re-running with `--region=…` `--seller=…` once to find a sucursal with the broadest catalog for your URLs, then pin it via `supermarkets.config.maxiCarrefourLogin = { pick: { region, seller }, ... }` so all future auto-refreshes use it.
+
+Other knobs in `supermarkets.config.maxiCarrefourLogin`:
+
+- `name`, `email`, `phone`, `numberId` — throwaway form values (any plausible-looking values work; nothing is verified server-side beyond shape).
+- `headless` — set `false` if running where Google's reCAPTCHA Enterprise rejects headless Chrome.
+- `useSystemChrome` — defaults to `true` (real Chrome scores higher with reCAPTCHA than `chromium-headless-shell`).
 
 ### Note on VTEX-based supermarkets
 
-Many LATAM supermarkets run on VTEX (Carrefour, Disco, Jumbo, Vea, Día, La Anónima, etc.). For any of them, the `carrefour.ts` adapter is a near-drop-in template — usually only the host constant and rate limit need to change. Always verify the `pagetype` and `catalog_system/pub/products/search` endpoints respond as expected for the new domain before assuming.
+Many LATAM supermarkets run on VTEX (Carrefour, Disco, Jumbo, Vea, Día, La Anónima, etc.). For any of them, the `carrefour.ts` adapter is a near-drop-in template — usually only the host constant and rate limit need to change. Always verify the `pagetype` and `catalog_system/pub/products/search` endpoints respond as expected for the new domain before assuming. **NB:** Carrefour's wholesale portal `comerciante.carrefour.com.ar` (Maxi Pedido) is a custom PHP app, NOT VTEX — see `maxi-carrefour.ts`.
 
 ## How to add products in bulk
 

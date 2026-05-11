@@ -64,11 +64,20 @@ export interface IngestResult {
   scrape: ProcessJobResult | null;
 }
 
-/** Detect which supermarket adapter handles this URL by hostname. */
+/**
+ * Detect which supermarket adapter handles this URL by hostname.
+ *
+ * Order matters: more-specific hosts must be checked before generic ones
+ * (e.g. `comerciante.carrefour.com.ar` → maxi-carrefour, not regular carrefour).
+ */
 export function detectSupermarket(url: string): string {
   const host = new URL(url).host.toLowerCase();
   if (host.includes('cotodigital')) return 'coto';
+  if (host.includes('comerciante.carrefour')) return 'maxi-carrefour';
   if (host.includes('carrefour.com.ar')) return 'carrefour';
+  if (host.includes('maxiconsumo')) return 'maxiconsumo';
+  if (host.includes('atomoconviene')) return 'atomo';
+  if (host.includes('lacoopeencasa')) return 'lacoopeencasa';
   throw new Error(`No supermarket adapter known for host "${host}"`);
 }
 

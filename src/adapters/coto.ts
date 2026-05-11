@@ -68,12 +68,21 @@ interface JsonLdProduct {
 // URL helpers
 // =============================================================================
 
-/** Strip `?format=json` (and any other scraping-only params) from a URL. */
+/**
+ * Coto product URLs sometimes carry tracking/assembler params copied from
+ * search results (e.g. "?Dy=1&assemblerContentCollection=..."). None of
+ * those are needed to identify the product — the SKU id in the path is
+ * canonical. Strip the whole query string + hash so:
+ *   1) `format=json` we append at scrape time is the ONLY param, and
+ *   2) the URL stored in the DB is the clean, shareable form.
+ */
 function canonicalizeUrl(rawUrl: string): string {
   try {
     const u = new URL(rawUrl);
-    u.searchParams.delete('format');
-    // Leave any other params intact (Coto sometimes uses them for variants)
+    u.search = '';
+    u.hash = '';
+    u.hostname = u.hostname.toLowerCase();
+    u.pathname = u.pathname.replace(/\/+$/, '');
     return u.toString();
   } catch {
     return rawUrl;

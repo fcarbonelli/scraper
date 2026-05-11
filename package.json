@@ -23,6 +23,7 @@
     "format": "prettier --write .",
     "test:adapter": "tsx --env-file=.env scripts/test-adapter.ts",
     "test:telegram": "tsx --env-file=.env scripts/test-telegram.ts",
+    "maxi-carrefour:login": "tsx --env-file=.env scripts/maxi-carrefour-login.ts",
     "db:setup": "tsx --env-file=.env scripts/setup-db.ts",
     "scrape:url": "tsx --env-file=.env scripts/scrape-url.ts",
     "scrape:bulk": "tsx --env-file=.env scripts/import-urls.ts",
@@ -38,6 +39,7 @@
     "ioredis": "^5.10.1",
     "node-cron": "^4.2.1",
     "pino": "^10.3.1",
+    "playwright": "^1.59.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

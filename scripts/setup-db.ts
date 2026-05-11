@@ -40,6 +40,39 @@ const SUPERMARKETS: SupermarketSeed[] = [
     rate_limit_ms: 250,
     concurrency: 4,
   },
+  {
+    id: 'maxi-carrefour',
+    name: 'Carrefour Maxi Pedido',
+    base_url: 'https://comerciante.carrefour.com.ar',
+    // Custom PHP backend, prices gated by PHPSESSID. Crawl slowly so we don't
+    // burn the session.
+    rate_limit_ms: 1000,
+    concurrency: 2,
+  },
+  {
+    id: 'maxiconsumo',
+    name: 'Maxiconsumo',
+    base_url: 'https://maxiconsumo.com',
+    // Magento 2 SSR HTML — full pages are ~700 KB each, take it slow
+    rate_limit_ms: 1500,
+    concurrency: 2,
+  },
+  {
+    id: 'atomo',
+    name: 'Átomo Conviene',
+    base_url: 'https://atomoconviene.com',
+    // PrestaShop SSR HTML, JSON-LD per page; ~350 KB
+    rate_limit_ms: 1000,
+    concurrency: 2,
+  },
+  {
+    id: 'lacoopeencasa',
+    name: 'La Coope en Casa',
+    base_url: 'https://www.lacoopeencasa.coop',
+    // Be2 JSON API — small, fast, no auth needed
+    rate_limit_ms: 250,
+    concurrency: 4,
+  },
 ];
 
 async function main(): Promise<void> {

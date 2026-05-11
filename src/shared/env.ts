@@ -40,6 +40,14 @@ const EnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional().default(''),
   TELEGRAM_CHAT_ID: z.string().optional().default(''),
   TELEGRAM_MIN_SEVERITY: Severity.default('warning'),
+
+  // Per-supermarket auth (optional — DB-driven config preferred)
+  // Carrefour Maxi Pedido: prices are gated behind a PHPSESSID cookie. The
+  // adapter self-heals: when the cookie expires it logs in via Playwright
+  // and writes the fresh value to `supermarkets.config.phpSessId`. This env
+  // var is just a fallback / bootstrap seed for local debugging.
+  // See src/adapters/maxi-carrefour-auth.ts for the full lifecycle.
+  MAXI_CARREFOUR_PHPSESSID: z.string().optional().default(''),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -9,6 +9,10 @@
 import type { SupermarketAdapter } from './types.js';
 import { cotoAdapter } from './coto.js';
 import { carrefourAdapter } from './carrefour.js';
+import { maxiCarrefourAdapter } from './maxi-carrefour.js';
+import { maxiconsumoAdapter } from './maxiconsumo.js';
+import { atomoAdapter } from './atomo.js';
+import { lacoopeencasaAdapter } from './lacoopeencasa.js';
 
 const adapters = new Map<string, SupermarketAdapter>();
 
@@ -22,6 +26,10 @@ function register(adapter: SupermarketAdapter): void {
 // Wire all known adapters here -----------------------------------------------
 register(cotoAdapter);
 register(carrefourAdapter);
+register(maxiCarrefourAdapter);
+register(maxiconsumoAdapter);
+register(atomoAdapter);
+register(lacoopeencasaAdapter);
 
 export function getAdapter(supermarketId: string): SupermarketAdapter {
   const adapter = adapters.get(supermarketId);
