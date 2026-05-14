@@ -465,11 +465,12 @@ npm run orchestrator:run-now
 
 ### Add a new supermarket
 
-1. Locally: write the adapter, register it, add to `setup-db.ts`, smoke-test with `npm run scrape:url`
-2. Push to main. GitHub Actions deploys.
-3. SSH in: `npm run db:setup` (re-seed)
-4. SSH in: `npm run scrape:url -- <a-product-url>` to ingest URLs into `supermarket_products`
-5. The next daily run will pick them up.
+1. Locally: write the adapter, register it in `src/adapters/registry.ts`, add a row to `SUPERMARKETS` in `scripts/setup-db.ts`, smoke-test with `npm run test:adapter -- <a-product-url>`.
+2. Push to main. That's it on the deploy side — GitHub Actions runs `npm run db:setup` automatically before `pm2 reload`, so the new row is upserted into the DB and the worker re-reads the active supermarkets list when it restarts. No SSH required.
+3. To start scraping products for it, ingest URLs:
+   - One-off: `npm run scrape:url -- <a-product-url>` (locally is fine — it writes to the same Supabase).
+   - Bulk: put URLs in a text file and run `npm run scrape:bulk -- urls.txt`.
+4. The next daily orchestrator run picks them up. To trigger immediately: `npm run orchestrator:run-now` (locally or on the server — orchestrator only enqueues; the production worker still does the work).
 
 ### Issue a new API key
 

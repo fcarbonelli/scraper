@@ -134,7 +134,7 @@ scraper/
 
 | Command                           | What it does                                          | When to use                                            |
 | --------------------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
-| `npm run db:setup`                | Inserts/updates supermarket rows                      | Once after migration; again after adding a supermarket |
+| `npm run db:setup`                | Inserts/updates supermarket rows                      | Runs automatically on deploy (idempotent). Manual only for one-offs against a fresh DB. |
 | `npm run test:adapter`            | Hits adapter directly (no DB)                         | Debug parsing changes fast                             |
 | `npm run test:telegram`           | Sends one of each severity to your bot                | Verify Telegram setup                                  |
 | `npm run scrape:url -- <url>`     | Full pipeline test for a single URL (bypasses queue)  | Verify a supermarket works end-to-end without Redis    |
@@ -221,10 +221,11 @@ All scripts that need env vars use `--env-file=.env` (Node ≥20.6 native flag).
   - Throw `ScrapeError` with the right type for known failure modes (`auth_required`, `product_not_found`, `price_missing`, `selector_failed`, ...).
   - Extract everything you can into `productInfo` and `rawData`.
 2. **Register it** in `src/adapters/registry.ts` (one line).
-3. **Seed the supermarket row** by adding it to `SUPERMARKETS` in `scripts/setup-db.ts` then running `npm run db:setup`.
+3. **Seed metadata** by adding the supermarket to `SUPERMARKETS` in `scripts/setup-db.ts` (id, name, base_url, rate_limit_ms, concurrency). The CI/CD pipeline runs `npm run db:setup` automatically on every deploy (idempotent upsert), so just pushing to main inserts the row in production. No manual SSH step needed.
 4. **Add URL detection** in `src/ingest/index.ts` (the `detectSupermarket` function — match by hostname; order matters when one host is a subdomain of another). Both `scrape:url` and `scrape:bulk` will pick it up automatically.
 5. **Smoke test (no DB needed)**: `npm run test:adapter -- <a-product-url>`. The script auto-detects the supermarket, runs canonicalize → resolve external_id → scrape, and prints the `ScrapeResult`.
 6. **End-to-end test**: `npm run scrape:url -- <a-product-url>`. Run it twice — the second run should skip the "adapter probe" line, confirming the cached external_id is being used. **Verify** the DB has rows in `supermarket_products` and `price_snapshots`.
+7. **Push to main**. CI typechecks, deploys to EC2, runs `db:setup`, then `pm2 reload` — which restarts the worker so it picks up the new supermarket from the DB. End-to-end: just push.
 
 ### Per-supermarket auth (cookies, tokens)
 

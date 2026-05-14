@@ -61,9 +61,19 @@ jobs:
             echo "==> Building TypeScript"
             npm run build
 
+            # Seed the supermarkets table from `scripts/setup-db.ts`.
+            # Idempotent (upsert by id) so it's safe to run on every deploy —
+            # this is what makes "just push code" work for new supermarkets.
+            # Must run BEFORE pm2 reload so the worker picks up the new rows
+            # when it re-reads the active-supermarkets list at startup.
+            echo "==> Seeding supermarkets table"
+            npm run db:setup
+
             echo "==> Reloading PM2 (zero-downtime)"
             # `pm2 reload` will start processes that aren't running yet,
             # so this works for both first deploy and subsequent ones.
+            # Reloading also forces the worker to re-load the supermarkets
+            # list from the DB, picking up anything `db:setup` just inserted.
             pm2 reload ecosystem.config.cjs --update-env
             pm2 save
 
