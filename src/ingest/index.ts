@@ -160,6 +160,11 @@ export async function ensureSupermarketProduct(
   }
 
   // First time: probe the adapter to extract product info for seeding.
+  // Prefer the adapter's lightweight `probe()` method if implemented —
+  // it skips heavy auth flows (e.g. Maxi Carrefour's Playwright login)
+  // so the API endpoint stays fast (Caddy times out at ~30s). The next
+  // scheduled scrape, running in the worker with a much larger time
+  // budget, will fill in the price/stock and any metadata gaps.
   const supermarketConfig = await loadSupermarketConfig(supermarketId);
   const ctx: ScrapeContext = {
     supermarketProductId: 'pending',
@@ -169,8 +174,9 @@ export async function ensureSupermarketProduct(
     logger: logger.child({ supermarket: supermarketId, externalId }),
   };
   logger.debug({ url: canonical, externalId }, 'adapter probe to extract product info');
-  const probe = await adapter.scrape(ctx);
-  const info = probe.productInfo ?? {};
+  const info = adapter.probe
+    ? await adapter.probe(ctx)
+    : (await adapter.scrape(ctx)).productInfo ?? {};
 
   // Reuse master product by EAN if known; otherwise insert a new master row.
   let productId: string | undefined;

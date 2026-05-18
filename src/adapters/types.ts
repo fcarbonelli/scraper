@@ -115,4 +115,22 @@ export interface SupermarketAdapter {
   resolveExternalId?(canonicalUrl: string, signal?: AbortSignal): Promise<string>;
   /** Perform a single scrape attempt for one product. */
   scrape(ctx: ScrapeContext): Promise<ScrapeResult>;
+  /**
+   * Lightweight probe — extract product metadata for ingest WITHOUT doing
+   * anything heavy. Specifically: must NOT trigger interactive auth flows
+   * (Playwright login, OAuth dance, etc.) because this runs synchronously
+   * inside the API request and Caddy will 502 after ~30s.
+   *
+   * The returned `ProductInfo` is used to seed the master `products` table.
+   * Price/stock are NOT needed here — the next scheduled scrape (running
+   * in the worker, with a generous time budget) will capture those.
+   *
+   * If a site exposes everything publicly, this can just be `scrape()` minus
+   * the price logic. If a site requires auth even for metadata, return `{}`
+   * — the row will be inserted with placeholder info and backfilled later.
+   *
+   * Adapters that don't implement this fall back to `scrape()` in the
+   * ingest layer (legacy behavior — slow for auth-gated sites).
+   */
+  probe?(ctx: ScrapeContext): Promise<ProductInfo>;
 }
