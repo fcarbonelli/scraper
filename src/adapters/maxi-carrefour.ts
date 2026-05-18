@@ -5,7 +5,12 @@
  * "comerciante" portal. The catalog endpoint is:
  *
  *   GET https://comerciante.carrefour.com.ar/products
- *       ?currentUrl=/p/<EAN>&method=getProductBasicData
+ *       ?currentUrl=p/<EAN>&method=getProductBasicData
+ *
+ * IMPORTANT: `currentUrl=p/...` has NO leading slash. With a leading slash
+ * (`currentUrl=/p/...`) the server silently ignores the parameter and
+ * returns a generic page of recommendations — same first cart_button for
+ * every EAN, which made every probe save the wrong product metadata.
  *
  * It returns an HTML *fragment* (not JSON, not a full page) with all metadata
  * baked into `data-*` attributes on the cart button:
@@ -324,7 +329,8 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
    */
   async probe(ctx: ScrapeContext): Promise<ProductInfo> {
     if (!ctx.externalId) return {};
-    const url = `${BASE}/products?currentUrl=/p/${encodeURIComponent(
+    // No leading slash on `currentUrl` — see file header for why.
+    const url = `${BASE}/products?currentUrl=p/${encodeURIComponent(
       ctx.externalId,
     )}&method=getProductBasicData`;
     try {
@@ -346,7 +352,9 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
         `Maxi Carrefour adapter requires external_id (EAN), got empty.`,
       );
     }
-    const url = `${BASE}/products?currentUrl=/p/${encodeURIComponent(
+    // No leading slash on `currentUrl` — with one the server ignores the
+    // param and returns generic recommendations. See file header.
+    const url = `${BASE}/products?currentUrl=p/${encodeURIComponent(
       ctx.externalId,
     )}&method=getProductBasicData`;
 

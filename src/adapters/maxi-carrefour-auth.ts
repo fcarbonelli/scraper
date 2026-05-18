@@ -567,8 +567,10 @@ async function probeEanHasRealPrice(
   ean: string,
   signal?: AbortSignal,
 ): Promise<boolean> {
+  // No leading slash on `currentUrl` — with one the server ignores the
+  // param and returns generic recommendations (see maxi-carrefour.ts header).
   const url =
-    `https://${HOST}/products?currentUrl=/p/${encodeURIComponent(ean)}` +
+    `https://${HOST}/products?currentUrl=p/${encodeURIComponent(ean)}` +
     `&method=getProductBasicData`;
   const res = await fetch(url, {
     headers: {
