@@ -610,9 +610,18 @@ export interface RefreshOptions {
   verifyEan?: string;
   /**
    * Max sellers to try before giving up. Each attempt is a full Playwright
-   * login (~15-20s + reCAPTCHA roundtrip).
+   * login (~15-20s + reCAPTCHA roundtrip). The loop will rotate across
+   * regions when a region's sellers are exhausted, so this caps the TOTAL
+   * attempts across all regions (not per-region).
    */
   maxAttempts?: number;
+  /**
+   * After this many consecutive misses in the SAME region, the loop will
+   * skip that region entirely and try the next one. Defaults to 3 — most
+   * BS AS regions have 3-5 sellers, so this gives every region a fair
+   * shot before moving on.
+   */
+  maxSellersPerRegion?: number;
   /** Override Playwright launch options. */
   launchOpts?: LaunchOptions;
 }
@@ -638,8 +647,11 @@ const loginInFlight = new Map<string, Promise<LoginResult>>();
  *      a real price → done, persist the cookie + auto-pin the seller for
  *      future refreshes.
  *   3. If "private", the picked sucursal doesn't carry this product. Add
- *      its seller id to the skip list and try again. Up to `maxAttempts`.
- *   4. Out of attempts → throw `auth_required` with a clear message.
+ *      its seller id to skipSellers and try again. After `maxSellersPer
+ *      Region` consecutive misses in the same region, also add the region
+ *      to skipRegions so the next attempt picks a different province.
+ *   4. Out of attempts (across all regions) → throw `auth_required` with
+ *      a clear message.
  *
  * No cron, no manual intervention: when the cookie expires the next scrape
  * triggers refresh, the working sucursal gets re-pinned (or auto-found),
@@ -664,9 +676,15 @@ export async function refreshCookie(
       | { headless?: boolean; useSystemChrome?: boolean }
       | undefined) ?? {};
     const finalLaunch: LaunchOptions = { ...cfgOverrides, ...(opts.launchOpts ?? {}) };
-    const maxAttempts = opts.maxAttempts ?? 3;
+    // 8 covers ~2-3 regions × 3 sellers each — enough that any reasonably
+    // common product on the platform should be reachable.
+    const maxAttempts = opts.maxAttempts ?? 8;
+    const maxSellersPerRegion = opts.maxSellersPerRegion ?? 3;
 
+    // Track per-region misses so we know when to abandon a region.
     const skipSellers: string[] = [];
+    const skipRegions: string[] = [];
+    const missesByRegion = new Map<string, number>();
     // Per-attempt budget so a single hung attempt can't blow the whole window.
     const perAttemptBudgetMs = LOGIN_TIMEOUT_MS;
     // Sleep between attempts to let reCAPTCHA Enterprise's bot-score recover
@@ -679,15 +697,16 @@ export async function refreshCookie(
     let lastErr: unknown;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // First attempt honors the operator's pinned sucursal (if any).
-      // Subsequent attempts force "first" + skipSellers to find a NEW one.
+      // Subsequent attempts force "first" + skipSellers/Regions to find a NEW one.
       const pick = attempt === 1 ? baseLoginCfg.pick : 'first';
       const attemptCfg: LoginDefaults = {
         ...baseLoginCfg,
         pick,
         skipSellers: [...skipSellers],
+        skipRegions: [...skipRegions],
       };
       logger.info(
-        { attempt, maxAttempts, pick, skipSellers, verifyEan },
+        { attempt, maxAttempts, pick, skipSellers, skipRegions, verifyEan },
         'maxi-carrefour: login attempt',
       );
 
@@ -748,6 +767,20 @@ export async function refreshCookie(
         'maxi-carrefour: cookie returned data-price="private" — trying next seller',
       );
       if (result.seller) skipSellers.push(result.seller);
+      // Track region miss; once we've burnt through `maxSellersPerRegion`
+      // sellers there, abandon the region entirely so the next attempt
+      // jumps to a different province.
+      if (result.region) {
+        const misses = (missesByRegion.get(result.region) ?? 0) + 1;
+        missesByRegion.set(result.region, misses);
+        if (misses >= maxSellersPerRegion && !skipRegions.includes(result.region)) {
+          skipRegions.push(result.region);
+          logger.info(
+            { region: result.region, misses, verifyEan },
+            'maxi-carrefour: exhausted sellers in region — switching region',
+          );
+        }
+      }
       if (attempt < maxAttempts) {
         await new Promise((r) => setTimeout(r, interAttemptCooldownMs));
       }
@@ -764,11 +797,12 @@ export async function refreshCookie(
     }
     throw new ScrapeError(
       'auth_required',
-      `Maxi Carrefour: tried ${maxAttempts} sucursales (skipSellers=${skipSellers.join(',')}) ` +
-        `for EAN ${verifyEan}, none returned a real price. The product may ` +
-        `genuinely not be carried online; run \`npm run maxi-carrefour:login ` +
-        `-- --headed\` to investigate. Last login: region=${lastResult?.region}, ` +
-        `seller=${lastResult?.seller}.`,
+      `Maxi Carrefour: tried ${maxAttempts} sucursales across ` +
+        `${skipRegions.length + 1} region(s) (sellers=${skipSellers.join(',')}, ` +
+        `regions=${skipRegions.join(',')}) for EAN ${verifyEan}, none returned ` +
+        `a real price. The product may genuinely not be carried online; ` +
+        `run \`npm run maxi-carrefour:login -- --headed\` to investigate. ` +
+        `Last login: region=${lastResult?.region}, seller=${lastResult?.seller}.`,
     );
   })();
 
