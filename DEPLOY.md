@@ -575,6 +575,39 @@ Open the failed run in the Actions tab on GitHub.
 - `**npm run build` fails** → typecheck error introduced. The CI should catch this in the typecheck job before deploy. If it slipped through, fix locally and push.
 - **Telegram notification didn't fire** → `TELEGRAM_`* secrets not set, or bot was kicked from the chat.
 
+### Maxi Carrefour fails with "Executable doesn't exist at .../chrome-headless-shell"
+
+The Maxi Carrefour adapter uses Playwright to drive a real Chromium through the reCAPTCHA-protected login form. Three pieces need to be in place, and they're independent:
+
+1. **System libs** — `libnss3`, `libnspr4`, `libatk-bridge2.0-0t64`, etc. Installed once by `scripts/setup-ec2.sh`. If you bootstrapped the server before this script knew about Playwright, install them manually once:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+     libcups2t64 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+     libxkbcommon0 libpango-1.0-0 libcairo2 libasound2t64 libatspi2.0-0t64 \
+     fonts-liberation
+   ```
+
+2. **Browser binary** — downloaded by `npx playwright install chromium` into `~/.cache/ms-playwright/`. Already done by GitHub Actions on every deploy. If you see this error on an existing server before the next deploy, run it manually:
+
+   ```bash
+   ssh ubuntu@<your-ip>
+   cd /home/ubuntu/scraper
+   export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64
+   npx playwright install chromium
+   pm2 reload ecosystem.config.cjs --update-env
+   ```
+
+3. **Ubuntu 26.04 platform override** — Playwright 1.59.x doesn't yet officially support Ubuntu 26.04 (support shipping in 1.61). The 24.04 binaries are dynamically linked and run fine on 26.04 once the t64 libs above are in place — we just have to point Playwright at the 24.04 download path with `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64`. Without it you get `ERROR: Playwright does not support chromium on ubuntu26.04-x64` at install time, or `Executable doesn't exist at ...` at runtime if the install used a different override than the worker. We set the override in two places, both checked in:
+
+   - `.github/workflows/deploy.yml` — for the `npx playwright install chromium` step.
+   - `ecosystem.config.cjs` — in the PM2 `env` block, so the worker has it at runtime.
+
+   When upgrading to Playwright 1.61+, both can be removed. See [microsoft/playwright#40117](https://github.com/microsoft/playwright/issues/40117).
+
+After all three are in place, the next product add or daily run triggers an auto-login and unlocks prices for Maxi Carrefour. No PHPSESSID cookie needs to be set manually.
+
 ### "I broke production, how do I roll back?"
 
 ```bash

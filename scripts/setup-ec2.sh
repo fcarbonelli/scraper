@@ -119,6 +119,37 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# Playwright system dependencies (for Maxi Carrefour auto-login)
+#
+# Playwright ships its browser binaries via `npx playwright install`, but the
+# Chromium binary itself needs a bunch of OS-level shared libs (libnss3,
+# libnspr4, libatk-bridge2.0-0, etc.) to actually launch on Ubuntu. Without
+# these, you'll see "error while loading shared libraries: libXXX.so.Y: cannot
+# open shared object file" or just a silent crash from chromium.
+#
+# Install them once here; the actual browser binary is fetched per-deploy by
+# `npx playwright install chromium` in .github/workflows/deploy.yml.
+# -----------------------------------------------------------------------------
+step "Installing Playwright system dependencies (libs Chromium needs to run)"
+sudo apt-get install -y \
+  libnss3 \
+  libnspr4 \
+  libatk1.0-0t64 \
+  libatk-bridge2.0-0t64 \
+  libcups2t64 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxfixes3 \
+  libxrandr2 \
+  libgbm1 \
+  libxkbcommon0 \
+  libpango-1.0-0 \
+  libcairo2 \
+  libasound2t64 \
+  libatspi2.0-0t64 \
+  fonts-liberation
+
+# -----------------------------------------------------------------------------
 # Firewall (UFW)
 # -----------------------------------------------------------------------------
 step "Configuring firewall (UFW)"

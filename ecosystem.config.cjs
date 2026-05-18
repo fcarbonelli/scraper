@@ -39,6 +39,17 @@ const common = {
   log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS Z',
   env: {
     NODE_ENV: 'production',
+    // Playwright doesn't yet officially support Ubuntu 26.04 (shipped in
+    // 1.61, we're on 1.59.x). The 24.04 chromium binaries are dynamically
+    // linked and run fine on 26.04 once the t64 libs are installed
+    // (handled by scripts/setup-ec2.sh). This override pins both the
+    // install path and the runtime lookup path to "ubuntu24.04-x64" so
+    // Playwright finds the binary it just downloaded.
+    //
+    // Safe to leave permanently — once we upgrade to Playwright 1.61+ we
+    // can remove this and let Playwright auto-detect.
+    // See: https://github.com/microsoft/playwright/issues/40117
+    PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: 'ubuntu24.04-x64',
   },
 };
 

@@ -58,6 +58,24 @@ jobs:
             echo "==> Installing dependencies"
             npm ci
 
+            # Playwright ships its package code via npm, but the actual browser
+            # binary lives in ~/.cache/ms-playwright/ and only lands when you
+            # explicitly run `playwright install`. Without this step the
+            # Maxi Carrefour auto-login throws "Executable doesn't exist at
+            # /home/ubuntu/.cache/ms-playwright/...". Idempotent + fast (~1s
+            # when up to date), so safe on every deploy.
+            #
+            # The HOST_PLATFORM_OVERRIDE works around Playwright not yet
+            # supporting Ubuntu 26.04 (lands in 1.61). The 24.04 binaries
+            # are dynamically linked and run fine on 26.04 with the t64
+            # libs installed by setup-ec2.sh. The same override is set in
+            # ecosystem.config.cjs so the worker finds the binary at
+            # runtime — keep them in sync.
+            # See: https://github.com/microsoft/playwright/issues/40117
+            echo "==> Ensuring Playwright Chromium is installed"
+            export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64
+            npx playwright install chromium
+
             echo "==> Building TypeScript"
             npm run build
 
