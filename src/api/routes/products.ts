@@ -1,12 +1,13 @@
 /**
  * Product routes.
  *
- *   GET  /v1/products                  list with filters + pagination
- *   POST /v1/products                  ingest a single product URL
- *   POST /v1/products/bulk-import      ingest up to 25 product URLs at once
- *   GET  /v1/products/:id              master product record
- *   GET  /v1/products/:id/compare      latest price across all supermarkets
- *   GET  /v1/products/:id/history      time series of price snapshots
+ *   GET    /v1/products                  list with filters + pagination
+ *   POST   /v1/products                  ingest a single product URL
+ *   POST   /v1/products/bulk-import      ingest up to 25 product URLs at once
+ *   GET    /v1/products/:id              master product record
+ *   GET    /v1/products/:id/compare      latest price across all supermarkets
+ *   GET    /v1/products/:id/history      time series of price snapshots
+ *   DELETE /v1/products/:id              remove product + all mappings + snapshots
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -213,6 +214,79 @@ productsRouter.get('/:id', async (req: Request, res: Response) => {
   if (error) throw error;
   if (!data) throw ApiError.notFound('Product');
   res.json(success(data));
+});
+
+// =============================================================================
+// DELETE /v1/products/:id
+//
+// Hard-deletes the master product row. Database FKs cascade to:
+//   - supermarket_products (every per-supermarket mapping for this product)
+//   - price_snapshots      (entire price history for those mappings)
+//   - job_executions       (scrape attempts referencing those mappings)
+// Alerts referencing the product are kept (`product_id` is set to NULL).
+//
+// Use case: cleaning up products that were ingested with bad metadata
+// (wrong name, wrong EAN, etc.) so the operator can re-add them clean.
+// =============================================================================
+
+productsRouter.delete('/:id', async (req: Request, res: Response) => {
+  // Confirm it exists first so the caller gets a clean 404 instead of a
+  // silent 200 on a typo'd id.
+  const existsRes = await db
+    .from('products')
+    .select('id, name')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (existsRes.error) throw existsRes.error;
+  if (!existsRes.data) throw ApiError.notFound('Product');
+
+  // Count what's about to disappear so the response is informative.
+  // Two cheap queries — fine even with thousands of snapshots.
+  const mappingsRes = await db
+    .from('supermarket_products')
+    .select('id', { count: 'exact', head: true })
+    .eq('product_id', req.params.id);
+  const snapshotsRes = await db
+    .from('price_snapshots')
+    .select('id', { count: 'exact', head: true })
+    .in(
+      'supermarket_product_id',
+      // Subselect the ids of the about-to-be-deleted mappings.
+      // Done client-side via a second fetch to keep the SQL portable.
+      (
+        await db
+          .from('supermarket_products')
+          .select('id')
+          .eq('product_id', req.params.id)
+      ).data?.map((m) => m.id) ?? [],
+    );
+
+  const { error: delErr } = await db
+    .from('products')
+    .delete()
+    .eq('id', req.params.id);
+  if (delErr) throw delErr;
+
+  logger.info(
+    {
+      productId: req.params.id,
+      name: existsRes.data.name,
+      mappingsRemoved: mappingsRes.count ?? 0,
+      snapshotsRemoved: snapshotsRes.count ?? 0,
+    },
+    'product deleted',
+  );
+
+  res.json(
+    success({
+      id: req.params.id,
+      deleted: true,
+      removed: {
+        supermarket_products: mappingsRes.count ?? 0,
+        price_snapshots: snapshotsRes.count ?? 0,
+      },
+    }),
+  );
 });
 
 // =============================================================================

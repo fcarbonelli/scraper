@@ -312,6 +312,13 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
    * are gated). MUST NOT trigger Playwright; that's reserved for the
    * worker's regular scrape() calls where a 4-minute login dance is fine.
    *
+   * IMPORTANT: probe deliberately fetches WITHOUT a cookie. A persisted
+   * PHPSESSID is bound to a sucursal AND carries last-viewed-product
+   * state, which causes consecutive `getProductBasicData` calls to all
+   * echo the same product back regardless of the `currentUrl` argument.
+   * Catalog metadata is public — no cookie needed — so we punt to the
+   * unauthenticated path which always honors the requested EAN.
+   *
    * Falls back to a URL-derived EAN if the network call fails for any
    * reason — the daily run will fill in the rest.
    */
@@ -320,9 +327,8 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
     const url = `${BASE}/products?currentUrl=/p/${encodeURIComponent(
       ctx.externalId,
     )}&method=getProductBasicData`;
-    const cookie = loadCookieFromConfig(ctx.config.config);
     try {
-      const html = await fetchMaxiCarrefourFragment(url, cookie, ctx.signal);
+      const html = await fetchMaxiCarrefourFragment(url, undefined, ctx.signal);
       return extractProductInfo(html, ctx.externalId);
     } catch (err) {
       (ctx.logger as Logger).info(
