@@ -677,11 +677,24 @@ export async function persistCookie(
   }
 
   const existing = (row?.config ?? {}) as Record<string, unknown>;
+  const now = new Date().toISOString();
   const next: Record<string, unknown> = {
     ...existing,
     phpSessId: result.phpSessId,
-    phpSessIdRefreshedAt: new Date().toISOString(),
+    // Always bump on any persist — used as a freshness/forensics signal.
+    phpSessIdRefreshedAt: now,
   };
+  // Only bump the *validated* timestamp when this cookie has been confirmed
+  // to unlock a real price (autoPin === true means probeEanHasRealPrice
+  // returned true for verifyEan). The adapter's "recently-validated"
+  // shortcut keys off this timestamp to know when a `data-price="private"`
+  // means "product not stocked here" vs "cookie is bad". Persisting an
+  // *unverified* fallback cookie must NOT update this — otherwise every
+  // subsequent product is treated as not-stocked without ever testing the
+  // cookie.
+  if (opts.autoPin) {
+    next['phpSessIdValidatedAt'] = now;
+  }
   if (result.expiresAt) next['phpSessIdExpiresAt'] = result.expiresAt;
   if (result.region) next['lastLoginRegion'] = result.region;
   if (result.seller) next['lastLoginSeller'] = result.seller;

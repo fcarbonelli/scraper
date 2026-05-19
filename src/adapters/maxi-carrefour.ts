@@ -374,18 +374,22 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
     //      this product → refresh would just un-pin the working sucursal
     //      and waste a Playwright login.
     //
-    // We disambiguate via `phpSessIdRefreshedAt`. That timestamp is only
-    // written by `persistCookie` AFTER `probeEanHasRealPrice` confirmed the
-    // cookie unlocks a real price for at least one product. If it's recent,
-    // the cookie was definitely valid moments ago — interpret (b) and treat
-    // this product as not-stocked at the pinned sucursal. The operator can
-    // re-pin via `npm run maxi-carrefour:login -- --headed` if needed.
+    // We disambiguate via `phpSessIdValidatedAt`. That timestamp is ONLY
+    // written by `persistCookie({autoPin:true})`, which only runs after
+    // `probeEanHasRealPrice` confirmed the cookie unlocks a real price for
+    // at least one product. If it's recent, the cookie was definitely valid
+    // moments ago — interpret (b) and treat this product as not-stocked at
+    // the pinned sucursal.
+    //
+    // Note: `phpSessIdRefreshedAt` (intentionally NOT used here) is bumped
+    // even on unverified fallback persists, so it would mistakenly classify
+    // unvalidated cookies as "recently validated" and skip refresh entirely.
     const RECENT_VALIDATE_MS = 60 * 60 * 1000; // 1h
-    const refreshedAtRaw = ctx.config.config?.['phpSessIdRefreshedAt'];
-    if (typeof refreshedAtRaw === 'string') {
-      const refreshedAt = Date.parse(refreshedAtRaw);
-      if (Number.isFinite(refreshedAt)) {
-        const ageMs = Date.now() - refreshedAt;
+    const validatedAtRaw = ctx.config.config?.['phpSessIdValidatedAt'];
+    if (typeof validatedAtRaw === 'string') {
+      const validatedAt = Date.parse(validatedAtRaw);
+      if (Number.isFinite(validatedAt)) {
+        const ageMs = Date.now() - validatedAt;
         if (ageMs < RECENT_VALIDATE_MS) {
           ctx.logger.info(
             { ageMinutes: Math.round(ageMs / 60000), externalId: ctx.externalId },
