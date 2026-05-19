@@ -999,24 +999,53 @@ export async function refreshCookie(
       }
     }
 
-    // Exhausted all attempts.
+    // Exhausted all attempts. Two distinct failure modes from here:
+    //
+    //   A. We never harvested a cookie (every attempt threw at the Playwright
+    //      stage). That's a genuine auth failure — reCAPTCHA blocked us, the
+    //      DOM changed, etc. Re-raise as `auth_required` and arm the cooldown
+    //      (handled by the outer try/catch).
+    //
+    //   B. We harvested N cookies, but verifyEan came back "private" at every
+    //      sucursal. The cookies themselves are fine — they may unlock prices
+    //      for OTHER products. The picked sucursales just don't carry THIS
+    //      specific EAN. Persisting the cookie lets every other product in
+    //      this scrape batch use it (saving N-1 logins). Throw `product_not
+    //      _found` so this one product fails cleanly without dragging the
+    //      rest of the batch into the auth_required cooldown.
     if (lastErr && !lastResult) {
-      // Every attempt threw before harvesting a cookie — most likely a
-      // sustained reCAPTCHA block. Re-raise the last error so the operator
-      // sees the real cause.
+      // Mode A — bubble up so the outer catch arms the cooldown.
       throw lastErr instanceof Error
         ? lastErr
         : new ScrapeError('auth_required', String(lastErr));
     }
-    throw new ScrapeError(
-      'auth_required',
-      `Maxi Carrefour: tried ${maxAttempts} sucursales across ` +
-        `${skipRegions.length + 1} region(s) (sellers=${skipSellers.join(',')}, ` +
-        `regions=${skipRegions.join(',')}) for EAN ${verifyEan}, none returned ` +
-        `a real price. The product may genuinely not be carried online; ` +
-        `run \`npm run maxi-carrefour:login -- --headed\` to investigate. ` +
-        `Last login: region=${lastResult?.region}, seller=${lastResult?.seller}.`,
-    );
+    if (lastResult) {
+      // Mode B — best-effort persist (no auto-pin since this sucursal didn't
+      // verify), then throw product_not_found.
+      logger.info(
+        {
+          region: lastResult.region,
+          seller: lastResult.seller,
+          verifyEan,
+          triedSellers: skipSellers,
+        },
+        'maxi-carrefour: harvested cookie but verifyEan unstocked at all tried sucursales — ' +
+          'persisting cookie for other products to reuse',
+      );
+      await persistCookie(config.id, lastResult, logger, { autoPin: false });
+      throw new ScrapeError(
+        'product_not_found',
+        `Maxi Carrefour: EAN ${verifyEan} is not stocked at any of the ` +
+          `${maxAttempts} tried sucursales (sellers=${skipSellers.join(',')}, ` +
+          `regions=${skipRegions.join(',')}). The harvested cookie has been ` +
+          `persisted for other products to reuse — only this EAN failed. ` +
+          `If this product really should be available, pin a sucursal that ` +
+          `carries it via supermarkets.config.maxiCarrefourLogin.pick.`,
+      );
+    }
+    // Should be unreachable (lastErr or lastResult must be set after the
+    // loop), but throw a coherent error just in case.
+    throw new ScrapeError('auth_required', 'Maxi Carrefour: refresh produced no result');
   })();
 
   loginInFlight.set(dedupeKey, promise);
@@ -1027,13 +1056,19 @@ export async function refreshCookie(
     clearRefreshCooldown();
     return result;
   } catch (err) {
-    // Arm the cooldown so the next N products in this run fail fast
-    // instead of each paying for their own (likely-also-failing) refresh.
-    lastRefreshFailureAt = Date.now();
-    lastRefreshFailureErr =
-      err instanceof ScrapeError
-        ? err
-        : new ScrapeError('auth_required', (err as Error).message);
+    // Only arm the cooldown for genuine auth failures (Playwright/reCAPTCHA
+    // problems, no cookie ever harvested). `product_not_found` means we have
+    // a working cookie persisted, so the next product's scrape can reuse it
+    // — arming the cooldown would block it spuriously.
+    const isAuthFailure =
+      err instanceof ScrapeError ? err.type === 'auth_required' : true;
+    if (isAuthFailure) {
+      lastRefreshFailureAt = Date.now();
+      lastRefreshFailureErr =
+        err instanceof ScrapeError
+          ? err
+          : new ScrapeError('auth_required', (err as Error).message);
+    }
     throw err;
   } finally {
     loginInFlight.delete(dedupeKey);
