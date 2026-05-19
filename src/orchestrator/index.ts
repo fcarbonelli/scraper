@@ -8,7 +8,13 @@
  *
  * Both run in the same process; both are tiny so it's not worth splitting.
  *
- * Manual trigger: `node --env-file=.env dist/orchestrator/index.js --run-now`
+ * Manual triggers:
+ *   node --env-file=.env dist/orchestrator/index.js --run-now
+ *   node --env-file=.env dist/orchestrator/index.js --run-now --supermarket=maxi-carrefour
+ *
+ * The `--supermarket=<id>` flag scopes the run to one supermarket only,
+ * which is handy when iterating on a single adapter without enqueueing
+ * every other site (and burning their rate-limit budgets).
  */
 
 import cron from 'node-cron';
@@ -23,14 +29,34 @@ initSentry('orchestrator');
 
 const FINALIZER_INTERVAL_MS = 10 * 60 * 1000;
 
-async function runScrapeWithErrorHandling(): Promise<void> {
+async function runScrapeWithErrorHandling(
+  supermarketId?: string,
+): Promise<void> {
   try {
-    const result = await runDailyScrape();
+    const result = await runDailyScrape(
+      supermarketId ? { supermarketId } : {},
+    );
     logger.info({ result }, 'daily scrape enqueued');
   } catch (err) {
     logger.error({ err }, 'daily scrape failed');
     captureError(err, { phase: 'daily-scrape' });
   }
+}
+
+/**
+ * Pull a `--supermarket=<id>` (or `--supermarket <id>`) flag out of argv.
+ * Returns undefined when the flag is missing. Validation of the id itself
+ * (does it exist in the DB?) is left to {@link runDailyScrape}, which
+ * naturally yields 0 jobs and a warning if the id doesn't match.
+ */
+function parseSupermarketArg(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a) continue;
+    if (a.startsWith('--supermarket=')) return a.slice('--supermarket='.length);
+    if (a === '--supermarket' && argv[i + 1]) return argv[i + 1];
+  }
+  return undefined;
 }
 
 async function runFinalizerWithErrorHandling(): Promise<void> {
@@ -52,9 +78,16 @@ async function main(): Promise<void> {
 
   if (runNow) {
     // Manual one-shot mode — useful for testing on EC2 before the first
-    // scheduled run, or for backfilling a missed day.
-    logger.info('--run-now: triggering immediate daily scrape');
-    await runScrapeWithErrorHandling();
+    // scheduled run, or for backfilling a missed day. Optionally scoped
+    // to a single supermarket via --supermarket=<id>.
+    const onlySupermarket = parseSupermarketArg(process.argv);
+    logger.info(
+      { onlySupermarket },
+      onlySupermarket
+        ? `--run-now: triggering scrape for supermarket="${onlySupermarket}" only`
+        : '--run-now: triggering immediate daily scrape',
+    );
+    await runScrapeWithErrorHandling(onlySupermarket);
     await runFinalizerWithErrorHandling();
     process.exit(0);
   }

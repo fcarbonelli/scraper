@@ -36,11 +36,26 @@ export interface RunDailyResult {
   bySupermarket: Record<string, number>;
 }
 
+/** Optional filters for {@link runDailyScrape}. */
+export interface RunDailyOptions {
+  /**
+   * Restrict the run to a single supermarket id (e.g. `"maxi-carrefour"`).
+   * When omitted, every active supermarket is enqueued.
+   *
+   * Used by `--supermarket=<id>` on the orchestrator's run-now flag — handy
+   * for re-running just one site after a code change without paying the
+   * cost (and rate-limit budget) of every other supermarket.
+   */
+  supermarketId?: string;
+}
+
 /**
  * Run the daily enqueue. Safe to call ad-hoc — it always creates a fresh
  * scrape_run row, never appends to an existing one.
  */
-export async function runDailyScrape(): Promise<RunDailyResult> {
+export async function runDailyScrape(
+  opts: RunDailyOptions = {},
+): Promise<RunDailyResult> {
   const startedAt = new Date().toISOString();
 
   // 1. Create scrape_runs row
@@ -51,15 +66,17 @@ export async function runDailyScrape(): Promise<RunDailyResult> {
     .single();
   if (runInsert.error) throw runInsert.error;
   const scrapeRunId = runInsert.data.id as string;
-  const log = logger.child({ runId: scrapeRunId });
+  const log = logger.child({ runId: scrapeRunId, filterSupermarket: opts.supermarketId });
 
   log.info({ startedAt }, 'starting daily scrape run');
 
-  // 2. Load active supermarkets
-  const smRes = await db
+  // 2. Load active supermarkets (optionally filtered to a single id)
+  let smQuery = db
     .from('supermarkets')
     .select('id, name')
     .eq('is_active', true);
+  if (opts.supermarketId) smQuery = smQuery.eq('id', opts.supermarketId);
+  const smRes = await smQuery;
   if (smRes.error) throw smRes.error;
   const supermarkets = (smRes.data ?? []) as SupermarketRow[];
 
