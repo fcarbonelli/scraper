@@ -103,8 +103,10 @@ async function main(): Promise<void> {
     'orchestrator: scheduling daily scrape',
   );
 
-  // 1. Daily scrape cron
-  cron.schedule(env.SCRAPE_CRON, runScrapeWithErrorHandling, {
+  // 1. Daily scrape cron.
+  // Wrapped in an arrow so node-cron doesn't accidentally pass its
+  // TaskContext arg as our optional `supermarketId` (TS2345 in CI).
+  cron.schedule(env.SCRAPE_CRON, () => void runScrapeWithErrorHandling(), {
     timezone: env.TZ,
   });
 
