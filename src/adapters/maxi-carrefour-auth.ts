@@ -263,20 +263,45 @@ export async function loginAndGetCookie(
     logger.debug({}, 'maxi-carrefour: clicking business card');
     await page.locator('#business').click();
 
-    // Step 2: pick region (province), wait for sellers to load, pick seller.
-    // The site loads regions on document.ready via XHR (`seller?method=zone`),
-    // so we need to wait for #region to populate before we can pick one.
+    // Step 2: pick region (province), then load + pick a seller.
+    //
+    // We DON'T rely on the site's inline `onchange="onchangeSelect(this)"`
+    // handler chain to populate the seller dropdown. That chain is fragile
+    // under automation — Playwright's selectOption fires synthetic events
+    // that occasionally don't trigger the inline handler, and even when they
+    // do, there's a race between the XHR completing and our pick logic.
+    //
+    // Instead we:
+    //   1. Wait for #region to populate (the site loads it on doc.ready).
+    //   2. Pick a region value from the populated <option>s.
+    //   3. Fetch the seller list DIRECTLY from /seller?method=sellersLists
+    //      inside the page context (same endpoint the site uses), giving us
+    //      full visibility into which sellers carry delivery (envio="1")
+    //      and which don't.
+    //   4. Inject the response into #seller.innerHTML and set the value
+    //      ourselves — no inline-onchange dependency.
     logger.debug({}, 'maxi-carrefour: waiting for regions to load');
     await waitForOptions(page, '#region', 20_000);
+
     logger.debug({}, 'maxi-carrefour: selecting region');
     const region = await pickFirstRealOption(page, '#region', loginCfg, 'region');
+    if (!region) {
+      throw new ScrapeError(
+        'auth_required',
+        `Maxi Carrefour: no region available to pick ` +
+          `(skipRegions=${(loginCfg.skipRegions ?? []).join(',')}).`,
+      );
+    }
 
-    // Selecting a region fires getSellerList() → POST seller?method=sellersLists,
-    // whose response is dropped into #seller.innerHTML. Wait for that.
-    logger.debug({}, 'maxi-carrefour: waiting for sellers to load');
-    await waitForOptions(page, '#seller', 20_000);
-    logger.debug({}, 'maxi-carrefour: selecting seller');
-    const seller = await pickFirstRealOption(page, '#seller', loginCfg, 'seller');
+    logger.debug({ region }, 'maxi-carrefour: fetching sellers via XHR');
+    const seller = await fetchAndPickSeller(page, region, loginCfg, logger);
+    if (!seller) {
+      throw new ScrapeError(
+        'auth_required',
+        `Maxi Carrefour: no seller with delivery (envio="1") in region ` +
+          `"${region}" (skipSellers=${(loginCfg.skipSellers ?? []).join(',')}).`,
+      );
+    }
 
     // Customer info — random throwaway values; nothing here is verified server-
     // side, the form only checks shape.
@@ -424,6 +449,9 @@ async function waitForOptions(
  *
  * `skipValues` lets the retry loop avoid sellers/regions already known to
  * not carry the target product.
+ *
+ * Used for #region only — the seller dropdown is now populated by
+ * `fetchAndPickSeller` to bypass the fragile inline-onchange dependency.
  */
 async function pickFirstRealOption(
   page: Page,
@@ -435,30 +463,32 @@ async function pickFirstRealOption(
   if (cfg.pick !== 'first' && cfg.pick[field]) {
     const exact = cfg.pick[field]!;
     await page.selectOption(selector, exact);
-    // Trigger the onchange handler that the site relies on to load sellers.
-    await page.dispatchEvent(selector, 'change');
     return exact;
   }
 
   // 2. Otherwise: pick the first option whose value isn't empty/placeholder
   //    AND isn't in the skip list (used by auto-retry on per-seller misses).
+  //    "Placeholder" detection covers value="0"/"-1" and option text
+  //    starting with "Seleccion…" or "Elegi…" / "Elija…" — common Spanish
+  //    prompt text on the site.
   const skip = field === 'seller' ? cfg.skipSellers ?? [] : cfg.skipRegions ?? [];
   const value = await page.evaluate(
     (args: { sel: string; skip: string[] }): string | undefined => {
-      type Sel = { options: ArrayLike<{ value: string }> } | null;
+      type Opt = { value: string; text?: string; textContent?: string | null };
+      type Sel = { options: ArrayLike<Opt> } | null;
       const el = (globalThis as { document?: { querySelector(s: string): unknown } })
         .document?.querySelector(args.sel) as Sel;
       if (!el) return undefined;
+      const placeholderText = /^(seleccion|elegi|elija|--)/i;
+      const placeholderValues = new Set(['', '0', '-1', 'null', 'undefined']);
       for (let i = 0; i < el.options.length; i++) {
         const o = el.options[i];
-        if (
-          o &&
-          o.value &&
-          o.value !== '' &&
-          args.skip.indexOf(o.value) === -1
-        ) {
-          return o.value;
-        }
+        if (!o || !o.value) continue;
+        if (placeholderValues.has(o.value)) continue;
+        const txt = (o.text ?? o.textContent ?? '').trim();
+        if (placeholderText.test(txt)) continue;
+        if (args.skip.indexOf(o.value) !== -1) continue;
+        return o.value;
       }
       return undefined;
     },
@@ -466,8 +496,143 @@ async function pickFirstRealOption(
   );
   if (!value) return undefined;
   await page.selectOption(selector, value);
-  await page.dispatchEvent(selector, 'change');
   return value;
+}
+
+/**
+ * Fetch the seller list for a region directly via the same XHR endpoint the
+ * site uses (`POST /seller?method=sellersLists`), parse it, pick a seller,
+ * then inject + select it into #seller.
+ *
+ * Why this instead of relying on the dropdown's onchange chain:
+ *   - The site's `onchange="onchangeSelect(this)"` calls `getSellerList(value)`
+ *     which fires the XHR. Under Playwright the synthetic `change` event
+ *     occasionally fails to trigger this inline handler, leaving the seller
+ *     dropdown empty and the script unable to proceed.
+ *   - Even when the handler fires, there's no awaitable signal — we'd have
+ *     to poll the DOM for new options, racing with placeholder + partial
+ *     responses.
+ *   - Doing the XHR ourselves (from page context, so cookies + same-origin
+ *     headers are correct) gives us a deterministic Promise we can await,
+ *     full visibility into envio="0" sellers (which the site silently
+ *     rejects on selection), and a reliable way to pick + commit the value.
+ *
+ * Returns the chosen seller's value (its numeric ID), or undefined if no
+ * seller in this region has delivery (envio="1") and isn't on the skip list.
+ */
+async function fetchAndPickSeller(
+  page: Page,
+  region: string,
+  cfg: LoginDefaults,
+  logger: Logger,
+): Promise<string | undefined> {
+  // 1. Fetch the raw <option>...</option> HTML the site would inject.
+  type FetchResult = { ok: true; html: string } | { ok: false; error: string };
+  const fetched = (await page.evaluate(
+    async (zone: string): Promise<FetchResult> => {
+      type FetchFn = (
+        url: string,
+        init: { method: string; headers: Record<string, string>; body: string },
+      ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+      const w = globalThis as unknown as {
+        fetch: FetchFn;
+        location: { origin: string };
+      };
+      try {
+        const res = await w.fetch(`${w.location.origin}/seller?method=sellersLists`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: `zoneId=${encodeURIComponent(zone)}`,
+        });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+        return { ok: true, html: await res.text() };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+    region,
+  )) as FetchResult;
+  if (!fetched.ok) {
+    throw new ScrapeError(
+      'auth_required',
+      `Maxi Carrefour: sellersLists XHR failed for region "${region}": ${fetched.error}`,
+    );
+  }
+
+  // 2. Parse + pick a seller in page context. We pick the first option with
+  //    a real numeric value, envio="1" (carrier ships from there), and
+  //    that isn't on the skip list. Operator pin overrides the search.
+  const exactSellerPin =
+    cfg.pick !== 'first' && cfg.pick.seller ? cfg.pick.seller : undefined;
+  const skipSellers = cfg.skipSellers ?? [];
+  type PickResult = { value: string; text: string; envio: string } | null;
+  const picked = (await page.evaluate(
+    (args: { html: string; skip: string[]; exact: string | undefined }): PickResult => {
+      type Opt = { value: string; text?: string; getAttribute(name: string): string | null };
+      type Doc = {
+        createElement(tag: string): { innerHTML: string; querySelector(s: string): unknown };
+      };
+      const doc = (globalThis as { document?: Doc }).document;
+      if (!doc) return null;
+      const wrapper = doc.createElement('div');
+      wrapper.innerHTML = `<select>${args.html}</select>`;
+      const select = wrapper.querySelector('select') as
+        | { options: ArrayLike<Opt> }
+        | null;
+      if (!select) return null;
+      const placeholderValues = new Set(['', '0', '-1', 'null', 'undefined']);
+      for (let i = 0; i < select.options.length; i++) {
+        const o = select.options[i];
+        if (!o || !o.value) continue;
+        if (placeholderValues.has(o.value)) continue;
+        const envio = o.getAttribute('envio') ?? '';
+        const text = (o.text ?? '').trim();
+        if (args.exact !== undefined) {
+          if (o.value === args.exact) return { value: o.value, text, envio };
+          continue;
+        }
+        if (envio !== '1') continue; // skip envio="0" — site silently rejects
+        if (args.skip.indexOf(o.value) !== -1) continue;
+        return { value: o.value, text, envio };
+      }
+      return null;
+    },
+    { html: fetched.html, skip: skipSellers, exact: exactSellerPin },
+  )) as PickResult;
+  if (!picked) {
+    logger.warn(
+      { region, skipSellers, exactSellerPin, htmlLength: fetched.html.length },
+      'maxi-carrefour: no eligible seller in fetched list',
+    );
+    return undefined;
+  }
+
+  // 3. Inject the freshly-fetched options into #seller and commit our pick.
+  //    Setting innerHTML mirrors what the site's getSellerList() would have
+  //    done. Then we set the value + fire change, which runs the site's
+  //    onchangeSelect handler (envio check, ship-info display) for parity
+  //    with a manual selection.
+  await page.evaluate(
+    (args: { html: string; sellerValue: string }) => {
+      type Sel = { innerHTML: string; value: string; dispatchEvent(e: Event): boolean };
+      const sel = (globalThis as { document?: { getElementById(id: string): unknown } })
+        .document?.getElementById('seller') as Sel | null;
+      if (!sel) return;
+      sel.innerHTML = args.html;
+      sel.value = args.sellerValue;
+      sel.dispatchEvent(new Event('input', { bubbles: true }));
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    { html: fetched.html, sellerValue: picked.value },
+  );
+  logger.debug(
+    { region, seller: picked.value, sellerText: picked.text, envio: picked.envio },
+    'maxi-carrefour: seller injected + selected',
+  );
+  return picked.value;
 }
 
 // =============================================================================
