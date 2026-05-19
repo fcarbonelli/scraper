@@ -368,12 +368,46 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
     });
     if (parsed.kind === 'ok') return parsed.result;
 
-    // -- Attempt 2: cookie missing or expired → log in via Playwright. ------
+    // Got `data-price="private"`. Decide between two interpretations:
+    //   a) Cookie is bad/expired → need to refresh.
+    //   b) Cookie is fine, but the *currently-pinned sucursal* doesn't carry
+    //      this product → refresh would just un-pin the working sucursal
+    //      and waste a Playwright login.
+    //
+    // We disambiguate via `phpSessIdRefreshedAt`. That timestamp is only
+    // written by `persistCookie` AFTER `probeEanHasRealPrice` confirmed the
+    // cookie unlocks a real price for at least one product. If it's recent,
+    // the cookie was definitely valid moments ago — interpret (b) and treat
+    // this product as not-stocked at the pinned sucursal. The operator can
+    // re-pin via `npm run maxi-carrefour:login -- --headed` if needed.
+    const RECENT_VALIDATE_MS = 60 * 60 * 1000; // 1h
+    const refreshedAtRaw = ctx.config.config?.['phpSessIdRefreshedAt'];
+    if (typeof refreshedAtRaw === 'string') {
+      const refreshedAt = Date.parse(refreshedAtRaw);
+      if (Number.isFinite(refreshedAt)) {
+        const ageMs = Date.now() - refreshedAt;
+        if (ageMs < RECENT_VALIDATE_MS) {
+          ctx.logger.info(
+            { ageMinutes: Math.round(ageMs / 60000), externalId: ctx.externalId },
+            'maxi-carrefour: cookie recently validated, treating private as not-stocked',
+          );
+          throw new ScrapeError(
+            'product_not_found',
+            `Maxi Carrefour: data-price="private" with cookie validated ${
+              Math.round(ageMs / 60000)
+            }m ago — product likely not stocked at the pinned sucursal (ean=${ctx.externalId}).`,
+          );
+        }
+      }
+    }
+
+    // -- Attempt 2: cookie missing or stale → log in via Playwright. --------
     // refreshCookie loops sucursales until it finds one that returns a real
     // price for THIS exact EAN, then auto-pins that sucursal so future
     // refreshes (cookie expiry, etc.) start with the known-good seller.
-    // It's process-singleton per-EAN: concurrent scrapes for the same
-    // product share one login, different products can refresh in parallel.
+    // Process-level cooldown inside refreshCookie ensures we don't spam
+    // Playwright when reCAPTCHA is throttling — once one refresh fails,
+    // subsequent calls within ~30 min fail fast with the cached error.
     ctx.logger.info(
       { hadCookie: Boolean(cookie), externalId: ctx.externalId },
       'maxi-carrefour: data-price=private, triggering Playwright relogin',

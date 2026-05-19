@@ -639,6 +639,30 @@ export interface RefreshOptions {
 const loginInFlight = new Map<string, Promise<LoginResult>>();
 
 /**
+ * Cooldown gate. After a refreshCookie call THROWS, we record the timestamp
+ * here; subsequent calls within REFRESH_COOLDOWN_MS short-circuit with the
+ * same error instead of spinning up another Playwright login.
+ *
+ * Why: reCAPTCHA Enterprise scores drop progressively when N back-to-back
+ * logins come from the same IP. Once the score crosses Google's reject
+ * threshold, every subsequent login *also* fails — and we'd just burn more
+ * minutes of CPU and tank the score further. Backing off lets the score
+ * recover on its own.
+ */
+let lastRefreshFailureAt: number | undefined;
+let lastRefreshFailureErr: ScrapeError | undefined;
+const REFRESH_COOLDOWN_MS = 30 * 60 * 1000;
+
+/**
+ * Reset the cooldown — useful in tests, or if the operator manually resolves
+ * the underlying issue and wants the next scrape to retry immediately.
+ */
+export function clearRefreshCooldown(): void {
+  lastRefreshFailureAt = undefined;
+  lastRefreshFailureErr = undefined;
+}
+
+/**
  * Force a fresh PHPSESSID via Playwright login, persist it to DB, and return
  * it. Concurrent calls (with the same `verifyEan`) share a single login.
  *
@@ -664,6 +688,26 @@ export async function refreshCookie(
   logger: Logger,
   opts: RefreshOptions = {},
 ): Promise<LoginResult> {
+  // Honor the process-level cooldown set after a previous refresh failure —
+  // see lastRefreshFailureAt comment for rationale. The first failure pays
+  // the full Playwright cost; everything within the cooldown window after
+  // that fails fast with the cached error.
+  if (lastRefreshFailureAt && lastRefreshFailureErr) {
+    const ageMs = Date.now() - lastRefreshFailureAt;
+    if (ageMs < REFRESH_COOLDOWN_MS) {
+      const remainingMin = Math.ceil((REFRESH_COOLDOWN_MS - ageMs) / 60000);
+      logger.warn(
+        { ageMs, remainingMin, cause: lastRefreshFailureErr.message },
+        'maxi-carrefour: skipping refresh, cooldown active',
+      );
+      throw new ScrapeError(
+        'auth_required',
+        `Maxi Carrefour: refresh in cooldown (${Math.round(ageMs / 60000)}m ago, ${remainingMin}m left). ` +
+          `Last error: ${lastRefreshFailureErr.message}`,
+      );
+    }
+  }
+
   const verifyEan = opts.verifyEan;
   const dedupeKey = verifyEan ?? '__novalidation__';
   const existing = loginInFlight.get(dedupeKey);
@@ -678,10 +722,12 @@ export async function refreshCookie(
       | { headless?: boolean; useSystemChrome?: boolean }
       | undefined) ?? {};
     const finalLaunch: LaunchOptions = { ...cfgOverrides, ...(opts.launchOpts ?? {}) };
-    // 8 covers ~2-3 regions × 3 sellers each — enough that any reasonably
-    // common product on the platform should be reachable.
-    const maxAttempts = opts.maxAttempts ?? 8;
-    const maxSellersPerRegion = opts.maxSellersPerRegion ?? 3;
+    // 3 attempts, optionally rotating regions: keeps total Playwright
+    // load per refresh modest so we don't tank reCAPTCHA scores. The
+    // recently-validated-cookie gate in the adapter prevents most other
+    // products from triggering a refresh in the first place.
+    const maxAttempts = opts.maxAttempts ?? 3;
+    const maxSellersPerRegion = opts.maxSellersPerRegion ?? 2;
 
     // Track per-region misses so we know when to abandon a region.
     const skipSellers: string[] = [];
@@ -810,7 +856,20 @@ export async function refreshCookie(
 
   loginInFlight.set(dedupeKey, promise);
   try {
-    return await promise;
+    const result = await promise;
+    // Refresh succeeded — clear any lingering cooldown so other in-flight
+    // products don't get spuriously short-circuited.
+    clearRefreshCooldown();
+    return result;
+  } catch (err) {
+    // Arm the cooldown so the next N products in this run fail fast
+    // instead of each paying for their own (likely-also-failing) refresh.
+    lastRefreshFailureAt = Date.now();
+    lastRefreshFailureErr =
+      err instanceof ScrapeError
+        ? err
+        : new ScrapeError('auth_required', (err as Error).message);
+    throw err;
   } finally {
     loginInFlight.delete(dedupeKey);
   }
