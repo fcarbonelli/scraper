@@ -11,8 +11,9 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '../../shared/db.js';
-import { paginated } from '../lib/envelope.js';
-import { parseQuery, PaginationQuery } from '../lib/parseQuery.js';
+import { ApiError } from '../lib/apiError.js';
+import { paginated, success } from '../lib/envelope.js';
+import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
 
 export const snapshotsRouter = Router();
 
@@ -67,4 +68,76 @@ snapshotsRouter.get('/', async (req: Request, res: Response) => {
   if (error) throw error;
 
   res.json(paginated(data ?? [], count ?? 0, page, limit));
+});
+
+// =============================================================================
+// POST /v1/snapshots/manual
+//
+// Operator override for emergencies: insert a trusted price when every scrape
+// path failed but the price is known from manual inspection.
+// =============================================================================
+
+const ManualSnapshotBody = z.object({
+  supermarket_product_id: z.string().uuid(),
+  scrape_run_id: z.string().uuid().optional(),
+  price: z.number().positive(),
+  list_price: z.number().positive().nullable().optional(),
+  unit_price: z.number().positive().nullable().optional(),
+  unit_price_per: z.string().trim().min(1).max(50).nullable().optional(),
+  in_stock: z.boolean().default(true),
+  currency: z.string().trim().min(1).max(8).default('ARS'),
+  promotions: z.array(z.record(z.string(), z.unknown())).default([]),
+  note: z.string().trim().max(1000).optional(),
+});
+
+snapshotsRouter.post('/manual', async (req: Request, res: Response) => {
+  const body = parseBody(req, ManualSnapshotBody);
+
+  const mapping = await db
+    .from('supermarket_products')
+    .select('id, supermarket_id, product_id, is_active')
+    .eq('id', body.supermarket_product_id)
+    .maybeSingle();
+  if (mapping.error) throw mapping.error;
+  if (!mapping.data || !mapping.data.is_active) {
+    throw ApiError.notFound('Supermarket product');
+  }
+
+  if (body.scrape_run_id) {
+    const run = await db
+      .from('scrape_runs')
+      .select('id')
+      .eq('id', body.scrape_run_id)
+      .maybeSingle();
+    if (run.error) throw run.error;
+    if (!run.data) throw ApiError.notFound('Run');
+  }
+
+  const insert = await db
+    .from('price_snapshots')
+    .insert({
+      supermarket_product_id: body.supermarket_product_id,
+      scrape_run_id: body.scrape_run_id ?? null,
+      scraped_at: new Date().toISOString(),
+      price: body.price,
+      list_price: body.list_price ?? null,
+      unit_price: body.unit_price ?? null,
+      unit_price_per: body.unit_price_per ?? null,
+      in_stock: body.in_stock,
+      currency: body.currency,
+      tier_used: 'manual',
+      promotions: body.promotions,
+      raw_data: {
+        source: 'manual',
+        note: body.note ?? null,
+        api_key_id: req.apiKey?.id ?? null,
+      },
+    })
+    .select(
+      'id, supermarket_product_id, scrape_run_id, price, list_price, unit_price, unit_price_per, in_stock, currency, tier_used, promotions, scraped_at',
+    )
+    .single();
+  if (insert.error) throw insert.error;
+
+  res.status(201).json(success(insert.data));
 });

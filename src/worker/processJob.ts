@@ -15,6 +15,7 @@ import type { ScrapeContext } from '../adapters/types.js';
 import type { ScrapeJobData } from '../shared/queue.js';
 import { classifyError } from './classifyError.js';
 import { decideRetry } from './retryPolicy.js';
+import { generateEarlyAlertForRunSupermarket } from '../alerts/aggregate.js';
 import {
   loadJobInput,
   recordJobStart,
@@ -47,6 +48,8 @@ export async function processJob(
   const log = logger.child({
     supermarket: jobData.supermarketId,
     sku: jobData.externalId,
+    supermarketProductId: jobData.supermarketProductId,
+    runId: jobData.scrapeRunId,
     attempt,
   });
 
@@ -108,7 +111,14 @@ export async function processJob(
     });
 
     log.info(
-      { tier: result.tierUsed, price: result.price, durationMs, inStock: result.inStock },
+      {
+        tier: result.tierUsed,
+        price: result.price,
+        durationMs,
+        inStock: result.inStock,
+        externalUrl: input.supermarketProduct.externalUrl,
+        jobExecutionId,
+      },
       'scrape ok',
     );
     return { status: 'success' };
@@ -124,13 +134,27 @@ export async function processJob(
       isFinal: !decision.shouldRetry,
     });
 
+    if (!decision.shouldRetry) {
+      try {
+        await generateEarlyAlertForRunSupermarket(
+          jobData.scrapeRunId,
+          input.supermarket.id,
+        );
+      } catch (alertErr) {
+        log.error({ err: alertErr }, 'early alert evaluation failed');
+      }
+    }
+
     log.warn(
       {
         type: classified.type,
         message: classified.message,
+        httpStatus: classified.httpStatus ?? null,
         retryable: classified.retryable,
         nextAttempt: decision.shouldRetry ? decision.nextAttempt : null,
         durationMs,
+        externalUrl: input.supermarketProduct.externalUrl,
+        jobExecutionId,
       },
       decision.shouldRetry ? 'scrape failed, will retry' : 'scrape failed (final)',
     );

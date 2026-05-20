@@ -8,8 +8,8 @@
 
 import type { Logger } from '../shared/logger.js';
 
-/** Tier the adapter ended up using (for analytics + per-tier breakdown). */
-export type Tier = 'api' | 'html' | 'ai';
+/** Tier/source used for the snapshot (for analytics + per-tier breakdown). */
+export type Tier = 'api' | 'html' | 'ai' | 'manual';
 
 /** Supermarket config row from the DB, passed to the adapter at scrape time. */
 export interface SupermarketConfig {

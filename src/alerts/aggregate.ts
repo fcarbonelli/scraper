@@ -19,6 +19,7 @@ import type { ErrorType } from '../shared/errors.js';
 
 const CRITICAL_THRESHOLD = 0.8;
 const WARNING_THRESHOLD = 0.3;
+const EARLY_ALERT_MIN_FAILURES = 10;
 
 interface SupermarketStat {
   supermarketId: string;
@@ -94,10 +95,11 @@ async function computeStats(scrapeRunId: string): Promise<SupermarketStat[]> {
       };
       bySupermarket.set(sm.id, stat);
     }
-    stat.total += 1;
     if (row.status === 'success') {
+      stat.total += 1;
       stat.succeeded += 1;
-    } else {
+    } else if (row.status === 'failed') {
+      stat.total += 1;
       stat.failed += 1;
       const key = (row.error_type ?? 'unknown') as ErrorType | 'unknown';
       stat.errorTypeCounts.set(key, (stat.errorTypeCounts.get(key) ?? 0) + 1);
@@ -209,6 +211,76 @@ export async function generateAlertsForRun(scrapeRunId: string): Promise<{
   }
 
   return { alertsCreated };
+}
+
+/**
+ * Create an early supermarket alert before the full run finalizes.
+ *
+ * This is intentionally conservative: it only fires after enough final failed
+ * products exist to make the signal useful, and it de-dupes per run/site/type.
+ */
+export async function generateEarlyAlertForRunSupermarket(
+  scrapeRunId: string | null,
+  supermarketId: string,
+): Promise<void> {
+  if (!scrapeRunId) return;
+
+  const stats = await computeStats(scrapeRunId);
+  const stat = stats.find((s) => s.supermarketId === supermarketId);
+  if (!stat || stat.total === 0 || stat.failed < EARLY_ALERT_MIN_FAILURES) return;
+
+  const failureRate = stat.failed / stat.total;
+  if (failureRate < WARNING_THRESHOLD) return;
+
+  const dom = dominantError(stat);
+  const alertType =
+    dom && dom.fraction > 0.7 && dom.type === 'selector_failed'
+      ? 'selector_broken'
+      : dom && dom.fraction > 0.7 && dom.type === 'rate_limited'
+        ? 'rate_limited'
+        : dom && dom.fraction > 0.7 && dom.type === 'auth_required'
+          ? 'auth_required'
+          : 'supermarket_unstable';
+
+  if (await hasExistingEarlyAlert(scrapeRunId, supermarketId, alertType)) return;
+
+  const errorsLine = topErrorsSummary(stat);
+  await createAlert({
+    severity: failureRate >= CRITICAL_THRESHOLD ? 'critical' : 'warning',
+    type: alertType,
+    supermarketId: stat.supermarketId,
+    title: `${stat.supermarketName} failing during run`,
+    message: `${stat.failed}/${stat.total} completed products are failing so far. Top errors: ${errorsLine}`,
+    context: {
+      run_id: scrapeRunId,
+      early: true,
+      failure_rate_so_far: `${Math.round(failureRate * 100)}%`,
+      total_completed_so_far: stat.total,
+      succeeded_so_far: stat.succeeded,
+      failed_so_far: stat.failed,
+      top_errors: errorsLine,
+    },
+  });
+}
+
+async function hasExistingEarlyAlert(
+  scrapeRunId: string,
+  supermarketId: string,
+  alertType: string,
+): Promise<boolean> {
+  const { data, error } = await db
+    .from('alerts')
+    .select('context')
+    .eq('supermarket_id', supermarketId)
+    .eq('type', alertType)
+    .eq('status', 'open')
+    .limit(20);
+  if (error) throw error;
+
+  return (data ?? []).some((row) => {
+    const context = row.context as Record<string, unknown>;
+    return context.run_id === scrapeRunId && context.early === true;
+  });
 }
 
 /**

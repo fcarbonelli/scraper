@@ -8,10 +8,17 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { z } from 'zod';
 import { db } from '../../shared/db.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
-import { parseQuery, PaginationQuery } from '../lib/parseQuery.js';
+import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
+import { defaultJobOptions, getQueue, type ScrapeJobData } from '../../shared/queue.js';
+import {
+  loadRunDiagnostics,
+  type FinalJobOutcome,
+  type SupermarketProductDebugRow,
+} from '../../shared/runDiagnostics.js';
 
 export const runsRouter = Router();
 
@@ -58,6 +65,114 @@ interface JobRow {
 interface MappingRow {
   id: string;
   supermarket_id: string;
+}
+
+interface SnapshotRow {
+  price: number;
+  list_price: number | null;
+  unit_price: number | null;
+  unit_price_per: string | null;
+  in_stock: boolean;
+  currency: string;
+  tier_used: string;
+  scraped_at: string;
+}
+
+interface EnqueuedScrapeJob {
+  name: 'scrape';
+  data: ScrapeJobData;
+  opts: ReturnType<typeof defaultJobOptions>;
+}
+
+function firstJoined<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+async function loadMappingDetails(
+  mappingIds: string[],
+): Promise<Map<string, SupermarketProductDebugRow>> {
+  if (mappingIds.length === 0) return new Map();
+
+  const { data, error } = await db
+    .from('supermarket_products')
+    .select(
+      `
+      id,
+      supermarket_id,
+      external_id,
+      external_url,
+      product_id,
+      products:product_id (
+        id,
+        name,
+        brand,
+        category,
+        metadata
+      ),
+      supermarkets:supermarket_id (
+        id,
+        name
+      )
+    `,
+    )
+    .in('id', mappingIds);
+  if (error) throw error;
+
+  return new Map(((data ?? []) as SupermarketProductDebugRow[]).map((m) => [m.id, m]));
+}
+
+async function loadLatestSnapshot(
+  supermarketProductId: string,
+): Promise<SnapshotRow | null> {
+  const { data, error } = await db
+    .from('price_snapshots')
+    .select(
+      'price, list_price, unit_price, unit_price_per, in_stock, currency, tier_used, scraped_at',
+    )
+    .eq('supermarket_product_id', supermarketProductId)
+    .order('scraped_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as SnapshotRow | null;
+}
+
+async function failedOutcomesForRun(
+  runId: string,
+): Promise<{
+  failures: FinalJobOutcome[];
+  detailsByMapping: Map<string, SupermarketProductDebugRow>;
+}> {
+  const diagnostics = await loadRunDiagnostics(runId);
+  if (!diagnostics) throw ApiError.notFound('Run');
+
+  const failures = diagnostics.finalOutcomes.filter((j) => j.status === 'failed');
+  const detailsByMapping = await loadMappingDetails(
+    failures.map((j) => j.supermarket_product_id),
+  );
+
+  return { failures, detailsByMapping };
+}
+
+function filterFailedOutcomes(
+  failures: FinalJobOutcome[],
+  detailsByMapping: Map<string, SupermarketProductDebugRow>,
+  filters: { supermarket?: string; error_type?: string; supermarket_product_ids?: string[] },
+): FinalJobOutcome[] {
+  const allowedIds = filters.supermarket_product_ids
+    ? new Set(filters.supermarket_product_ids)
+    : null;
+
+  return failures.filter((failure) => {
+    if (allowedIds && !allowedIds.has(failure.supermarket_product_id)) return false;
+    if (filters.error_type && failure.error_type !== filters.error_type) return false;
+    if (filters.supermarket) {
+      const mapping = detailsByMapping.get(failure.supermarket_product_id);
+      if (mapping?.supermarket_id !== filters.supermarket) return false;
+    }
+    return true;
+  });
 }
 
 runsRouter.get('/:id', async (req: Request, res: Response) => {
@@ -107,7 +222,7 @@ runsRouter.get('/:id', async (req: Request, res: Response) => {
     string,
     { total: number; succeeded: number; failed: number }
   > = {};
-  const byTier: Record<string, number> = { api: 0, html: 0, ai: 0 };
+  const byTier: Record<string, number> = { api: 0, html: 0, ai: 0, manual: 0 };
   const byErrorType: Record<string, number> = {};
 
   for (const j of finalByMapping.values()) {
@@ -120,7 +235,12 @@ runsRouter.get('/:id', async (req: Request, res: Response) => {
     bucket.total += 1;
     if (j.status === 'success') {
       bucket.succeeded += 1;
-      if (j.tier_used === 'api' || j.tier_used === 'html' || j.tier_used === 'ai') {
+      if (
+        j.tier_used === 'api' ||
+        j.tier_used === 'html' ||
+        j.tier_used === 'ai' ||
+        j.tier_used === 'manual'
+      ) {
         byTier[j.tier_used] = (byTier[j.tier_used] ?? 0) + 1;
       }
     } else if (j.status === 'failed') {
@@ -143,6 +263,191 @@ runsRouter.get('/:id', async (req: Request, res: Response) => {
         byTier,
         topErrors,
       },
+    }),
+  );
+});
+
+// =============================================================================
+// GET /v1/runs/:id/progress
+//
+// Live progress for dashboards. Unlike the final run row, this updates while
+// the run is still active and includes pending/retrying counts.
+// =============================================================================
+
+runsRouter.get('/:id/progress', async (req: Request, res: Response) => {
+  const diagnostics = await loadRunDiagnostics(req.params.id);
+  if (!diagnostics) throw ApiError.notFound('Run');
+
+  res.json(
+    success({
+      run: diagnostics.run,
+      progress: diagnostics.progress,
+    }),
+  );
+});
+
+// =============================================================================
+// GET /v1/runs/:id/failures
+//
+// Product-level failure drilldown for operations/debugging.
+// =============================================================================
+
+const FailuresQuery = PaginationQuery.extend({
+  supermarket: z.string().trim().min(1).optional(),
+  error_type: z.string().trim().min(1).optional(),
+});
+
+runsRouter.get('/:id/failures', async (req: Request, res: Response) => {
+  const q = parseQuery(req, FailuresQuery);
+  const page = req.pagination?.page ?? q.page;
+  const limit = req.pagination?.limit ?? q.limit;
+  const offset = req.pagination?.offset ?? (page - 1) * limit;
+
+  const { failures, detailsByMapping } = await failedOutcomesForRun(req.params.id);
+  const filtered = filterFailedOutcomes(failures, detailsByMapping, q);
+  const pageItems = filtered.slice(offset, offset + limit);
+
+  const rows = await Promise.all(
+    pageItems.map(async (failure) => {
+      const mapping = detailsByMapping.get(failure.supermarket_product_id);
+      const product = firstJoined(mapping?.products);
+      const supermarket = firstJoined(mapping?.supermarkets);
+
+      return {
+        job_execution_id: failure.id,
+        supermarket_product_id: failure.supermarket_product_id,
+        attempts: failure.attempts,
+        final_attempt: failure.attempt,
+        status: failure.status,
+        error_type: failure.error_type,
+        error_message: failure.error_message,
+        error_stack: failure.error_stack,
+        duration_ms: failure.duration_ms,
+        started_at: failure.started_at,
+        finished_at: failure.finished_at,
+        supermarket: supermarket
+          ? { id: supermarket.id, name: supermarket.name }
+          : mapping
+            ? { id: mapping.supermarket_id, name: mapping.supermarket_id }
+            : null,
+        supermarket_product: mapping
+          ? {
+              id: mapping.id,
+              external_id: mapping.external_id,
+              external_url: mapping.external_url,
+            }
+          : null,
+        product: product
+          ? {
+              id: product.id,
+              name: product.name,
+              brand: product.brand,
+              category: product.category,
+              metadata: product.metadata,
+            }
+          : null,
+        latest_snapshot: await loadLatestSnapshot(failure.supermarket_product_id),
+      };
+    }),
+  );
+
+  res.json(paginated(rows, filtered.length, page, limit));
+});
+
+// =============================================================================
+// POST /v1/runs/:id/retry-failed
+//
+// Creates a fresh recovery run with jobs for selected failures from the source
+// run. This keeps daily run history immutable and gives retries their own
+// progress/alerts.
+// =============================================================================
+
+const RetryFailedBody = z.object({
+  supermarket: z.string().trim().min(1).optional(),
+  error_type: z.string().trim().min(1).optional(),
+  supermarket_product_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+  max: z.number().int().min(1).max(1000).default(500),
+});
+
+runsRouter.post('/:id/retry-failed', async (req: Request, res: Response) => {
+  const body = parseBody(req, RetryFailedBody);
+  const { failures, detailsByMapping } = await failedOutcomesForRun(req.params.id);
+  const selected = filterFailedOutcomes(failures, detailsByMapping, body)
+    .filter((failure) => detailsByMapping.has(failure.supermarket_product_id))
+    .slice(0, body.max);
+
+  if (selected.length === 0) {
+    res.json(
+      success({
+        source_run_id: req.params.id,
+        retry_run_id: null,
+        total_enqueued: 0,
+        by_supermarket: {},
+      }),
+    );
+    return;
+  }
+
+  const bySupermarket: Record<string, number> = {};
+  for (const failure of selected) {
+    const mapping = detailsByMapping.get(failure.supermarket_product_id);
+    if (!mapping) continue;
+    bySupermarket[mapping.supermarket_id] = (bySupermarket[mapping.supermarket_id] ?? 0) + 1;
+  }
+
+  const runInsert = await db
+    .from('scrape_runs')
+    .insert({
+      started_at: new Date().toISOString(),
+      status: 'running',
+      total_jobs: selected.length,
+      metadata: {
+        recovery: true,
+        source_run_id: req.params.id,
+        by_supermarket: bySupermarket,
+        filters: {
+          supermarket: body.supermarket ?? null,
+          error_type: body.error_type ?? null,
+          supermarket_product_ids: body.supermarket_product_ids ?? null,
+        },
+      },
+    })
+    .select('id')
+    .single();
+  if (runInsert.error) throw runInsert.error;
+  const retryRunId = runInsert.data.id as string;
+
+  const jobsBySupermarket = new Map<string, EnqueuedScrapeJob[]>();
+  for (const failure of selected) {
+    const mapping = detailsByMapping.get(failure.supermarket_product_id);
+    if (!mapping) continue;
+
+    const jobs = jobsBySupermarket.get(mapping.supermarket_id) ?? [];
+    jobs.push({
+      name: 'scrape',
+      data: {
+        supermarketProductId: mapping.id,
+        supermarketId: mapping.supermarket_id,
+        externalId: mapping.external_id,
+        externalUrl: mapping.external_url,
+        scrapeRunId: retryRunId,
+        attempt: 1,
+      },
+      opts: defaultJobOptions(),
+    });
+    jobsBySupermarket.set(mapping.supermarket_id, jobs);
+  }
+
+  for (const [supermarketId, jobs] of jobsBySupermarket) {
+    await getQueue(supermarketId).addBulk(jobs);
+  }
+
+  res.status(201).json(
+    success({
+      source_run_id: req.params.id,
+      retry_run_id: retryRunId,
+      total_enqueued: selected.length,
+      by_supermarket: bySupermarket,
     }),
   );
 });

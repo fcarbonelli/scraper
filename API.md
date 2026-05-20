@@ -246,7 +246,7 @@ export type ApiErrorCode =
 // ============================================================================
 
 export type HealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown';
-export type Tier         = 'api' | 'html' | 'ai';
+export type Tier         = 'api' | 'html' | 'ai' | 'manual';
 export type RunStatus    = 'running' | 'completed' | 'failed';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
@@ -384,6 +384,23 @@ export interface RunBreakdown {
   bySupermarket: Record<string, { total: number; succeeded: number; failed: number }>;
   byTier: Partial<Record<Tier, number>>;
   topErrors: Array<{ type: string; count: number }>;
+}
+
+export interface RunProgress {
+  total_jobs: number;
+  distinct_started: number;
+  completed: number;
+  pending: number;
+  succeeded: number;
+  failed: number;
+  running_or_retrying: number;
+  retried_products: number;
+  latest_activity_at: string | null;
+  ms_since_latest_activity: number | null;
+  by_supermarket: Record<
+    string,
+    { total: number; pending: number; running_or_retrying: number; succeeded: number; failed: number }
+  >;
 }
 
 export interface RunDetail {
@@ -910,6 +927,31 @@ Items have the same shape as items in `/products/:id/history`.
 
 ---
 
+### `POST /v1/snapshots/manual`
+
+Operator override: insert a trusted manual price snapshot when scraping failed but the price was manually verified.
+
+#### Body
+
+```json
+{
+  "supermarket_product_id": "...",
+  "scrape_run_id": "...",
+  "price": 1234.56,
+  "list_price": null,
+  "unit_price": null,
+  "unit_price_per": null,
+  "in_stock": true,
+  "currency": "ARS",
+  "promotions": [],
+  "note": "Verified from supermarket website"
+}
+```
+
+Only `supermarket_product_id` and `price` are required. The inserted row uses `tier_used: "manual"`.
+
+---
+
 ## Runs
 
 A *run* is a single orchestration cycle (typically once per day). Each run enqueues N jobs; each job becomes one row in `job_executions` and (on success) one row in `price_snapshots`.
@@ -968,7 +1010,7 @@ Detailed breakdown of a single run.
         "coto":      { "total": 100, "succeeded": 100, "failed": 0 },
         "carrefour": { "total": 100, "succeeded": 98,  "failed": 2 }
       },
-      "byTier":    { "api": 2700, "html": 145, "ai": 2 },
+      "byTier":    { "api": 2700, "html": 145, "ai": 2, "manual": 0 },
       "topErrors": [
         { "type": "selector_failed", "count": 89 },
         { "type": "network_timeout", "count": 31 }
@@ -981,6 +1023,97 @@ Detailed breakdown of a single run.
 
 #### Errors
 - `404 NOT_FOUND`
+
+---
+
+### `GET /v1/runs/:id/progress`
+
+Live progress for a running or recently completed run. Use this for the operations dashboard while the scraper is still active.
+
+#### Response — 200
+
+```json
+{
+  "data": {
+    "run": { "id": "...", "status": "running", "total_jobs": 3000 },
+    "progress": {
+      "total_jobs": 3000,
+      "distinct_started": 2800,
+      "completed": 2700,
+      "pending": 200,
+      "succeeded": 2640,
+      "failed": 60,
+      "running_or_retrying": 100,
+      "retried_products": 12,
+      "latest_activity_at": "2026-04-30T09:32:14.000Z",
+      "ms_since_latest_activity": 12000,
+      "by_supermarket": {
+        "carrefour": {
+          "total": 100,
+          "pending": 0,
+          "running_or_retrying": 2,
+          "succeeded": 90,
+          "failed": 8
+        }
+      }
+    }
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+---
+
+### `GET /v1/runs/:id/failures`
+
+Paginated product-level failure drilldown.
+
+#### Query
+
+| Param | Type | Description |
+|---|---|---|
+| `page`, `limit` | int | Pagination |
+| `supermarket` | string | Filter failures to one supermarket |
+| `error_type` | string | Filter failures to one error type |
+
+#### Response — 200
+
+Each item includes the failed final attempt, supermarket/product metadata, URL, and latest known snapshot.
+
+---
+
+### `POST /v1/runs/:id/retry-failed`
+
+Creates a new recovery run from failed products in the source run.
+
+#### Body
+
+```json
+{
+  "supermarket": "carrefour",
+  "error_type": "network_timeout",
+  "supermarket_product_ids": ["..."],
+  "max": 500
+}
+```
+
+All body fields are optional. If `supermarket_product_ids` is present, only those mappings are retried.
+
+#### Response — 201
+
+```json
+{
+  "data": {
+    "source_run_id": "...",
+    "retry_run_id": "...",
+    "total_enqueued": 12,
+    "by_supermarket": { "carrefour": 12 }
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+If nothing matches, `retry_run_id` is `null` and `total_enqueued` is `0`.
 
 ---
 

@@ -142,10 +142,17 @@ export async function runDailyScrape(
     );
   }
 
-  // 4. Stamp total_jobs so the finalizer knows when we're done
+  // 4. Stamp total_jobs and per-supermarket plan so progress dashboards can
+  // show pending work before every job has emitted a job_execution row.
   await db
     .from('scrape_runs')
-    .update({ total_jobs: totalEnqueued })
+    .update({
+      total_jobs: totalEnqueued,
+      metadata: {
+        by_supermarket: bySupermarket,
+        filter_supermarket: opts.supermarketId ?? null,
+      },
+    })
     .eq('id', scrapeRunId);
 
   log.info({ totalEnqueued, bySupermarket }, 'daily enqueue complete');

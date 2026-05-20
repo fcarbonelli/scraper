@@ -2,8 +2,9 @@
  * Run finalizer.
  *
  * Periodically scans scrape_runs that are still 'running'. For each one:
- *   1. Decide whether the run is "done": no jobs in 'retrying' state and the
- *      latest activity is older than QUIESCENCE_MS.
+ *   1. Decide whether the run is "done": every planned product has a final
+ *      latest outcome (success or failed), and no product's latest outcome is
+ *      still retrying.
  *   2. Compute final stats from job_executions and write them to scrape_runs.
  *   3. Run alert aggregation (creates supermarket-level alerts as needed).
  *   4. Update each supermarket's `health_status`.
@@ -17,13 +18,14 @@
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { generateAlertsForRun, updateSupermarketHealth } from '../alerts/aggregate.js';
+import { loadRunDiagnostics, type RunProgress } from '../shared/runDiagnostics.js';
 
 /**
- * How long after the most recent job activity to wait before considering
- * a run "done". Should be longer than the longest retry delay (30 min for
- * rate_limited). 90 minutes gives a comfortable margin.
+ * Short guard for brand-new runs whose total_jobs has not been stamped yet.
+ * Once total_jobs is available, finalization is based on latest product
+ * outcomes rather than a long "quiet period".
  */
-const QUIESCENCE_MS = 90 * 60 * 1000;
+const ENQUEUE_GRACE_MS = 5 * 60 * 1000;
 
 /**
  * Hard ceiling: finalize after this many hours regardless of activity, so a
@@ -37,15 +39,6 @@ interface RunningRun {
   total_jobs: number;
 }
 
-interface JobStatusCounts {
-  total: number;
-  succeeded: number;
-  failed: number;
-  retrying: number;
-  /** ms since the latest started_at across job_executions in this run. */
-  msSinceLatestActivity: number | null;
-}
-
 async function loadRunningRuns(): Promise<RunningRun[]> {
   const { data, error } = await db
     .from('scrape_runs')
@@ -55,74 +48,31 @@ async function loadRunningRuns(): Promise<RunningRun[]> {
   return (data ?? []) as RunningRun[];
 }
 
-async function countByStatus(scrapeRunId: string): Promise<JobStatusCounts> {
-  // Pull only the columns we need. With ~3000 rows this is cheap.
-  const { data, error } = await db
-    .from('job_executions')
-    .select('status, started_at')
-    .eq('scrape_run_id', scrapeRunId);
-  if (error) throw error;
-
-  let succeeded = 0;
-  let failed = 0;
-  let retrying = 0;
-  let latestActivity = 0;
-
-  for (const row of data ?? []) {
-    const t = new Date(row.started_at).getTime();
-    if (t > latestActivity) latestActivity = t;
-    switch (row.status) {
-      case 'success':
-        succeeded += 1;
-        break;
-      case 'failed':
-        failed += 1;
-        break;
-      case 'retrying':
-        retrying += 1;
-        break;
-    }
-  }
-
-  return {
-    total: (data ?? []).length,
-    succeeded,
-    failed,
-    retrying,
-    msSinceLatestActivity: latestActivity > 0 ? Date.now() - latestActivity : null,
-  };
-}
-
 /**
  * Decide whether a run can be finalized. A run is "done" when:
- *   - it has no jobs in 'retrying' status, AND
- *   - the latest job_execution started over QUIESCENCE_MS ago
- *     (so we don't race with a worker that's about to write a row), OR
+ *   - every planned product has started at least once,
+ *   - no latest product outcome is still 'retrying',
+ *   - every latest product outcome is either success or final failed, OR
  *   - the run is older than MAX_RUN_AGE_MS (force finalize)
  */
 function isDone(
   run: RunningRun,
-  counts: JobStatusCounts,
+  progress: RunProgress,
   nowMs: number,
 ): boolean {
   const ageMs = nowMs - new Date(run.started_at).getTime();
   if (ageMs >= MAX_RUN_AGE_MS) return true;
 
-  if (counts.retrying > 0) return false;
-  if (counts.total === 0) {
-    // No job_executions yet — the orchestrator might still be enqueueing.
-    // Only finalize if the run has been around for a while.
-    return ageMs >= QUIESCENCE_MS;
-  }
-
-  if (counts.msSinceLatestActivity === null) return false;
-  return counts.msSinceLatestActivity >= QUIESCENCE_MS;
+  if (run.total_jobs === 0) return ageMs >= ENQUEUE_GRACE_MS;
+  if (progress.pending > 0) return false;
+  if (progress.running_or_retrying > 0) return false;
+  return progress.completed >= run.total_jobs;
 }
 
 /** Mark the run completed and trigger alerts. Idempotent against re-runs. */
 async function finalizeRun(
   run: RunningRun,
-  counts: JobStatusCounts,
+  progress: RunProgress,
 ): Promise<void> {
   const log = logger.child({ runId: run.id });
 
@@ -132,9 +82,9 @@ async function finalizeRun(
     .update({
       status: 'completed',
       finished_at: new Date().toISOString(),
-      succeeded: counts.succeeded,
-      failed: counts.failed,
-      retried: 0, // total retries — left as 0 in v1 (low signal)
+      succeeded: progress.succeeded,
+      failed: progress.failed,
+      retried: progress.retried_products,
       // total_jobs was set by the orchestrator at enqueue time
     })
     .eq('id', run.id)
@@ -158,9 +108,10 @@ async function finalizeRun(
 
   log.info(
     {
-      total: counts.total,
-      succeeded: counts.succeeded,
-      failed: counts.failed,
+      total: progress.total_jobs,
+      succeeded: progress.succeeded,
+      failed: progress.failed,
+      retried: progress.retried_products,
     },
     'run finalized',
   );
@@ -177,10 +128,12 @@ export async function finalizePendingRuns(): Promise<number> {
   const now = Date.now();
   let finalized = 0;
   for (const run of runs) {
-    const counts = await countByStatus(run.id);
-    if (!isDone(run, counts, now)) continue;
+    const diagnostics = await loadRunDiagnostics(run.id);
+    if (!diagnostics) continue;
+    const progress = diagnostics.progress;
+    if (!isDone(run, progress, now)) continue;
     try {
-      await finalizeRun(run, counts);
+      await finalizeRun(run, progress);
       finalized += 1;
     } catch (err) {
       logger.error({ err, runId: run.id }, 'failed to finalize run');

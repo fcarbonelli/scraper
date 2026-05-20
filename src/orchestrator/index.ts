@@ -3,7 +3,7 @@
  *
  * Two responsibilities:
  *   1. Fire `runDailyScrape` once per cron interval (env.SCRAPE_CRON).
- *   2. Run the finalizer every 10 minutes — finds completed scrape_runs
+ *   2. Run the finalizer every minute — finds completed scrape_runs
  *      and writes their final stats + alerts.
  *
  * Both run in the same process; both are tiny so it's not worth splitting.
@@ -27,7 +27,7 @@ import { finalizePendingRuns } from './finalize.js';
 
 initSentry('orchestrator');
 
-const FINALIZER_INTERVAL_MS = 10 * 60 * 1000;
+const FINALIZER_INTERVAL_MS = 60 * 1000;
 
 async function runScrapeWithErrorHandling(
   supermarketId?: string,
