@@ -124,6 +124,16 @@ const DEFAULT_LOGIN: LoginDefaults = {
   pick: 'first',
 };
 
+// Prefer dense regions first. The site's region dropdown starts with
+// "BS AS (NORTE)", but for product coverage CABA is usually a better first
+// bet. Anything not listed here keeps the site's original order after these.
+const REGION_PRIORITY = [
+  'CABA',
+  'BS AS (OESTE)',
+  'BS AS (NORTE)',
+  'BS AS (SUR)',
+] as const;
+
 function loadLoginDefaults(
   config: Record<string, unknown> | undefined,
 ): LoginDefaults {
@@ -526,7 +536,12 @@ async function pickFirstRealOption(
   //    prompt text on the site.
   const skip = field === 'seller' ? cfg.skipSellers ?? [] : cfg.skipRegions ?? [];
   const value = await page.evaluate(
-    (args: { sel: string; skip: string[] }): string | undefined => {
+    (args: {
+      sel: string;
+      skip: string[];
+      field: 'region' | 'seller';
+      regionPriority: readonly string[];
+    }): string | undefined => {
       type Opt = { value: string; text?: string; textContent?: string | null };
       type Sel = { options: ArrayLike<Opt> } | null;
       const el = (globalThis as { document?: { querySelector(s: string): unknown } })
@@ -534,6 +549,7 @@ async function pickFirstRealOption(
       if (!el) return undefined;
       const placeholderText = /^(seleccion|elegi|elija|--)/i;
       const placeholderValues = new Set(['', '0', '-1', 'null', 'undefined']);
+      const candidates: Array<{ value: string; index: number }> = [];
       for (let i = 0; i < el.options.length; i++) {
         const o = el.options[i];
         if (!o || !o.value) continue;
@@ -541,11 +557,20 @@ async function pickFirstRealOption(
         const txt = (o.text ?? o.textContent ?? '').trim();
         if (placeholderText.test(txt)) continue;
         if (args.skip.indexOf(o.value) !== -1) continue;
-        return o.value;
+        candidates.push({ value: o.value, index: i });
       }
-      return undefined;
+      if (args.field !== 'region') return candidates[0]?.value;
+
+      candidates.sort((a, b) => {
+        const ai = args.regionPriority.indexOf(a.value);
+        const bi = args.regionPriority.indexOf(b.value);
+        const ar = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+        const br = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+        return ar === br ? a.index - b.index : ar - br;
+      });
+      return candidates[0]?.value;
     },
-    { sel: selector, skip },
+    { sel: selector, skip, field, regionPriority: REGION_PRIORITY },
   );
   if (!value) return undefined;
   await page.selectOption(selector, value);
@@ -952,12 +977,12 @@ export async function refreshCookie(
     const cfgOverrides =
       (config.config?.['maxiCarrefourLogin'] as LaunchOptions | undefined) ?? {};
     const finalLaunch: LaunchOptions = { ...cfgOverrides, ...(opts.launchOpts ?? {}) };
-    // 3 attempts, optionally rotating regions: keeps total Playwright
-    // load per refresh modest so we don't tank reCAPTCHA scores. The
-    // recently-validated-cookie gate in the adapter prevents most other
-    // products from triggering a refresh in the first place.
-    const maxAttempts = opts.maxAttempts ?? 3;
-    const maxSellersPerRegion = opts.maxSellersPerRegion ?? 2;
+    // Try enough sucursales to find product coverage, but keep a hard cap so
+    // one genuinely unavailable EAN can't consume the whole run. With the
+    // region priority above this means roughly:
+    //   CABA x3 → BS AS (OESTE) x3 → BS AS (NORTE) x3 → BS AS (SUR) x3.
+    const maxAttempts = opts.maxAttempts ?? 12;
+    const maxSellersPerRegion = opts.maxSellersPerRegion ?? 3;
 
     // Track per-region misses so we know when to abandon a region.
     const skipSellers: string[] = [];
