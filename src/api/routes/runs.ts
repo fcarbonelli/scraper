@@ -89,6 +89,14 @@ function firstJoined<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null;
 }
 
+function pathParam(req: Request, name: string): string {
+  const value = req.params[name];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw ApiError.badRequest(`Missing path parameter: ${name}`);
+  }
+  return value;
+}
+
 async function loadMappingDetails(
   mappingIds: string[],
 ): Promise<Map<string, SupermarketProductDebugRow>> {
@@ -275,7 +283,8 @@ runsRouter.get('/:id', async (req: Request, res: Response) => {
 // =============================================================================
 
 runsRouter.get('/:id/progress', async (req: Request, res: Response) => {
-  const diagnostics = await loadRunDiagnostics(req.params.id);
+  const runId = pathParam(req, 'id');
+  const diagnostics = await loadRunDiagnostics(runId);
   if (!diagnostics) throw ApiError.notFound('Run');
 
   res.json(
@@ -298,12 +307,13 @@ const FailuresQuery = PaginationQuery.extend({
 });
 
 runsRouter.get('/:id/failures', async (req: Request, res: Response) => {
+  const runId = pathParam(req, 'id');
   const q = parseQuery(req, FailuresQuery);
   const page = req.pagination?.page ?? q.page;
   const limit = req.pagination?.limit ?? q.limit;
   const offset = req.pagination?.offset ?? (page - 1) * limit;
 
-  const { failures, detailsByMapping } = await failedOutcomesForRun(req.params.id);
+  const { failures, detailsByMapping } = await failedOutcomesForRun(runId);
   const filtered = filterFailedOutcomes(failures, detailsByMapping, q);
   const pageItems = filtered.slice(offset, offset + limit);
 
@@ -370,8 +380,9 @@ const RetryFailedBody = z.object({
 });
 
 runsRouter.post('/:id/retry-failed', async (req: Request, res: Response) => {
+  const sourceRunId = pathParam(req, 'id');
   const body = parseBody(req, RetryFailedBody);
-  const { failures, detailsByMapping } = await failedOutcomesForRun(req.params.id);
+  const { failures, detailsByMapping } = await failedOutcomesForRun(sourceRunId);
   const selected = filterFailedOutcomes(failures, detailsByMapping, body)
     .filter((failure) => detailsByMapping.has(failure.supermarket_product_id))
     .slice(0, body.max);
@@ -379,7 +390,7 @@ runsRouter.post('/:id/retry-failed', async (req: Request, res: Response) => {
   if (selected.length === 0) {
     res.json(
       success({
-        source_run_id: req.params.id,
+        source_run_id: sourceRunId,
         retry_run_id: null,
         total_enqueued: 0,
         by_supermarket: {},
@@ -403,7 +414,7 @@ runsRouter.post('/:id/retry-failed', async (req: Request, res: Response) => {
       total_jobs: selected.length,
       metadata: {
         recovery: true,
-        source_run_id: req.params.id,
+        source_run_id: sourceRunId,
         by_supermarket: bySupermarket,
         filters: {
           supermarket: body.supermarket ?? null,
@@ -444,7 +455,7 @@ runsRouter.post('/:id/retry-failed', async (req: Request, res: Response) => {
 
   res.status(201).json(
     success({
-      source_run_id: req.params.id,
+      source_run_id: sourceRunId,
       retry_run_id: retryRunId,
       total_enqueued: selected.length,
       by_supermarket: bySupermarket,
