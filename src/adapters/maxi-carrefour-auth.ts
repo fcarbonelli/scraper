@@ -171,6 +171,13 @@ export interface LaunchOptions {
    * machines without Chrome installed).
    */
   useSystemChrome?: boolean;
+  /**
+   * Optional explicit Chromium channel. Useful for local debugging when
+   * reCAPTCHA behaves differently across installed browsers.
+   *
+   * Examples: "chrome", "msedge".
+   */
+  browserChannel?: 'chrome' | 'msedge';
 }
 
 export async function loginAndGetCookie(
@@ -181,6 +188,7 @@ export async function loginAndGetCookie(
   const startedAt = Date.now();
   const headless = launchOpts.headless ?? true;
   const useSystemChrome = launchOpts.useSystemChrome ?? true;
+  const browserChannel = launchOpts.browserChannel;
 
   let browser: Browser | undefined;
   try {
@@ -189,7 +197,13 @@ export async function loginAndGetCookie(
     // because it ships without a number of fingerprintable Chrome APIs.
     // Fall back to bundled chromium if Chrome isn't installed.
     const launchAttempts: Array<Parameters<typeof chromium.launch>[0]> = [];
-    if (useSystemChrome) {
+    if (browserChannel) {
+      launchAttempts.push({
+        headless,
+        channel: browserChannel,
+        args: ['--disable-blink-features=AutomationControlled', '--lang=es-AR'],
+      });
+    } else if (useSystemChrome) {
       launchAttempts.push({
         headless,
         channel: 'chrome',
@@ -202,9 +216,11 @@ export async function loginAndGetCookie(
     });
 
     let lastErr: unknown;
+    let launchedChannel: string | undefined;
     for (const opts of launchAttempts) {
       try {
         browser = await chromium.launch(opts);
+        launchedChannel = opts?.channel;
         logger.debug(
           { channel: opts?.channel ?? 'bundled', headless },
           'maxi-carrefour: browser launched',
@@ -225,12 +241,17 @@ export async function loginAndGetCookie(
       );
     }
 
+    const contextUserAgent =
+      launchedChannel === 'msedge'
+        ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0'
+        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
     const ctx: BrowserContext = await browser.newContext({
       locale: 'es-AR',
       timezoneId: 'America/Argentina/Buenos_Aires',
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      userAgent: contextUserAgent,
       viewport: { width: 1366, height: 900 },
     });
     // Hide the navigator.webdriver flag — reCAPTCHA's bot heuristics check it.
@@ -258,10 +279,33 @@ export async function loginAndGetCookie(
       await ingresarBtn.click({ trial: false }).catch(() => undefined);
     }
 
-    // Step 1: choose "comerciante" (business). The visible card has id="business"
-    // and an onclick="goToStep2()" that flips the radio + reveals step2.
-    logger.debug({}, 'maxi-carrefour: clicking business card');
+    // Step 1: choose "comerciante" (business). The visible #business card has
+    // onclick="goToStep2()" which only does setStep(2) + a GA event — it does
+    // NOT actually check the hidden radio button. The radios:
+    //
+    //   <input type="radio" name="delivery" value="customer" style="display:none;">
+    //   <input type="radio" name="delivery" value="business" style="display:none;">
+    //
+    // are both unchecked at form-submit time unless we explicitly check one.
+    // Real users probably pass server validation by some lenient default,
+    // BUT crucially the server appears to use this field to bind the session
+    // to "comerciante" mode (= business with a seller). Without it, the
+    // PHPSESSID gets set but no seller binding happens — every product
+    // request comes back data-price="private" even after a "successful"
+    // login. That's exactly what we observed in production.
+    logger.debug({}, 'maxi-carrefour: clicking business card + setting delivery=business radio');
     await page.locator('#business').click();
+    await page.evaluate(() => {
+      type Doc = { querySelector(s: string): unknown };
+      type Radio = { checked: boolean; dispatchEvent(e: Event): boolean };
+      const radio = (globalThis as { document?: Doc }).document?.querySelector(
+        'input[name="delivery"][value="business"]',
+      ) as Radio | null;
+      if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
 
     // Step 2: pick region (province), then load + pick a seller.
     //

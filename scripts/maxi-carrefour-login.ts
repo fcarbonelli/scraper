@@ -16,8 +16,17 @@
  *   npm run maxi-carrefour:login -- --dry-run   # login, print cookie, no DB
  *   npm run maxi-carrefour:login -- --headed    # show the browser window
  *   npm run maxi-carrefour:login -- --no-chrome # use bundled chromium
+ *   npm run maxi-carrefour:login -- --edge      # use installed Microsoft Edge
  *   npm run maxi-carrefour:login -- --region=BS_AS_NORTE --seller=219
  *                                               # pin a specific sucursal
+ *   npm run maxi-carrefour:login -- --dry-run --probe=7791130002240,7793253004361
+ *                                               # after harvesting cookie,
+ *                                               #   probe each EAN and report
+ *                                               #   data-price (real | private |
+ *                                               #   missing). Use this to
+ *                                               #   validate that the login
+ *                                               #   actually binds a seller
+ *                                               #   before deploying.
  */
 
 import { logger } from '../src/shared/logger.js';
@@ -31,8 +40,10 @@ interface Flags {
   dryRun: boolean;
   headless: boolean;
   useSystemChrome: boolean;
+  browserChannel?: 'chrome' | 'msedge';
   region?: string;
   seller?: string;
+  probeEans?: string[];
 }
 
 function parseFlags(argv: readonly string[]): Flags {
@@ -42,10 +53,57 @@ function parseFlags(argv: readonly string[]): Flags {
     useSystemChrome: !argv.includes('--no-chrome'),
   };
   for (const arg of argv) {
+    if (arg === '--edge') flags.browserChannel = 'msedge';
+    if (arg === '--chrome') flags.browserChannel = 'chrome';
+    if (arg.startsWith('--channel=')) {
+      const channel = arg.slice('--channel='.length);
+      if (channel === 'chrome' || channel === 'msedge') flags.browserChannel = channel;
+    }
     if (arg.startsWith('--region=')) flags.region = arg.slice('--region='.length);
     if (arg.startsWith('--seller=')) flags.seller = arg.slice('--seller='.length);
+    if (arg.startsWith('--probe=')) {
+      flags.probeEans = arg
+        .slice('--probe='.length)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
   }
   return flags;
+}
+
+/**
+ * Hit `getProductBasicData` for a single EAN with the harvested cookie and
+ * extract the cart_button's `data-price`. Mirrors what the adapter does so
+ * the result here predicts what the adapter will see.
+ */
+async function probeEan(
+  cookie: string,
+  ean: string,
+): Promise<{ status: number; dataPrice: string | undefined; description: string | undefined }> {
+  const url =
+    `https://comerciante.carrefour.com.ar/products?currentUrl=p/${encodeURIComponent(ean)}` +
+    `&method=getProductBasicData`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,*/*',
+      'Accept-Language': 'es-AR,es;q=0.9',
+      Referer: 'https://comerciante.carrefour.com.ar/',
+      'X-Requested-With': 'XMLHttpRequest',
+      Cookie: `PHPSESSID=${cookie}`,
+    },
+  });
+  if (!res.ok) return { status: res.status, dataPrice: undefined, description: undefined };
+  const html = await res.text();
+  const tagMatch = html.match(
+    /<(?:div|button)\b[^>]*class=["'][^"']*\bcart_button\b[^"']*["'][^>]*>/i,
+  );
+  const dataPrice = tagMatch?.[0].match(/data-price=["']([^"']+)["']/i)?.[1];
+  const description = tagMatch?.[0].match(/data-description=["']([^"']+)["']/i)?.[1];
+  return { status: res.status, dataPrice, description };
 }
 
 async function main(): Promise<void> {
@@ -74,6 +132,7 @@ async function main(): Promise<void> {
     result = await loginAndGetCookie(loginCfg, logger, {
       headless: flags.headless,
       useSystemChrome: flags.useSystemChrome,
+      browserChannel: flags.browserChannel,
     });
   } catch (err) {
     logger.error({ err }, 'maxi-carrefour: login failed');
@@ -84,6 +143,38 @@ async function main(): Promise<void> {
   console.log('\n--- LoginResult ---');
   console.log(JSON.stringify(result, null, 2));
   console.log(`\nPHPSESSID = ${result.phpSessId}`);
+
+  // Optional verification: probe each EAN with the harvested cookie and
+  // report data-price. This is the ground-truth test of whether the login
+  // actually bound a seller — if data-price is "private" for everything,
+  // the cookie isn't usable and there's no point persisting it.
+  if (flags.probeEans?.length) {
+    console.log('\n--- Cookie verification probes ---');
+    let realCount = 0;
+    for (const ean of flags.probeEans) {
+      try {
+        const { status, dataPrice, description } = await probeEan(result.phpSessId, ean);
+        const verdict =
+          dataPrice === undefined
+            ? `MISSING cart_button (status=${status})`
+            : dataPrice === 'private' || dataPrice === ''
+            ? 'PRIVATE — cookie does NOT unlock prices for this EAN'
+            : `REAL price = ${dataPrice}`;
+        if (dataPrice && dataPrice !== 'private' && dataPrice !== '') realCount++;
+        console.log(`  ${ean}  →  ${verdict}${description ? ` [${description.slice(0, 60)}]` : ''}`);
+      } catch (err) {
+        console.log(`  ${ean}  →  ERROR: ${(err as Error).message}`);
+      }
+    }
+    console.log(
+      `\nVerdict: ${realCount}/${flags.probeEans.length} EANs unlocked. ` +
+        (realCount === 0
+          ? 'Login flow is broken — cookie does not bind a seller. Investigate before deploying.'
+          : realCount < flags.probeEans.length
+          ? 'Cookie works but some EANs are not stocked at the picked sucursal. Try a different region/seller.'
+          : 'All EANs unlocked — login flow is healthy.'),
+    );
+  }
 
   if (flags.dryRun) {
     console.log('\n(dry-run: not persisting to DB)');
