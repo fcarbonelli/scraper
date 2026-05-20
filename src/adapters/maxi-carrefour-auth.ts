@@ -164,11 +164,11 @@ export interface LaunchOptions {
    */
   headless?: boolean;
   /**
-   * Default `true`. When true, prefer the system-installed Google Chrome
-   * over Playwright's bundled chromium-headless-shell — Google's reCAPTCHA
-   * Enterprise scores real Chrome much higher than Playwright's headless
-   * build. Set to `false` to fall back to bundled chromium (e.g. on CI
-   * machines without Chrome installed).
+   * Default `true`. When true, prefer installed system browsers over
+   * Playwright's bundled chromium-headless-shell — reCAPTCHA Enterprise
+   * scores real browsers much higher than Playwright's headless build.
+   * Set to `false` to fall back to bundled chromium (e.g. on CI machines
+   * without a system browser installed).
    */
   useSystemChrome?: boolean;
   /**
@@ -192,10 +192,14 @@ export async function loginAndGetCookie(
 
   let browser: Browser | undefined;
   try {
-    // Prefer the system Chrome ("channel: 'chrome'") — Playwright's bundled
+    // Prefer installed system browsers — Playwright's bundled
     // chromium-headless-shell is consistently flagged by reCAPTCHA Enterprise
-    // because it ships without a number of fingerprintable Chrome APIs.
-    // Fall back to bundled chromium if Chrome isn't installed.
+    // because it ships without a number of fingerprintable browser APIs.
+    //
+    // Edge is tried before Chrome because Maxi Carrefour's reCAPTCHA flow
+    // currently passes in Edge while Chrome/incognito times out for the same
+    // form inputs. If Edge isn't installed, we fall through to Chrome and
+    // finally bundled Chromium.
     const launchAttempts: Array<Parameters<typeof chromium.launch>[0]> = [];
     if (browserChannel) {
       launchAttempts.push({
@@ -204,6 +208,11 @@ export async function loginAndGetCookie(
         args: ['--disable-blink-features=AutomationControlled', '--lang=es-AR'],
       });
     } else if (useSystemChrome) {
+      launchAttempts.push({
+        headless,
+        channel: 'msedge',
+        args: ['--disable-blink-features=AutomationControlled', '--lang=es-AR'],
+      });
       launchAttempts.push({
         headless,
         channel: 'chrome',
@@ -940,9 +949,8 @@ export async function refreshCookie(
 
   const promise = (async () => {
     const baseLoginCfg = loadLoginDefaults(config.config);
-    const cfgOverrides = (config.config?.['maxiCarrefourLogin'] as
-      | { headless?: boolean; useSystemChrome?: boolean }
-      | undefined) ?? {};
+    const cfgOverrides =
+      (config.config?.['maxiCarrefourLogin'] as LaunchOptions | undefined) ?? {};
     const finalLaunch: LaunchOptions = { ...cfgOverrides, ...(opts.launchOpts ?? {}) };
     // 3 attempts, optionally rotating regions: keeps total Playwright
     // load per refresh modest so we don't tank reCAPTCHA scores. The
