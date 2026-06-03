@@ -61,6 +61,16 @@ export interface ProductInfo {
   name?: string;
   brand?: string;
   category?: string;
+  /** Client taxonomy: subcategory within the category (e.g. "DESINF", "C/ FRAG"). */
+  subcategory?: string;
+  /** Client taxonomy: parent manufacturer (e.g. "GRUPO AYUDIN", "UNILEVER"). */
+  manufacturer?: string;
+  /** Client taxonomy: size/format (e.g. "4L", "360", "900"). */
+  format?: string;
+  /** Client taxonomy: variety/fragrance (e.g. "GL", "OR", "LAV"). */
+  variety?: string;
+  /** Client taxonomy: human-readable description for forms/reports. */
+  descriptionForms?: string;
   unit?: string;
   ean?: string;
   imageUrl?: string;

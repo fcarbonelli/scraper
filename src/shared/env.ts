@@ -40,6 +40,11 @@ const EnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional().default(''),
   TELEGRAM_CHAT_ID: z.string().optional().default(''),
   TELEGRAM_MIN_SEVERITY: Severity.default('warning'),
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional().default(''),
+
+  // Public-facing URL of the API (used to register the Telegram webhook).
+  // Only needed if TELEGRAM_WEBHOOK_SECRET is set.
+  API_BASE_URL: z.string().url().optional().or(z.literal('')).default(''),
 
   // Per-supermarket auth (optional — DB-driven config preferred)
   // Carrefour Maxi Pedido: prices are gated behind a PHPSESSID cookie. The

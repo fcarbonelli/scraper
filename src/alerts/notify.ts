@@ -15,6 +15,11 @@
 
 import { env } from '../shared/env.js';
 import { logger } from '../shared/logger.js';
+import {
+  sendMessage,
+  callbackData,
+  type InlineKeyboard,
+} from '../telegram/bot.js';
 
 export type Severity = 'info' | 'warning' | 'critical';
 
@@ -39,6 +44,30 @@ export interface AlertPayload {
   url?: string;
   /** Optional structured context shown as key/value list. */
   context?: Record<string, string | number | boolean | null | undefined>;
+  /** Optional inline action buttons for this alert. */
+  actions?: AlertAction[];
+}
+
+export interface AlertAction {
+  label: string;
+  /** Callback data string sent back when the button is pressed. */
+  data: string;
+}
+
+/**
+ * Build standard action buttons for a supermarket-level alert.
+ *
+ * Telegram limits callback_data to 64 bytes, so we pass only the alert_id
+ * in the callback and look up the run_id + supermarket_id from the alert's
+ * context column when the button is pressed.
+ */
+export function buildSupermarketAlertActions(alertId: string): AlertAction[] {
+  // Use short prefix + alertId (UUIDs are 36 chars, prefix+colon = ~40 total)
+  return [
+    { label: '🔄 Retry failed', data: callbackData('retry', alertId) },
+    { label: '📋 Fill yesterday', data: callbackData('fill', alertId) },
+    { label: '✓ Acknowledge', data: callbackData('ack', alertId) },
+  ];
 }
 
 /**
@@ -60,38 +89,10 @@ export async function notifyAlert(payload: AlertPayload): Promise<boolean> {
   }
 
   const text = formatMessage(payload);
+  const keyboard = buildKeyboard(payload.actions);
 
-  try {
-    const res = await fetch(
-      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: env.TELEGRAM_CHAT_ID,
-          text,
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-        }),
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      logger.error(
-        { status: res.status, errorText, title: payload.title },
-        'Telegram API returned non-2xx',
-      );
-      return false;
-    }
-
-    return true;
-  } catch (err) {
-    // Don't let notification failures crash the caller
-    logger.error({ err, title: payload.title }, 'failed to send Telegram alert');
-    return false;
-  }
+  const messageId = await sendMessage(text, keyboard);
+  return messageId !== null;
 }
 
 function isConfigured(): boolean {
@@ -126,6 +127,13 @@ function formatMessage(p: AlertPayload): string {
   }
 
   return lines.join('\n');
+}
+
+/** Convert AlertActions into the inline keyboard format Telegram expects. */
+function buildKeyboard(actions?: AlertAction[]): InlineKeyboard | undefined {
+  if (!actions || actions.length === 0) return undefined;
+  // One button per row for readability on mobile
+  return actions.map((a) => [{ text: a.label, callback_data: a.data }]);
 }
 
 /** Escape user-controlled strings for safe HTML insertion (Telegram subset). */

@@ -25,6 +25,7 @@
     "test:telegram": "tsx --env-file=.env scripts/test-telegram.ts",
     "maxi-carrefour:login": "tsx --env-file=.env scripts/maxi-carrefour-login.ts",
     "db:setup": "tsx --env-file=.env scripts/setup-db.ts",
+    "db:seed-taxonomy": "tsx --env-file=.env scripts/seed-taxonomy.ts",
     "scrape:url": "tsx --env-file=.env scripts/scrape-url.ts",
     "scrape:bulk": "tsx --env-file=.env scripts/import-urls.ts",
     "apikey:create": "tsx --env-file=.env scripts/create-api-key.ts"

@@ -22,6 +22,8 @@ import { supermarketsRouter } from './routes/supermarkets.js';
 import { snapshotsRouter } from './routes/snapshots.js';
 import { runsRouter } from './routes/runs.js';
 import { alertsRouter } from './routes/alerts.js';
+import { dataRouter } from './routes/data.js';
+import { telegramRouter } from './routes/telegram.js';
 
 export function buildApp(): Express {
   const app = express();
@@ -45,8 +47,9 @@ export function buildApp(): Express {
   // JSON body parsing for PATCH endpoints.
   app.use(express.json({ limit: '64kb' }));
 
-  // Public route — no auth.
+  // Public routes — no auth.
   app.use('/v1/health', healthRouter);
+  app.use('/telegram', telegramRouter);
 
   // Everything below requires a valid API key + has pagination available.
   app.use('/v1', requireApiKey, pagination);
@@ -56,6 +59,7 @@ export function buildApp(): Express {
   app.use('/v1/snapshots', snapshotsRouter);
   app.use('/v1/runs', runsRouter);
   app.use('/v1/alerts', alertsRouter);
+  app.use('/v1/data', dataRouter);
 
   // 404 + error handlers (must be last).
   app.use(notFoundHandler);

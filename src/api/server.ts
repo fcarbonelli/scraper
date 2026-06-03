@@ -9,6 +9,7 @@ import { env } from '../shared/env.js';
 import { logger } from '../shared/logger.js';
 import { initSentry, captureError } from '../shared/sentry.js';
 import { buildApp } from './app.js';
+import { registerWebhook } from '../telegram/bot.js';
 
 initSentry('api');
 
@@ -19,6 +20,12 @@ function main(): void {
 
   const server = app.listen(env.API_PORT, () => {
     logger.info({ port: env.API_PORT }, 'API listening');
+
+    // Register Telegram webhook after the server is ready to accept requests
+    if (env.TELEGRAM_WEBHOOK_SECRET && env.API_BASE_URL) {
+      const webhookUrl = `${env.API_BASE_URL}/telegram/callback`;
+      void registerWebhook(webhookUrl);
+    }
   });
 
   const shutdown = (signal: string): void => {

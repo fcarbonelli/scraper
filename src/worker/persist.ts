@@ -8,7 +8,7 @@
 
 import { db } from '../shared/db.js';
 import type { Logger } from '../shared/logger.js';
-import type { ScrapeResult } from '../adapters/types.js';
+import type { Promotion, ScrapeResult } from '../adapters/types.js';
 import type { ClassifiedError } from './classifyError.js';
 
 // =============================================================================
@@ -98,6 +98,60 @@ export async function loadJobInput(
 }
 
 // =============================================================================
+// Promotion flattening — extract the first two promotions into discrete columns
+// =============================================================================
+
+interface FlatPromotions {
+  promotion_1: string | null;
+  promotion_2: string | null;
+  offer_price_1: number | null;
+  offer_price_2: number | null;
+  unit_discount: number | null;
+}
+
+/**
+ * Flatten the promotions array into the discrete columns the client expects.
+ * Computes offer prices from discount percentages when available.
+ */
+function flattenPromotions(
+  promotions: Promotion[] | undefined,
+  regularPrice: number,
+): FlatPromotions {
+  const promos = promotions ?? [];
+  const p1 = promos[0];
+  const p2 = promos[1];
+
+  const computeOfferPrice = (promo: Promotion | undefined): number | null => {
+    if (!promo) return null;
+    if (promo.discountPct != null && promo.discountPct > 0) {
+      return Math.round(regularPrice * (1 - promo.discountPct) * 100) / 100;
+    }
+    if (promo.discountAmount != null && promo.discountAmount > 0) {
+      return Math.round((regularPrice - promo.discountAmount) * 100) / 100;
+    }
+    return null;
+  };
+
+  // Unit discount = largest percentage discount across all promotions
+  let maxDiscountPct: number | null = null;
+  for (const promo of promos) {
+    if (promo.discountPct != null && promo.discountPct > 0) {
+      if (maxDiscountPct === null || promo.discountPct > maxDiscountPct) {
+        maxDiscountPct = promo.discountPct;
+      }
+    }
+  }
+
+  return {
+    promotion_1: p1?.description ?? null,
+    promotion_2: p2?.description ?? null,
+    offer_price_1: computeOfferPrice(p1),
+    offer_price_2: computeOfferPrice(p2),
+    unit_discount: maxDiscountPct,
+  };
+}
+
+// =============================================================================
 // Job lifecycle: start -> success | failure
 // =============================================================================
 
@@ -147,6 +201,7 @@ export async function recordJobSuccess(
 ): Promise<void> {
   const { jobExecutionId, scrapeRunId, supermarketProductId, result, durationMs } = args;
   const finishedAt = new Date().toISOString();
+  const flat = flattenPromotions(result.promotions, result.price);
 
   // 1. price_snapshots row
   const snapshotInsert = db.from('price_snapshots').insert({
@@ -162,6 +217,12 @@ export async function recordJobSuccess(
     tier_used: result.tierUsed,
     promotions: result.promotions ?? [],
     raw_data: result.rawData ?? {},
+    offer_price_1: flat.offer_price_1,
+    offer_price_2: flat.offer_price_2,
+    promotion_1: flat.promotion_1,
+    promotion_2: flat.promotion_2,
+    unit_discount: flat.unit_discount,
+    site_product_name: result.productInfo?.name ?? null,
   });
 
   // 2. job_executions update

@@ -6,11 +6,17 @@
  *   - your chat_id is correct
  *   - the message formatting looks how you want
  *
+ * Pass `--buttons` to also send a test message with interactive action
+ * buttons (retry / fill / acknowledge). Requires TELEGRAM_WEBHOOK_SECRET
+ * and API_BASE_URL to be set so Telegram knows where to send callbacks.
+ *
  * Usage:
  *   npx tsx --env-file=.env scripts/test-telegram.ts
+ *   npx tsx --env-file=.env scripts/test-telegram.ts --buttons
  */
 
 import { notifyAlert } from '../src/alerts/notify.js';
+import { callbackData } from '../src/telegram/bot.js';
 import { env } from '../src/shared/env.js';
 import { logger } from '../src/shared/logger.js';
 
@@ -23,7 +29,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  logger.info({ minSeverity: env.TELEGRAM_MIN_SEVERITY }, 'sending test alerts');
+  const withButtons = process.argv.includes('--buttons');
+
+  logger.info(
+    { minSeverity: env.TELEGRAM_MIN_SEVERITY, withButtons },
+    'sending test alerts',
+  );
 
   const results: Record<string, boolean> = {};
 
@@ -55,6 +66,34 @@ async function main(): Promise<void> {
     },
     url: 'https://example.com/alerts/abc-123',
   });
+
+  if (withButtons) {
+    if (!env.TELEGRAM_WEBHOOK_SECRET || !env.API_BASE_URL) {
+      logger.warn(
+        'TELEGRAM_WEBHOOK_SECRET and API_BASE_URL must be set for buttons to work. ' +
+          'Sending buttons anyway so you can see how they look, but pressing them will fail.',
+      );
+    }
+
+    // fake alert ID — pressing the buttons will return "alert not found"
+    // which is fine for a visual test
+    const fakeAlertId = '00000000-0000-0000-0000-000000000000';
+    results.buttons = await notifyAlert({
+      severity: 'warning',
+      title: 'Test alert WITH buttons',
+      body: '3 products failed for coto. Try pressing the buttons below!',
+      context: {
+        supermarket: 'coto',
+        failed: 3,
+        total: 50,
+      },
+      actions: [
+        { label: '🔄 Retry failed', data: callbackData('retry', fakeAlertId) },
+        { label: '📋 Fill yesterday', data: callbackData('fill', fakeAlertId) },
+        { label: '✓ Acknowledge', data: callbackData('ack', fakeAlertId) },
+      ],
+    });
+  }
 
   logger.info({ results }, 'test alerts sent');
   if (!results.warning && !results.critical) {

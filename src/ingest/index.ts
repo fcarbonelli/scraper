@@ -19,6 +19,7 @@ import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { getAdapter } from '../adapters/registry.js';
 import type { ScrapeContext } from '../adapters/types.js';
+import { lookupTaxonomy } from '../shared/taxonomy.js';
 import { processJob, type ProcessJobResult } from '../worker/processJob.js';
 
 export interface SupermarketConfig {
@@ -178,6 +179,9 @@ export async function ensureSupermarketProduct(
     ? await adapter.probe(ctx)
     : (await adapter.scrape(ctx)).productInfo ?? {};
 
+  // Auto-enrich from client's taxonomy reference when the EAN is known.
+  const taxonomy = info.ean ? lookupTaxonomy(info.ean) : undefined;
+
   // Reuse master product by EAN if known; otherwise insert a new master row.
   let productId: string | undefined;
   if (info.ean) {
@@ -187,7 +191,21 @@ export async function ensureSupermarketProduct(
       .eq('ean', info.ean)
       .maybeSingle();
     if (error) throw error;
-    if (data) productId = data.id as string;
+    if (data) {
+      productId = data.id as string;
+      // Backfill taxonomy on existing product if available
+      if (taxonomy) {
+        await db.from('products').update({
+          category: taxonomy.category,
+          subcategory: taxonomy.subcategory,
+          manufacturer: taxonomy.manufacturer,
+          brand: taxonomy.brand,
+          format: taxonomy.format || null,
+          variety: taxonomy.variety || null,
+          description_forms: taxonomy.descriptionForms || null,
+        }).eq('id', productId);
+      }
+    }
   }
 
   if (!productId) {
@@ -195,8 +213,13 @@ export async function ensureSupermarketProduct(
       .from('products')
       .insert({
         name: info.name ?? 'Unknown product',
-        category: info.category ?? null,
-        brand: info.brand ?? null,
+        category: taxonomy?.category ?? info.category ?? null,
+        subcategory: taxonomy?.subcategory ?? null,
+        manufacturer: taxonomy?.manufacturer ?? null,
+        brand: taxonomy?.brand ?? info.brand ?? null,
+        format: taxonomy?.format || null,
+        variety: taxonomy?.variety || null,
+        description_forms: taxonomy?.descriptionForms || null,
         unit: info.unit ?? null,
         ean: info.ean ?? null,
         metadata: {

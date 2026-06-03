@@ -11,7 +11,7 @@
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
-import { notifyAlert, type Severity } from './notify.js';
+import { notifyAlert, buildSupermarketAlertActions, type Severity } from './notify.js';
 
 export type AlertType =
   | 'supermarket_degraded'
@@ -74,6 +74,15 @@ export async function createAlert(args: CreateAlertArgs): Promise<CreatedAlert> 
       context: buildNotifyContext(args),
     };
     if (args.url !== undefined) notifyArgs.url = args.url;
+
+    // Attach action buttons when we have enough context.
+    // The alert's context column stores run_id + supermarket — the callback
+    // handler looks those up by alert_id when a button is pressed.
+    const runId = args.context?.run_id;
+    if (args.supermarketId && typeof runId === 'string') {
+      notifyArgs.actions = buildSupermarketAlertActions(alertId);
+    }
+
     notified = await notifyAlert(notifyArgs);
   }
 
