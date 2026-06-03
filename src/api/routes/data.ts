@@ -45,8 +45,9 @@ dataRouter.get('/pricing', async (req: Request, res: Response) => {
 
   if (q.supermarket) {
     const ids = q.supermarket.split(',').map((s) => s.trim()).filter(Boolean);
-    if (ids.length === 1) {
-      query = query.eq('Cadena', ids[0].toUpperCase());
+    const first = ids[0];
+    if (ids.length === 1 && first) {
+      query = query.eq('Cadena', first.toUpperCase());
     } else if (ids.length > 1) {
       query = query.in('Cadena', ids.map((id) => id.toUpperCase()));
     }
