@@ -143,4 +143,24 @@ export interface SupermarketAdapter {
    * ingest layer (legacy behavior — slow for auth-gated sites).
    */
   probe?(ctx: ScrapeContext): Promise<ProductInfo>;
+  /**
+   * Search the supermarket's site by EAN barcode. Returns the canonical
+   * product URL and (when available) the pre-resolved external_id, so the
+   * discover script can skip the extra HTTP call that `resolveExternalId`
+   * would make. Returns `null` when the product doesn't exist at this chain.
+   *
+   * Used by `scripts/discover-products.ts` to bulk-discover which of the
+   * ~211 client EANs are available at each supermarket without manually
+   * finding URLs one by one.
+   *
+   * Adapters that don't implement this are skipped during discovery.
+   */
+  searchByEan?(ean: string, signal?: AbortSignal): Promise<EanSearchResult | null>;
+}
+
+/** Result of an EAN search — URL plus an optional pre-resolved external ID. */
+export interface EanSearchResult {
+  url: string;
+  /** If provided, the discover script passes this to ingest so it skips resolveExternalId. */
+  externalId?: string;
 }

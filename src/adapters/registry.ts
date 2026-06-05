@@ -42,3 +42,18 @@ export function getAdapter(supermarketId: string): SupermarketAdapter {
 export function listAdapters(): SupermarketAdapter[] {
   return Array.from(adapters.values());
 }
+
+export interface AdapterCapabilities {
+  hasAdapter: boolean;
+  hasSearch: boolean;
+}
+
+/** Check what capabilities exist for a given supermarket. */
+export function getAdapterCapabilities(supermarketId: string): AdapterCapabilities {
+  const adapter = adapters.get(supermarketId);
+  if (!adapter) return { hasAdapter: false, hasSearch: false };
+  return {
+    hasAdapter: true,
+    hasSearch: typeof adapter.searchByEan === 'function',
+  };
+}

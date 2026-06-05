@@ -300,6 +300,19 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
 
   canonicalizeUrl,
 
+  searchByEan(ean: string) {
+    // Maxi Carrefour URLs are literally /p/<EAN> — no search API needed.
+    // We probe the catalog to confirm the product exists before returning.
+    const url = `${BASE}/products?currentUrl=p/${encodeURIComponent(ean)}&method=getProductBasicData`;
+    return fetchMaxiCarrefourFragment(url, undefined, undefined)
+      .then((html) => {
+        const desc = readCartButtonAttr(html, 'data-description');
+        // externalId = the EAN itself (that's how this adapter works)
+        return desc ? { url: `${BASE}/p/${ean}`, externalId: ean } : null;
+      })
+      .catch(() => null);
+  },
+
   async resolveExternalId(canonicalUrl: string): Promise<string> {
     const ean = extractEanFromUrl(canonicalUrl);
     if (!ean) {

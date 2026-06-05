@@ -52,6 +52,12 @@ export interface IngestOptions {
    * fast and just registers them for the next scheduled run.
    */
   runInitialScrape?: boolean;
+  /**
+   * Pre-resolved external ID from a prior search (e.g. VTEX productId from
+   * an EAN lookup). When provided, `resolveExternalId` is skipped entirely,
+   * avoiding an extra HTTP call that would otherwise hit the pagetype API.
+   */
+  preResolvedExternalId?: string;
 }
 
 export interface IngestResult {
@@ -133,15 +139,16 @@ export async function loadSupermarketConfig(
 export async function ensureSupermarketProduct(
   supermarketId: string,
   externalUrl: string,
+  preResolvedExternalId?: string,
 ): Promise<EnsureResult> {
   const adapter = getAdapter(supermarketId);
   const canonical = adapter.canonicalizeUrl
     ? adapter.canonicalizeUrl(externalUrl)
     : externalUrl;
 
-  // Adapter decides how its external_id is derived (URL parsing for Coto,
-  // pagetype API call for Carrefour, etc.). Done once per URL.
-  const externalId = await resolveExternalIdForUrl(supermarketId, canonical);
+  // Use pre-resolved ID when available (e.g. from a prior VTEX EAN search)
+  // to skip the extra HTTP call to the pagetype endpoint.
+  const externalId = preResolvedExternalId ?? await resolveExternalIdForUrl(supermarketId, canonical);
 
   const existing = await db
     .from('supermarket_products')
@@ -272,7 +279,7 @@ export async function ingestUrl(
   opts: IngestOptions = {},
 ): Promise<IngestResult> {
   const supermarketId = detectSupermarket(url);
-  const ensured = await ensureSupermarketProduct(supermarketId, url);
+  const ensured = await ensureSupermarketProduct(supermarketId, url, opts.preResolvedExternalId);
 
   const skipScrape = opts.skipScrapeIfExists ?? true;
   const runInitialScrape = opts.runInitialScrape ?? true;

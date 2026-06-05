@@ -28,6 +28,7 @@ import type {
   ScrapeResult,
   SupermarketAdapter,
 } from './types.js';
+import { vtexSearchByEan } from './vtex-search.js';
 
 // =============================================================================
 // Constants
@@ -301,6 +302,8 @@ export const carrefourAdapter: SupermarketAdapter = {
 
   canonicalizeUrl,
   resolveExternalId,
+
+  searchByEan: (ean, signal) => vtexSearchByEan(CARREFOUR_BASE, ean, signal),
 
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     if (!ctx.externalId) {

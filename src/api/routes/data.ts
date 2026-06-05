@@ -1,18 +1,17 @@
 /**
- * Client data endpoint.
+ * Client data endpoints.
  *
- *   GET /v1/data/pricing
- *
- * Queries the `client_base` view and returns the flat 31-column structure
- * the client's reporting tools expect. Paginated, filterable by date range,
- * supermarket, channel, and EAN.
+ *   GET /v1/data/pricing   — flat 31-column client view (paginated)
+ *   GET /v1/data/coverage  — EAN coverage per supermarket (summary + detail)
  */
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '../../shared/db.js';
-import { paginated } from '../lib/envelope.js';
+import { paginated, success } from '../lib/envelope.js';
 import { parseQuery } from '../lib/parseQuery.js';
+import { TAXONOMY_BY_EAN } from '../../shared/taxonomy.js';
+import { getAdapterCapabilities } from '../../adapters/registry.js';
 
 export const dataRouter = Router();
 
@@ -61,3 +60,156 @@ dataRouter.get('/pricing', async (req: Request, res: Response) => {
 
   res.json(paginated(data ?? [], count ?? 0, page, limit));
 });
+
+// =============================================================================
+// GET /v1/data/coverage
+//
+// EAN coverage per supermarket: which of the 211 client EANs are mapped
+// (have a supermarket_products row) vs missing at each chain.
+//
+// Summary mode (no ?supermarket or multiple): per-chain counts
+// Detail mode  (?supermarket=carrefour): full EAN-level list with status
+// =============================================================================
+
+const CoverageQuery = z.object({
+  supermarket: z.string().trim().min(1).optional(),
+  status: z.enum(['covered', 'missing']).optional(),
+  category: z.string().trim().min(1).optional(),
+});
+
+dataRouter.get('/coverage', async (req: Request, res: Response) => {
+  const q = parseQuery(req, CoverageQuery);
+  const taxonomyEans = Array.from(TAXONOMY_BY_EAN.keys());
+  const totalEans = taxonomyEans.length;
+
+  // Fetch all active supermarket_products with their product EAN.
+  // Supabase doesn't support raw SQL joins on views, so we use the
+  // foreign-table select syntax to get the EAN from products.
+  const { data: mappings, error: mappingsErr } = await db
+    .from('supermarket_products')
+    .select('supermarket_id, external_url, products:product_id ( ean )')
+    .eq('is_active', true);
+  if (mappingsErr) throw mappingsErr;
+
+  // Build a map: supermarketId -> Set<ean> and supermarketId -> Map<ean, url>
+  const coveredByChain = new Map<string, Set<string>>();
+  const urlByChainEan = new Map<string, Map<string, string | null>>();
+
+  for (const row of mappings ?? []) {
+    const product = Array.isArray(row.products) ? row.products[0] : row.products;
+    const ean = product?.ean;
+    if (!ean) continue;
+
+    if (!coveredByChain.has(row.supermarket_id)) {
+      coveredByChain.set(row.supermarket_id, new Set());
+      urlByChainEan.set(row.supermarket_id, new Map());
+    }
+    coveredByChain.get(row.supermarket_id)!.add(ean);
+    urlByChainEan.get(row.supermarket_id)!.set(ean, row.external_url ?? null);
+  }
+
+  // Parse requested supermarket(s)
+  const requestedIds = q.supermarket
+    ? q.supermarket.split(',').map((s) => s.trim()).filter(Boolean)
+    : null;
+  const isSingleDetail = requestedIds?.length === 1;
+
+  // --- Detail mode: single supermarket with per-EAN breakdown ---------------
+  if (isSingleDetail) {
+    const smId = requestedIds[0]!;
+
+    const { data: sm, error: smErr } = await db
+      .from('supermarkets')
+      .select('id, name, canal, cadena_display_name, is_active')
+      .eq('id', smId)
+      .maybeSingle();
+    if (smErr) throw smErr;
+
+    const caps = getAdapterCapabilities(smId);
+    const coveredSet = coveredByChain.get(smId) ?? new Set<string>();
+    const urlMap = urlByChainEan.get(smId) ?? new Map<string, string | null>();
+
+    const products: CoverageProduct[] = [];
+    for (const ean of taxonomyEans) {
+      const tax = TAXONOMY_BY_EAN.get(ean)!;
+      const isCovered = coveredSet.has(ean);
+      const status = isCovered ? 'covered' as const : 'missing' as const;
+
+      if (q.status && q.status !== status) continue;
+      if (q.category && tax.category !== q.category) continue;
+
+      products.push({
+        ean,
+        descriptionForms: tax.descriptionForms,
+        category: tax.category,
+        subcategory: tax.subcategory,
+        brand: tax.brand,
+        status,
+        url: isCovered ? (urlMap.get(ean) ?? null) : null,
+      });
+    }
+
+    const coveredCount = coveredSet.size;
+    const missingCount = totalEans - coveredCount;
+
+    res.json(success({
+      supermarket: {
+        id: sm?.id ?? smId,
+        name: sm?.name ?? smId,
+        canal: sm?.canal ?? null,
+        cadenaDisplayName: sm?.cadena_display_name ?? null,
+        isActive: sm?.is_active ?? false,
+        ...caps,
+      },
+      totalEans,
+      covered: coveredCount,
+      missing: missingCount,
+      coveragePct: Math.round((coveredCount / totalEans) * 1000) / 10,
+      products,
+    }));
+    return;
+  }
+
+  // --- Summary mode: all (or filtered) supermarkets -------------------------
+  const { data: allSupermarkets, error: smErr } = await db
+    .from('supermarkets')
+    .select('id, name, canal, cadena_display_name, is_active')
+    .order('name', { ascending: true });
+  if (smErr) throw smErr;
+
+  const supermarkets = (allSupermarkets ?? [])
+    .filter((sm) => !requestedIds || requestedIds.includes(sm.id))
+    .map((sm) => {
+      const coveredSet = coveredByChain.get(sm.id) ?? new Set<string>();
+      // Only count EANs that are in the taxonomy (ignore non-catalog products)
+      let coveredCount = 0;
+      for (const ean of taxonomyEans) {
+        if (coveredSet.has(ean)) coveredCount++;
+      }
+      const caps = getAdapterCapabilities(sm.id);
+
+      return {
+        id: sm.id,
+        name: sm.name,
+        canal: sm.canal,
+        cadenaDisplayName: sm.cadena_display_name,
+        isActive: sm.is_active,
+        ...caps,
+        covered: coveredCount,
+        missing: totalEans - coveredCount,
+        coveragePct: Math.round((coveredCount / totalEans) * 1000) / 10,
+      };
+    });
+
+  res.json(success({ totalEans, supermarkets }));
+});
+
+interface CoverageProduct {
+  ean: string;
+  descriptionForms: string;
+  category: string;
+  subcategory: string;
+  brand: string;
+  status: 'covered' | 'missing';
+  url: string | null;
+}
