@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   typecheck:
-    name: Typecheck
+    name: Typecheck + tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +32,10 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      # Block production deploys on a failing unit suite (regression guard).
+      - name: Unit tests
+        run: npm test
 
   deploy:
     name: SSH + reload

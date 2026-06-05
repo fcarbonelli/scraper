@@ -8,8 +8,9 @@
 
 import { db } from '../shared/db.js';
 import type { Logger } from '../shared/logger.js';
-import type { Promotion, ScrapeResult } from '../adapters/types.js';
+import type { ScrapeResult } from '../adapters/types.js';
 import type { ClassifiedError } from './classifyError.js';
+import { flattenPromotions } from './promotions.js';
 
 // =============================================================================
 // Types matching DB rows we read
@@ -94,60 +95,6 @@ export async function loadJobInput(
       concurrency: supermarketRaw.concurrency,
       config: (supermarketRaw.config as Record<string, unknown>) ?? {},
     },
-  };
-}
-
-// =============================================================================
-// Promotion flattening — extract the first two promotions into discrete columns
-// =============================================================================
-
-interface FlatPromotions {
-  promotion_1: string | null;
-  promotion_2: string | null;
-  offer_price_1: number | null;
-  offer_price_2: number | null;
-  unit_discount: number | null;
-}
-
-/**
- * Flatten the promotions array into the discrete columns the client expects.
- * Computes offer prices from discount percentages when available.
- */
-function flattenPromotions(
-  promotions: Promotion[] | undefined,
-  regularPrice: number,
-): FlatPromotions {
-  const promos = promotions ?? [];
-  const p1 = promos[0];
-  const p2 = promos[1];
-
-  const computeOfferPrice = (promo: Promotion | undefined): number | null => {
-    if (!promo) return null;
-    if (promo.discountPct != null && promo.discountPct > 0) {
-      return Math.round(regularPrice * (1 - promo.discountPct) * 100) / 100;
-    }
-    if (promo.discountAmount != null && promo.discountAmount > 0) {
-      return Math.round((regularPrice - promo.discountAmount) * 100) / 100;
-    }
-    return null;
-  };
-
-  // Unit discount = largest percentage discount across all promotions
-  let maxDiscountPct: number | null = null;
-  for (const promo of promos) {
-    if (promo.discountPct != null && promo.discountPct > 0) {
-      if (maxDiscountPct === null || promo.discountPct > maxDiscountPct) {
-        maxDiscountPct = promo.discountPct;
-      }
-    }
-  }
-
-  return {
-    promotion_1: p1?.description ?? null,
-    promotion_2: p2?.description ?? null,
-    offer_price_1: computeOfferPrice(p1),
-    offer_price_2: computeOfferPrice(p2),
-    unit_discount: maxDiscountPct,
   };
 }
 
@@ -247,8 +194,22 @@ export async function recordJobSuccess(
 
   const [snapRes, jobRes] = await Promise.all([snapshotInsert, jobUpdate]);
   if (snapRes.error) {
+    // Log the exact numeric values alongside the DB error so constraint
+    // violations (e.g. numeric overflow / out-of-range) can be diagnosed
+    // immediately without re-running the scrape.
     args.logger?.error(
-      { err: snapRes.error, supermarketProductId },
+      {
+        err: snapRes.error,
+        supermarketProductId,
+        numericValues: {
+          price: result.price,
+          listPrice: result.listPrice ?? null,
+          unitPrice: result.unitPrice ?? null,
+          offerPrice1: flat.offer_price_1,
+          offerPrice2: flat.offer_price_2,
+          unitDiscount: flat.unit_discount,
+        },
+      },
       'failed to insert price_snapshot (job marked success anyway)',
     );
     throw snapRes.error;

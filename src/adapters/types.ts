@@ -48,7 +48,13 @@ export interface Promotion {
     | 'unknown';
   /** Human-readable description for the UI/alerts. */
   description: string;
+  /**
+   * Discount as a PERCENTAGE in the range 0-100 (e.g. 15 means "15% off").
+   * NOT a fraction. Adapters must emit percentages; persistence converts to a
+   * fraction before storing in the numeric(5,4) `unit_discount` column.
+   */
   discountPct?: number;
+  /** Absolute discount in the product's currency (e.g. 500 means "$500 off"). */
   discountAmount?: number;
   /** E.g. ["galicia", "santander"] for payment-method offers. */
   validPaymentMethods?: string[];

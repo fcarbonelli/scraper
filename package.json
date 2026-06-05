@@ -22,6 +22,8 @@
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
     "test:adapter": "tsx --env-file=.env scripts/test-adapter.ts",
+    "smoke": "tsx --env-file=.env scripts/smoke-test.ts",
+    "smoke:db": "tsx --env-file=.env scripts/smoke-test.ts --from-db",
     "test:telegram": "tsx --env-file=.env scripts/test-telegram.ts",
     "maxi-carrefour:login": "tsx --env-file=.env scripts/maxi-carrefour-login.ts",
     "db:setup": "tsx --env-file=.env scripts/setup-db.ts",

@@ -1,0 +1,37 @@
+name: CI
+
+# Fast feedback on every push and PR: typecheck + unit tests. These run without
+# any DB/Redis/Telegram creds (the unit suites are pure and don't import the DB
+# client), so they're a cheap gate that catches regressions like the Carrefour
+# numeric overflow before they ship.
+on:
+  push:
+    branches-ignore: [main] # main is covered by deploy.yml's gate
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
