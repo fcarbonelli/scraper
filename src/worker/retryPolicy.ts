@@ -25,6 +25,7 @@ const POLICY: Record<ErrorType, RetryRule> = {
   selector_failed:    { maxAttempts: 1, delayMs: 0 },              // don't retry — alert immediately
   price_missing:      { maxAttempts: 1, delayMs: 0 },              // don't retry — alert immediately
   product_not_found:  { maxAttempts: 1, delayMs: 0 },              // don't retry — product likely deleted
+  region_unavailable: { maxAttempts: 1, delayMs: 0 },              // don't retry — adapter already swept all zones
   auth_required:      { maxAttempts: 1, delayMs: 0 },              // don't retry — needs human intervention
   unknown:            { maxAttempts: 3, delayMs: 10 * 60_000 },    // 10 min, give it the benefit of the doubt
 };

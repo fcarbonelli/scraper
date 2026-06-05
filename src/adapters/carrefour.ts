@@ -29,6 +29,9 @@ import type {
   SupermarketAdapter,
 } from './types.js';
 import { vtexSearchByEan } from './vtex-search.js';
+import { runWithGeoFallback } from './geo-retry.js';
+import { resolveRegionId, withRegion } from './vtex-region.js';
+import type { Zone } from './zones.js';
 
 // =============================================================================
 // Constants
@@ -312,15 +315,50 @@ export const carrefourAdapter: SupermarketAdapter = {
         `Carrefour adapter requires external_id (productId), got empty.`,
       );
     }
-    const url = `${CARREFOUR_BASE}/api/catalog_system/pub/products/search?fq=productId:${encodeURIComponent(
-      ctx.externalId,
-    )}`;
-    ctx.logger.debug({ url }, 'fetching Carrefour catalog');
-
-    const body = await fetchVtex<VtexProduct[]>(url, ctx.signal, 'catalog lookup');
-    return parseCarrefourResponse(body, ctx);
+    // VTEX regionalizes availability/price. Try the default sales channel
+    // first; if the product is missing / price-less / out of stock there,
+    // runWithGeoFallback re-scrapes from other AR zones via a VTEX regionId.
+    return runWithGeoFallback({
+      logger: ctx.logger,
+      config: ctx.config.config,
+      attempt: (zone) => scrapeCarrefourZone(ctx, zone),
+    });
   },
 };
+
+/**
+ * Single Carrefour catalog scrape, optionally scoped to a zone.
+ *
+ * - `zone === null`: the default catalog request (current behavior).
+ * - `zone` provided: resolve that zone's postal code to a VTEX `regionId` and
+ *   append it so the catalog returns sellers serving that region. If no region
+ *   serves the CP, throw `product_not_found` so the fallback loop moves on.
+ */
+async function scrapeCarrefourZone(
+  ctx: ScrapeContext,
+  zone: Zone | null,
+): Promise<ScrapeResult> {
+  let url = `${CARREFOUR_BASE}/api/catalog_system/pub/products/search?fq=productId:${encodeURIComponent(
+    ctx.externalId,
+  )}`;
+  let context = 'catalog lookup';
+
+  if (zone) {
+    const regionId = await resolveRegionId(CARREFOUR_BASE, zone.postalCode, ctx.signal);
+    if (!regionId) {
+      throw new ScrapeError(
+        'product_not_found',
+        `Carrefour: no VTEX region for zone ${zone.id} (CP ${zone.postalCode})`,
+      );
+    }
+    url = withRegion(url, regionId);
+    context = `catalog lookup [${zone.id}]`;
+  }
+
+  ctx.logger.debug({ url, zone: zone?.id ?? 'default' }, 'fetching Carrefour catalog');
+  const body = await fetchVtex<VtexProduct[]>(url, ctx.signal, context);
+  return parseCarrefourResponse(body, ctx);
+}
 
 // =============================================================================
 // Pure parser — split out so we can unit-test against saved fixtures.

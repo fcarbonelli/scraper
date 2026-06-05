@@ -90,6 +90,13 @@ export interface ScrapeResult {
   inStock: boolean;
   currency: string;
   tierUsed: Tier;
+  /**
+   * When a location-aware adapter had to fall back to a non-default zone to
+   * find this product in stock, the winning zone's id (see src/adapters/zones.ts).
+   * Undefined for the normal/default-zone path. Persisted into the snapshot's
+   * raw_data for forensics and geographic-availability analysis.
+   */
+  zoneUsed?: string;
   promotions?: Promotion[];
   /** Optional master-catalog info — used to backfill the products table. */
   productInfo?: ProductInfo;

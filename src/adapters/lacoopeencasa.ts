@@ -27,6 +27,8 @@ import type {
   ScrapeResult,
   SupermarketAdapter,
 } from './types.js';
+import { runWithGeoFallback } from './geo-retry.js';
+import type { Zone } from './zones.js';
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const API_BASE = 'https://api.lacoopeencasa.coop/api';
@@ -255,15 +257,65 @@ export const lacoopeencasaAdapter: SupermarketAdapter = {
         `LCEC adapter requires external_id (cod_interno), got empty.`,
       );
     }
-    const url = `${API_BASE}/articulo/detalle?cod_interno=${encodeURIComponent(
-      ctx.externalId,
-    )}&simple=false`;
-    ctx.logger.debug({ url }, 'fetching LCEC articulo/detalle');
 
-    const body = await fetchLcec<LcecArticulo>(url, ctx.signal, 'articulo/detalle');
-    return parseLcecResponse(body, ctx);
+    // Geo-retry assessment (2026-06): La Coope en Casa (Cooperativa Obrera) is
+    // a single regional cooperative and its `articulo/detalle` endpoint did not
+    // expose a confirmed per-branch parameter. So geo-retry is OFF unless an
+    // operator configures a branch query-param via `supermarkets.config`
+    // (e.g. `{ "lcecZoneParam": "id_sucursal",
+    //          "zones": [{ "id": "...", "postalCode": "...", "code": "<suc>" }] }`).
+    // Until then this behaves exactly as before (default branch only).
+    const zoneParam = readLcecZoneParam(ctx.config.config);
+    if (!zoneParam) {
+      return scrapeLcecZone(ctx, null, undefined);
+    }
+    return runWithGeoFallback({
+      logger: ctx.logger,
+      config: ctx.config.config,
+      attempt: (zone) => scrapeLcecZone(ctx, zone, zoneParam),
+    });
   },
 };
+
+/** Read the optional LCEC branch query-param name from supermarket config. */
+function readLcecZoneParam(
+  config: Record<string, unknown> | undefined,
+): string | undefined {
+  const v = config?.['lcecZoneParam'];
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+}
+
+/**
+ * Single LCEC scrape, optionally scoped to a zone via a configured branch param.
+ *
+ * - `zone === null`: the default request (current behavior).
+ * - `zone` provided: append `<zoneParam>=<zone.code>`. If the zone has no `code`
+ *   (or no param configured), throw `product_not_found` so the fallback loop
+ *   moves on.
+ */
+async function scrapeLcecZone(
+  ctx: ScrapeContext,
+  zone: Zone | null,
+  zoneParam: string | undefined,
+): Promise<ScrapeResult> {
+  let url = `${API_BASE}/articulo/detalle?cod_interno=${encodeURIComponent(
+    ctx.externalId,
+  )}&simple=false`;
+
+  if (zone) {
+    if (!zoneParam || !zone.code) {
+      throw new ScrapeError(
+        'product_not_found',
+        `LCEC: zone ${zone.id} has no branch code configured`,
+      );
+    }
+    url += `&${encodeURIComponent(zoneParam)}=${encodeURIComponent(zone.code)}`;
+  }
+
+  ctx.logger.debug({ url, zone: zone?.id ?? 'default' }, 'fetching LCEC articulo/detalle');
+  const body = await fetchLcec<LcecArticulo>(url, ctx.signal, 'articulo/detalle');
+  return parseLcecResponse(body, ctx);
+}
 
 // =============================================================================
 // Pure parser — split out so we can unit-test against saved fixtures.

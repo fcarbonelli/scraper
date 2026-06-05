@@ -12,6 +12,7 @@ export type ErrorType =
   | 'network_error'
   | 'rate_limited'
   | 'product_not_found'
+  | 'region_unavailable'
   | 'site_server_error'
   | 'auth_required'
   | 'selector_failed'
@@ -53,6 +54,7 @@ function defaultRetryable(type: ErrorType): boolean {
     case 'unknown':
       return true;
     case 'product_not_found':
+    case 'region_unavailable':
     case 'selector_failed':
     case 'auth_required':
     case 'price_missing':

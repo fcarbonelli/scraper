@@ -1100,9 +1100,10 @@ export async function refreshCookie(
     //      sucursal. The cookies themselves are fine — they may unlock prices
     //      for OTHER products. The picked sucursales just don't carry THIS
     //      specific EAN. Persisting the cookie lets every other product in
-    //      this scrape batch use it (saving N-1 logins). Throw `product_not
-    //      _found` so this one product fails cleanly without dragging the
-    //      rest of the batch into the auth_required cooldown.
+    //      this scrape batch use it (saving N-1 logins). Throw
+    //      `region_unavailable` so this one product fails cleanly without
+    //      dragging the rest of the batch into the auth_required cooldown —
+    //      and so it's distinguishable from a genuinely deleted product.
     if (lastErr && !lastResult) {
       // Mode A — bubble up so the outer catch arms the cooldown.
       throw lastErr instanceof Error
@@ -1124,7 +1125,7 @@ export async function refreshCookie(
       );
       await persistCookie(config.id, lastResult, logger, { autoPin: false });
       throw new ScrapeError(
-        'product_not_found',
+        'region_unavailable',
         `Maxi Carrefour: EAN ${verifyEan} is not stocked at any of the ` +
           `${maxAttempts} tried sucursales (sellers=${skipSellers.join(',')}, ` +
           `regions=${skipRegions.join(',')}). The harvested cookie has been ` +

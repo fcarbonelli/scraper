@@ -17,6 +17,8 @@ import type {
   ScrapeResult,
   SupermarketAdapter,
 } from './types.js';
+import { runWithGeoFallback } from './geo-retry.js';
+import type { Zone } from './zones.js';
 
 // =============================================================================
 // Constants & types describing the Coto JSON structure
@@ -349,13 +351,66 @@ export const cotoAdapter: SupermarketAdapter = {
       );
     }
 
-    const jsonUrl = toJsonUrl(ctx.externalUrl);
-    ctx.logger.debug({ jsonUrl }, 'fetching Coto JSON');
-
-    const body = (await fetchCoto(jsonUrl, ctx.signal)) as CotoResponse;
-    return parseCotoResponse(body, ctx);
+    // Geo-retry assessment (2026-06): Coto Digital's `?format=json` endpoint
+    // serves a SINGLE national price list (priceList200) and exposes no
+    // per-sucursal stock here — availability is only resolved at cart/checkout.
+    // So there is no zone mechanism to exploit by default and geo-retry would
+    // just repeat identical requests. We therefore only enable the location
+    // sweep when an operator has configured a query-param mechanism in
+    // `supermarkets.config` (e.g. `{ "cotoZoneParam": "idSucursal",
+    // "zones": [{ "id": "...", "postalCode": "...", "code": "<sucursal>" }] }`).
+    // Until then this behaves exactly as before (default catalog only).
+    const zoneParam = readCotoZoneParam(ctx.config.config);
+    if (!zoneParam) {
+      return scrapeCotoZone(ctx, null, undefined);
+    }
+    return runWithGeoFallback({
+      logger: ctx.logger,
+      config: ctx.config.config,
+      attempt: (zone) => scrapeCotoZone(ctx, zone, zoneParam),
+    });
   },
 };
+
+/** Read the optional Coto sucursal query-param name from supermarket config. */
+function readCotoZoneParam(
+  config: Record<string, unknown> | undefined,
+): string | undefined {
+  const v = config?.['cotoZoneParam'];
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+}
+
+/**
+ * Single Coto scrape, optionally scoped to a zone via a configured query param.
+ *
+ * - `zone === null`: the default catalog request (current behavior).
+ * - `zone` provided: append `<zoneParam>=<zone.code>` to the JSON URL. If the
+ *   zone has no `code` (or no param configured), throw `product_not_found` so
+ *   the fallback loop simply moves on.
+ */
+async function scrapeCotoZone(
+  ctx: ScrapeContext,
+  zone: Zone | null,
+  zoneParam: string | undefined,
+): Promise<ScrapeResult> {
+  let jsonUrl = toJsonUrl(ctx.externalUrl!);
+
+  if (zone) {
+    if (!zoneParam || !zone.code) {
+      throw new ScrapeError(
+        'product_not_found',
+        `Coto: zone ${zone.id} has no sucursal code configured`,
+      );
+    }
+    const u = new URL(jsonUrl);
+    u.searchParams.set(zoneParam, zone.code);
+    jsonUrl = u.toString();
+  }
+
+  ctx.logger.debug({ jsonUrl, zone: zone?.id ?? 'default' }, 'fetching Coto JSON');
+  const body = (await fetchCoto(jsonUrl, ctx.signal)) as CotoResponse;
+  return parseCotoResponse(body, ctx);
+}
 
 /**
  * Pure parser — separated from `scrape` so it's trivially unit-testable

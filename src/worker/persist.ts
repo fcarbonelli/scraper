@@ -216,7 +216,13 @@ export async function recordJobSuccess(
     currency: result.currency,
     tier_used: result.tierUsed,
     promotions: result.promotions ?? [],
-    raw_data: result.rawData ?? {},
+    // Record which geographic zone produced this snapshot. `zoneUsed` is only
+    // set when a location-aware adapter had to fall back from the default zone
+    // (see src/adapters/geo-retry.ts); otherwise it's the default zone.
+    raw_data: {
+      ...(result.rawData ?? {}),
+      zoneUsed: result.zoneUsed ?? 'default',
+    },
     offer_price_1: flat.offer_price_1,
     offer_price_2: flat.offer_price_2,
     promotion_1: flat.promotion_1,
