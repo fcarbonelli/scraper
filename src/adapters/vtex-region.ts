@@ -53,6 +53,7 @@ export async function resolveRegionId(
   baseUrl: string,
   postalCode: string,
   signal?: AbortSignal,
+  userAgent: string = USER_AGENT,
 ): Promise<string | null> {
   const key = `${baseUrl}|${postalCode}`;
   const cached = regionCache.get(key);
@@ -73,7 +74,7 @@ export async function resolveRegionId(
     const res = await fetch(url, {
       method: 'GET',
       headers: {
-        'User-Agent': USER_AGENT,
+        'User-Agent': userAgent,
         Accept: 'application/json',
         'Accept-Language': 'es-AR,es;q=0.9',
       },

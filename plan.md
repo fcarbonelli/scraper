@@ -118,6 +118,18 @@ price_snapshots (
 )
 CREATE INDEX ON price_snapshots (supermarket_product_id, scraped_at DESC);
 
+-- Price semantics (IMPORTANT):
+--   `price`      = the CURRENT SELLING price (already discounted when on sale).
+--                  This is the canonical number used by history/alerts/compare.
+--   `list_price` = the REGULAR / crossed-out price, set only when there's a
+--                  markdown (price < list_price). Every VTEX store uses this
+--                  pattern (e.g. Cordiez: list_price 4362.12, price 2999).
+-- The client-facing `client_base` view (migration 002, fixed in 003) maps these
+-- to the client's columns: Precio_Regular = COALESCE(list_price, price),
+-- Precio_c_Oferta_1 = the sale price when marked down, and Descuento_Unitario =
+-- max(named-promo discount, markdown gap). Do NOT change `price` to mean the
+-- regular price — the regular/offer split is a view concern only.
+
 -- promotions JSONB shape (array of objects, each object normalized):
 -- [
 --   {

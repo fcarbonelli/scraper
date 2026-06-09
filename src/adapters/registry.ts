@@ -13,6 +13,12 @@ import { maxiCarrefourAdapter } from './maxi-carrefour.js';
 import { maxiconsumoAdapter } from './maxiconsumo.js';
 import { atomoAdapter } from './atomo.js';
 import { lacoopeencasaAdapter } from './lacoopeencasa.js';
+import { veaAdapter } from './vea.js';
+import { jumboAdapter } from './jumbo.js';
+import { discoAdapter } from './disco.js';
+import { changomasAdapter } from './changomas.js';
+import { diaAdapter } from './dia.js';
+import { cordiezAdapter } from './cordiez.js';
 
 const adapters = new Map<string, SupermarketAdapter>();
 
@@ -30,6 +36,12 @@ register(maxiCarrefourAdapter);
 register(maxiconsumoAdapter);
 register(atomoAdapter);
 register(lacoopeencasaAdapter);
+register(veaAdapter);
+register(jumboAdapter);
+register(discoAdapter);
+register(changomasAdapter);
+register(diaAdapter);
+register(cordiezAdapter);
 
 export function getAdapter(supermarketId: string): SupermarketAdapter {
   const adapter = adapters.get(supermarketId);

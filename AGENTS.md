@@ -12,6 +12,7 @@ A Node/TypeScript backend service that scrapes 100+ products across 30+ supermar
 - `**API.md**` — external-facing REST API reference (auth, endpoints, TypeScript types, response shapes, UI workflows). The source of truth for API consumers (frontend, partners). Keep it in sync when changing routes.
 - `**examples/api/**` — JSON response fixtures matching the API envelope exactly. Used for frontend dev before deploy and as test data. Update any time a route's response shape changes.
 - `**DEPLOY.md**` — step-by-step deployment guide (AWS setup, server bootstrap, first deploy, GitHub Actions, troubleshooting). Read when working on infra; keep in sync when changing the deploy flow.
+- `**docs/ADDING_SUPERMARKETS.md**` — hands-on playbook for mapping a new supermarket: the VTEX factory, verification commands, the preview-vs-go-live distinction, and the gotchas (Cencosud WAF, `listPrice` sentinel). Read this before adding a store.
 - `**summary.md**` — original problem framing (read once for context, then ignore).
 
 ## Tech stack (locked in)
@@ -208,7 +209,10 @@ All scripts that need env vars use `--env-file=.env` (Node ≥20.6 native flag).
 
 ## How to add a new supermarket
 
+> For the full hands-on version (exact commands, VTEX factory template, preview-vs-go-live, gotchas) see `**docs/ADDING_SUPERMARKETS.md**`. The summary below is the quick reference.
+
 1. **Write the adapter** at `src/adapters/<id>.ts` implementing the `SupermarketAdapter` interface.
+  - **VTEX stores (most of the list)**: don't copy `carrefour.ts`. Use the factory `createVtexAdapter({ id, name, host })` from `src/adapters/vtex.ts` — your adapter is ~10 lines (see `vea.ts`/`jumbo.ts`/`disco.ts`).
   - References (pick the closest one to the new site's stack):
     - `src/adapters/coto.ts` — single JSON API endpoint, id embedded in URL
     - `src/adapters/lacoopeencasa.ts` — JSON API behind an Angular SPA; envelope-style `{ estado, mensaje, datos }`
@@ -261,7 +265,9 @@ Other knobs in `supermarkets.config.maxiCarrefourLogin`:
 
 ### Note on VTEX-based supermarkets
 
-Many LATAM supermarkets run on VTEX (Carrefour, Disco, Jumbo, Vea, Día, La Anónima, etc.). For any of them, the `carrefour.ts` adapter is a near-drop-in template — usually only the host constant and rate limit need to change. Always verify the `pagetype` and `catalog_system/pub/products/search` endpoints respond as expected for the new domain before assuming. **NB:** Carrefour's wholesale portal `comerciante.carrefour.com.ar` (Maxi Pedido) is a custom PHP app, NOT VTEX — see `maxi-carrefour.ts`.
+Many LATAM supermarkets run on VTEX (Carrefour, Disco, Jumbo, Vea, Día, etc.). For any of them, use the shared factory **`createVtexAdapter({ id, name, host })`** in `src/adapters/vtex.ts` — a new VTEX store is a ~10-line file (`vea.ts`/`jumbo.ts`/`disco.ts`), not a copy of `carrefour.ts`. The factory handles the `pagetype` slug→productId lookup, the regionalized `catalog_system/pub/products/search` scrape with geo-fallback, promotions, `searchByEan`, a browser User-Agent (Cencosud's WAF 429s bot UAs), and a `listPrice` sanity guard (Cencosud emits garbage sentinels). The legacy `carrefour.ts` predates the factory and keeps its own identical implementation (untouched on purpose); new stores always use the factory. Always verify the endpoints respond for the new domain before assuming.
+
+**NB:** Carrefour's wholesale portal `comerciante.carrefour.com.ar` (Maxi Pedido) is a custom PHP app, NOT VTEX — see `maxi-carrefour.ts`. La Anónima (`laanonima.com.ar`, `/art_<id>/` URLs) is also NOT VTEX.
 
 ## How to add products in bulk
 
