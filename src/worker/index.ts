@@ -111,19 +111,70 @@ function createWorker(supermarket: SupermarketRow): Worker<ScrapeJobData> {
   return worker;
 }
 
-async function main(): Promise<void> {
-  const supermarkets = await loadActiveSupermarkets();
-  if (supermarkets.length === 0) {
-    logger.warn('no active supermarkets in DB — worker will idle');
-  } else {
-    logger.info({ count: supermarkets.length }, 'starting workers');
+/**
+ * How often the worker re-checks the DB for newly-activated (or deactivated)
+ * supermarkets. This is what lets activating a chain (db:setup flips
+ * `is_active`) take effect WITHOUT a worker restart / `pm2 reload`.
+ */
+const RELOAD_INTERVAL_MS = 60 * 1000;
+
+/** Live map of supermarket id -> its running BullMQ Worker. */
+const workers = new Map<string, Worker<ScrapeJobData>>();
+
+/**
+ * Reconcile the running workers against the current set of active supermarkets:
+ *   - spin up a Worker for any newly-active supermarket,
+ *   - gracefully close the Worker for any supermarket that went inactive.
+ *
+ * Safe to call repeatedly. A transient DB error just skips this pass and keeps
+ * the current workers running (we never tear everything down on a read blip).
+ */
+async function reconcileWorkers(): Promise<void> {
+  let active: SupermarketRow[];
+  try {
+    active = await loadActiveSupermarkets();
+  } catch (err) {
+    logger.error({ err }, 'failed to reload active supermarkets; keeping current workers');
+    return;
   }
 
-  const workers = supermarkets.map(createWorker);
+  const activeIds = new Set(active.map((s) => s.id));
+
+  // Start workers for newly-active supermarkets.
+  for (const sm of active) {
+    if (workers.has(sm.id)) continue;
+    workers.set(sm.id, createWorker(sm));
+    logger.info({ supermarket: sm.id }, 'started worker for newly-active supermarket');
+  }
+
+  // Tear down workers for supermarkets that are no longer active. `close()` is
+  // graceful — it waits for any in-flight job on that queue to finish.
+  for (const [id, worker] of workers) {
+    if (activeIds.has(id)) continue;
+    workers.delete(id);
+    void worker.close().then(
+      () => logger.info({ supermarket: id }, 'closed worker for deactivated supermarket'),
+      (err) => logger.error({ err, supermarket: id }, 'error closing deactivated worker'),
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  await reconcileWorkers();
+  if (workers.size === 0) {
+    logger.warn('no active supermarkets in DB — worker idle (will keep polling)');
+  } else {
+    logger.info({ count: workers.size }, 'workers started');
+  }
+
+  // Poll for supermarkets activated/deactivated after startup so adding a chain
+  // doesn't require restarting this process.
+  const reloadHandle = setInterval(() => void reconcileWorkers(), RELOAD_INTERVAL_MS);
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down workers');
-    await Promise.all(workers.map((w) => w.close()));
+    clearInterval(reloadHandle);
+    await Promise.all(Array.from(workers.values()).map((w) => w.close()));
     process.exit(0);
   };
 

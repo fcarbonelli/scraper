@@ -196,6 +196,13 @@ After ingest:
 - Want prices **now** (needs Redis):
   `npm run orchestrator:run-now -- --supermarket=vea`.
 
+> **Worker pickup:** the worker auto-reconciles active supermarkets every ~60s
+> (`RELOAD_INTERVAL_MS` in `src/worker/index.ts`), so a chain you just activated
+> via `db:setup` starts getting its queue consumed within a minute — no
+> `pm2 reload worker` / restart required. (Before this existed, jobs for a
+> newly-activated chain would enqueue but sit unconsumed, leaving the run stuck
+> "running".)
+
 | Command | Writes to DB? | Captures price? | Use when |
 | --- | --- | --- | --- |
 | `discover-products --search-only <id>` | No | No | Preview coverage |

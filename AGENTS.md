@@ -229,7 +229,7 @@ All scripts that need env vars use `--env-file=.env` (Node ≥20.6 native flag).
 4. **Add URL detection** in `src/ingest/index.ts` (the `detectSupermarket` function — match by hostname; order matters when one host is a subdomain of another). Both `scrape:url` and `scrape:bulk` will pick it up automatically.
 5. **Smoke test (no DB needed)**: `npm run test:adapter -- <a-product-url>`. The script auto-detects the supermarket, runs canonicalize → resolve external_id → scrape, and prints the `ScrapeResult`.
 6. **End-to-end test**: `npm run scrape:url -- <a-product-url>`. Run it twice — the second run should skip the "adapter probe" line, confirming the cached external_id is being used. **Verify** the DB has rows in `supermarket_products` and `price_snapshots`.
-7. **Push to main**. CI typechecks, deploys to EC2, runs `db:setup`, then `pm2 reload` — which restarts the worker so it picks up the new supermarket from the DB. End-to-end: just push.
+7. **Push to main**. CI typechecks, deploys to EC2, runs `db:setup`, then `pm2 reload`. The worker also **auto-reconciles active supermarkets every ~60s** (`RELOAD_INTERVAL_MS` in `src/worker/index.ts`), so even activating a chain WITHOUT a redeploy (just `db:setup`) is picked up within a minute — no manual `pm2 reload worker` needed. End-to-end: just push.
 
 ### Per-supermarket auth (cookies, tokens)
 
