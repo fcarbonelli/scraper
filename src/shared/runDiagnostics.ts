@@ -6,9 +6,12 @@
  * finalizer, and alerts agree on what "done" means.
  */
 
-import { db } from './db.js';
+import { db, fetchAllPages, fetchInChunks } from './db.js';
 
 export type JobExecutionStatus = 'success' | 'failed' | 'retrying';
+
+const JOB_EXECUTION_COLUMNS =
+  'id, scrape_run_id, supermarket_product_id, attempt, status, error_type, error_message, error_stack, tier_used, duration_ms, started_at, finished_at';
 
 export interface RunRow {
   id: string;
@@ -137,20 +140,27 @@ export async function loadRunDiagnostics(scrapeRunId: string): Promise<RunDiagno
   if (runRes.error) throw runRes.error;
   if (!runRes.data) return null;
 
-  const jobsRes = await db
-    .from('job_executions')
-    .select(
-      'id, scrape_run_id, supermarket_product_id, attempt, status, error_type, error_message, error_stack, tier_used, duration_ms, started_at, finished_at',
-    )
-    .eq('scrape_run_id', scrapeRunId);
-  if (jobsRes.error) throw jobsRes.error;
-
   const run = runRes.data as RunRow;
-  const executions = (jobsRes.data ?? []) as JobExecutionRow[];
+  const executions = await loadAllJobExecutions(scrapeRunId);
   const finalOutcomes = Array.from(latestOutcomeByProduct(executions).values());
   const progress = await buildRunProgress(run, finalOutcomes, executions);
 
   return { run, executions, finalOutcomes, progress };
+}
+
+/**
+ * Fetch every job_execution for a run, paging past the 1000-row response cap.
+ * Ordered by id so paging is stable across requests.
+ */
+async function loadAllJobExecutions(scrapeRunId: string): Promise<JobExecutionRow[]> {
+  return fetchAllPages<JobExecutionRow>((from, to) =>
+    db
+      .from('job_executions')
+      .select(JOB_EXECUTION_COLUMNS)
+      .eq('scrape_run_id', scrapeRunId)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 }
 
 export async function buildRunProgress(
@@ -257,14 +267,13 @@ function plannedBySupermarket(metadata: Record<string, unknown>): Record<string,
 }
 
 async function loadMappingSupermarkets(mappingIds: string[]): Promise<Map<string, string>> {
-  if (mappingIds.length === 0) return new Map();
+  // Chunk the id filter so the generated `id=in.(...)` URL stays well under
+  // PostgREST's length limit (a single ~1000-id filter returns HTTP 400).
+  const rows = await fetchInChunks<{ id: string; supermarket_id: string }>(
+    mappingIds,
+    (chunk) => db.from('supermarket_products').select('id, supermarket_id').in('id', chunk),
+  );
 
-  const { data, error } = await db
-    .from('supermarket_products')
-    .select('id, supermarket_id')
-    .in('id', mappingIds);
-  if (error) throw error;
-
-  return new Map((data ?? []).map((m) => [m.id as string, m.supermarket_id as string]));
+  return new Map(rows.map((m) => [m.id, m.supermarket_id]));
 }
 

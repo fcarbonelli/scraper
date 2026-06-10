@@ -9,7 +9,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { db } from '../../shared/db.js';
+import { db, fetchAllPages, fetchInChunks } from '../../shared/db.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
@@ -102,10 +102,11 @@ async function loadMappingDetails(
 ): Promise<Map<string, SupermarketProductDebugRow>> {
   if (mappingIds.length === 0) return new Map();
 
-  const { data, error } = await db
-    .from('supermarket_products')
-    .select(
-      `
+  const rows = await fetchInChunks<SupermarketProductDebugRow>(mappingIds, (chunk) =>
+    db
+      .from('supermarket_products')
+      .select(
+        `
       id,
       supermarket_id,
       external_id,
@@ -123,11 +124,11 @@ async function loadMappingDetails(
         name
       )
     `,
-    )
-    .in('id', mappingIds);
-  if (error) throw error;
+      )
+      .in('id', chunk),
+  );
 
-  return new Map(((data ?? []) as SupermarketProductDebugRow[]).map((m) => [m.id, m]));
+  return new Map(rows.map((m) => [m.id, m]));
 }
 
 async function loadLatestSnapshot(
@@ -195,27 +196,26 @@ runsRouter.get('/:id', async (req: Request, res: Response) => {
   if (runRes.error) throw runRes.error;
   if (!runRes.data) throw ApiError.notFound('Run');
 
-  // 2. All job_executions for this run (typically a few thousand at most)
-  const jobsRes = await db
-    .from('job_executions')
-    .select('supermarket_product_id, attempt, status, error_type, tier_used')
-    .eq('scrape_run_id', req.params.id);
-  if (jobsRes.error) throw jobsRes.error;
-  const jobs = (jobsRes.data ?? []) as JobRow[];
+  // 2. All job_executions for this run — paged past the 1000-row response cap
+  //    (a daily run across many supermarkets easily exceeds 1000 rows).
+  const jobs = await fetchAllPages<JobRow>((from, to) =>
+    db
+      .from('job_executions')
+      .select('supermarket_product_id, attempt, status, error_type, tier_used')
+      .eq('scrape_run_id', req.params.id)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 
-  // 3. Resolve mapping -> supermarket_id (one extra query, then index in JS)
+  // 3. Resolve mapping -> supermarket_id (chunked so a large id filter does not
+  //    overflow the request URL and 400), then index in JS.
   const mappingIds = Array.from(new Set(jobs.map((j) => j.supermarket_product_id)));
-  let mappingsBySupermarket = new Map<string, string>(); // mappingId -> supermarketId
-  if (mappingIds.length > 0) {
-    const mappingsRes = await db
-      .from('supermarket_products')
-      .select('id, supermarket_id')
-      .in('id', mappingIds);
-    if (mappingsRes.error) throw mappingsRes.error;
-    mappingsBySupermarket = new Map(
-      ((mappingsRes.data ?? []) as MappingRow[]).map((m) => [m.id, m.supermarket_id]),
-    );
-  }
+  const mappingRows = await fetchInChunks<MappingRow>(mappingIds, (chunk) =>
+    db.from('supermarket_products').select('id, supermarket_id').in('id', chunk),
+  );
+  const mappingsBySupermarket = new Map<string, string>(
+    mappingRows.map((m) => [m.id, m.supermarket_id]),
+  );
 
   // 4. Take the FINAL attempt per (supermarket_product_id) — this is the
   //    outcome we count in stats.
