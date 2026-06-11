@@ -12,6 +12,7 @@
 
 import { ScrapeError } from '../shared/errors.js';
 import type {
+  EanSearchResult,
   Promotion,
   ScrapeContext,
   ScrapeResult,
@@ -30,6 +31,9 @@ const REQUEST_TIMEOUT_MS = 15_000;
 /** A reasonable, identifiable user agent. */
 const USER_AGENT =
   'Mozilla/5.0 (compatible; PriceScraperBot/1.0; +https://example.com/bot)';
+
+/** Public base URL for building canonical product URLs during EAN discovery. */
+const COTO_BASE_URL = 'https://www.cotodigital.com.ar';
 
 /**
  * Coto's `sku.dtoPrice` is a JSON-encoded string with this shape.
@@ -330,6 +334,139 @@ async function fetchCoto(
 }
 
 // =============================================================================
+// EAN search (bulk product discovery)
+//
+// Coto runs on Oracle Commerce / Endeca. Its default keyword search does NOT
+// index the barcode (a plain `Ntt=<ean>` query returns zero records), but
+// Endeca lets us scope a keyword query to a single record property via `Ntk`.
+// `Ntk=product.eanPrincipal&Ntt=<ean>` returns the matching product's record.
+//
+// We then build the canonical product URL from the record id: Coto resolves
+// product pages by the `/_/R-<id>` path segment regardless of the (decorative)
+// slug, so a slug derived from the product name is sufficient and stable.
+// =============================================================================
+
+/** Endeca search response timeout (independent of the scrape timeout). */
+const SEARCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Build a URL-safe slug from a product name. The slug is decorative — Coto
+ * resolves the product by the `R-<id>` segment — so exact parity with Coto's
+ * own slug isn't required, only that it's a clean path segment.
+ */
+function slugify(name: string): string {
+  return (
+    name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // strip accents
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-') // non-alphanumeric -> hyphen
+      .replace(/^-+|-+$/g, '') || // trim leading/trailing hyphens
+    'producto'
+  );
+}
+
+/** First string value of an Endeca attribute (attributes are arrays of strings). */
+function attrStr(attrs: Record<string, unknown>, key: string): string | undefined {
+  const v = attrs[key];
+  if (Array.isArray(v) && typeof v[0] === 'string') return v[0];
+  return undefined;
+}
+
+/**
+ * Recursively walk Coto's Endeca JSON and return the `attributes` of the first
+ * record whose `product.eanPrincipal` exactly matches `ean`.
+ *
+ * Matching on the EAN (rather than just taking the first record) is important:
+ * a search-results page can include unrelated products in recommendation /
+ * "visited" carousels, and we must not map the client EAN to one of those.
+ */
+function findRecordByEan(node: unknown, ean: string): Record<string, unknown> | null {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findRecordByEan(item, ean);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (node && typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    const attrs = obj.attributes;
+    if (attrs && typeof attrs === 'object') {
+      const eanAttr = (attrs as Record<string, unknown>)['product.eanPrincipal'];
+      if (Array.isArray(eanAttr) && String(eanAttr[0]) === ean) {
+        return attrs as Record<string, unknown>;
+      }
+    }
+    for (const value of Object.values(obj)) {
+      const found = findRecordByEan(value, ean);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Search Coto by EAN. Returns the canonical product URL + external_id, or null
+ * when the barcode isn't in Coto's catalog (or the request fails — discovery
+ * treats null as "not found" and simply moves on to the next EAN).
+ */
+async function searchByEan(
+  ean: string,
+  signal?: AbortSignal,
+): Promise<EanSearchResult | null> {
+  const searchUrl =
+    `${COTO_BASE_URL}/sitios/cdigi/categoria` +
+    `?Ntk=product.eanPrincipal&Ntt=${encodeURIComponent(ean)}&Nty=1&format=json`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  let body: unknown;
+  try {
+    const res = await fetch(searchUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json,text/plain,*/*',
+        'Accept-Language': 'es-AR,es;q=0.9',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    body = await res.json();
+  } catch {
+    // Network error / timeout / non-JSON — treat as "not found" so discovery
+    // keeps going. (The scrape path, by contrast, surfaces these as errors.)
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const attrs = findRecordByEan(body, ean);
+  if (!attrs) return null;
+
+  const recordId = attrStr(attrs, 'record.id');
+  if (!recordId) return null;
+
+  const name =
+    attrStr(attrs, 'product.description') ?? attrStr(attrs, 'sku.displayName') ?? 'producto';
+
+  return {
+    // `record.id` (e.g. "00591050-00591050-200") is exactly what
+    // resolveExternalIdFromUrl() would parse back out of the `/R-<id>` path,
+    // so we pass it as the pre-resolved external_id to skip a round-trip.
+    url: `${COTO_BASE_URL}/sitios/cdigi/productos/${slugify(name)}/_/R-${recordId}`,
+    externalId: recordId,
+  };
+}
+
+// =============================================================================
 // Adapter
 // =============================================================================
 
@@ -338,6 +475,8 @@ export const cotoAdapter: SupermarketAdapter = {
   name: 'Coto Digital',
 
   canonicalizeUrl,
+
+  searchByEan,
 
   async resolveExternalId(canonicalUrl: string): Promise<string> {
     return resolveExternalIdFromUrl(canonicalUrl);

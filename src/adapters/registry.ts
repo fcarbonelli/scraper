@@ -19,6 +19,10 @@ import { discoAdapter } from './disco.js';
 import { changomasAdapter } from './changomas.js';
 import { diaAdapter } from './dia.js';
 import { cordiezAdapter } from './cordiez.js';
+import { mamiAdapter } from './mami.js';
+import { parodiAdapter } from './parodi.js';
+import { elCondorAdapter } from './el-condor.js';
+import { laReinaAdapter } from './la-reina.js';
 
 const adapters = new Map<string, SupermarketAdapter>();
 
@@ -42,6 +46,10 @@ register(discoAdapter);
 register(changomasAdapter);
 register(diaAdapter);
 register(cordiezAdapter);
+register(mamiAdapter);
+register(parodiAdapter);
+register(elCondorAdapter);
+register(laReinaAdapter);
 
 export function getAdapter(supermarketId: string): SupermarketAdapter {
   const adapter = adapters.get(supermarketId);

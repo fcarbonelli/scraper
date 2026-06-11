@@ -218,7 +218,7 @@ If the site isn't VTEX, write a full adapter. Pick the closest existing template
 
 | Template | Stack | Strategy |
 | --- | --- | --- |
-| `coto.ts` | JSON API, id in URL | Append `?format=json`, parse attributes |
+| `coto.ts` | Oracle Commerce/Endeca JSON | Append `?format=json`, parse attributes; EAN discovery via `Ntk` (see below) |
 | `lacoopeencasa.ts` | JSON API behind SPA | `{ estado, mensaje, datos }` envelope |
 | `atomo.ts` | PrestaShop SSR HTML | Parse `<script type="application/ld+json">` |
 | `maxiconsumo.ts` | Magento 2 SSR HTML | Parse microdata + inline GA4 `dataLayer` |
@@ -232,6 +232,21 @@ Rules of thumb:
 - Implement `searchByEan` only if the site has a barcode search; otherwise URLs
   must be added manually (`scrape:bulk`) and the store is skipped by discovery.
 - Wiring (registry, `detectSupermarket`, `setup-db`) is identical to the VTEX path.
+
+**Non-VTEX EAN search (Coto / Endeca example)**: a site without a VTEX catalog
+API can still support discovery if it exposes *any* way to query by barcode.
+Coto's default keyword search (`?Ntt=<ean>`) does **not** index the EAN, but
+Oracle Commerce/Endeca lets you scope a keyword query to one record property
+via `Ntk`:
+
+```
+/sitios/cdigi/categoria?Ntk=product.eanPrincipal&Ntt=<ean>&Nty=1&format=json
+```
+
+`coto.ts#searchByEan` fetches that, recursively finds the record whose
+`product.eanPrincipal` exactly matches the EAN (so it ignores unrelated
+products in recommendation carousels), and builds the canonical URL from
+`record.id` — Coto resolves `/_/R-<id>` regardless of the (decorative) slug.
 
 ---
 

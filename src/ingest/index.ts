@@ -88,6 +88,10 @@ export function detectSupermarket(url: string): string {
   if (host.includes('masonline') || host.includes('changomas')) return 'changomas';
   if (host.includes('supermercadosdia') || host.includes('diaonline')) return 'dia';
   if (host.includes('cordiez')) return 'cordiez';
+  if (host.includes('supermami')) return 'mami';
+  if (host.includes('dipa.ar')) return 'parodi';
+  if (host.includes('superelcondor')) return 'el-condor';
+  if (host.includes('lareinaonline')) return 'la-reina';
   if (host.includes('maxiconsumo')) return 'maxiconsumo';
   if (host.includes('atomoconviene')) return 'atomo';
   if (host.includes('lacoopeencasa')) return 'lacoopeencasa';
