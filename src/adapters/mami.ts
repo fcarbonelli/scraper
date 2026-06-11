@@ -192,6 +192,19 @@ function findRecordNodeByEan(
 // HTTP layer
 // =============================================================================
 
+/**
+ * Undici surfaces network failures as a generic `TypeError: fetch failed` and
+ * stashes the real reason (ECONNRESET, ETIMEDOUT, ENOTFOUND, a TLS error, ...)
+ * on `error.cause`. Surface that so logs are actionable — "fetch failed" alone
+ * can't distinguish a transient blip from an IP-level block.
+ */
+function describeFetchError(err: unknown): string {
+  const e = err as { message?: string; cause?: unknown };
+  const cause = e.cause as { code?: string; message?: string } | undefined;
+  const detail = cause?.code ?? cause?.message;
+  return detail ? `${e.message ?? 'fetch failed'} (${detail})` : e.message ?? String(err);
+}
+
 async function fetchMami(
   url: string,
   signal: AbortSignal | undefined,
@@ -224,7 +237,7 @@ async function fetchMami(
     }
     throw new ScrapeError(
       'network_error',
-      `Super Mami request failed: ${(err as Error).message}`,
+      `Super Mami request failed: ${describeFetchError(err)}`,
       { cause: err },
     );
   } finally {
