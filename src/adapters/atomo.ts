@@ -19,6 +19,7 @@
 
 import { ScrapeError } from '../shared/errors.js';
 import type {
+  EanSearchResult,
   ProductInfo,
   Promotion,
   ScrapeContext,
@@ -27,7 +28,9 @@ import type {
 } from './types.js';
 
 const REQUEST_TIMEOUT_MS = 20_000;
+const SEARCH_TIMEOUT_MS = 20_000;
 const ATOMO_HOST = 'atomoconviene.com';
+const ATOMO_BASE_URL = 'https://atomoconviene.com';
 
 const USER_AGENT =
   'Mozilla/5.0 (compatible; PriceScraperBot/1.0; +https://example.com/bot)';
@@ -103,9 +106,14 @@ function extractProductIdFromUrl(canonicalUrl: string): string | null {
 async function fetchAtomoHtml(
   url: string,
   signal: AbortSignal | undefined,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+  // The search path 301-redirects to the canonical results URL, so it must
+  // follow redirects; the product (scrape) path keeps `manual` so an unknown
+  // id redirecting to home is detected as `product_not_found`.
+  followRedirects = false,
 ): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   if (signal) {
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
@@ -119,14 +127,14 @@ async function fetchAtomoHtml(
         Accept: 'text/html,application/xhtml+xml,*/*',
         'Accept-Language': 'es-AR,es;q=0.9',
       },
-      redirect: 'manual',
+      redirect: followRedirects ? 'follow' : 'manual',
       signal: controller.signal,
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
       throw new ScrapeError(
         'network_timeout',
-        `Atomo request timed out after ${REQUEST_TIMEOUT_MS}ms`,
+        `Atomo request timed out after ${timeoutMs}ms`,
         { cause: err },
       );
     }
@@ -225,6 +233,47 @@ function typesIncludeProduct(t: unknown): boolean {
 }
 
 // =============================================================================
+// EAN search (bulk product discovery)
+// =============================================================================
+
+/**
+ * Find a product by its EAN using PrestaShop's built-in search.
+ *
+ * Átomo's search (`?controller=search&s=<ean>`) indexes the barcode, so an EAN
+ * query returns the matching product page. As with DIPA we only accept a result
+ * whose product URL embeds the EAN — Átomo's friendly URLs end with
+ * `---<EAN>.html`, so this guarantees an exact match instead of a fuzzy one.
+ */
+async function searchByEan(
+  ean: string,
+  signal?: AbortSignal,
+): Promise<EanSearchResult | null> {
+  // Hit the canonical results URL directly (the `?controller=search` form
+  // 301-redirects here) and follow redirects so we land on the 200 results page.
+  const searchUrl = `${ATOMO_BASE_URL}/atomo-ecommerce/busqueda?s=${encodeURIComponent(
+    ean,
+  )}`;
+
+  let html: string;
+  try {
+    html = await fetchAtomoHtml(searchUrl, signal, SEARCH_TIMEOUT_MS, true);
+  } catch {
+    // Discovery treats any failure (incl. the "no results" redirect) as not found.
+    return null;
+  }
+
+  // Accept only a product link whose URL embeds the EAN (…-<EAN>.html). The
+  // leading `[^"]*` happily absorbs Átomo's `---` separator before the barcode.
+  const re = new RegExp(`href="(https?://[^"]*-${ean}\\.html)"`, 'i');
+  const m = html.match(re);
+  if (!m?.[1]) return null;
+
+  const url = canonicalizeUrl(m[1].replace(/&amp;/g, '&'));
+  const externalId = extractProductIdFromUrl(url);
+  return externalId ? { url, externalId } : { url };
+}
+
+// =============================================================================
 // Adapter
 // =============================================================================
 
@@ -233,6 +282,8 @@ export const atomoAdapter: SupermarketAdapter = {
   name: 'Átomo Conviene',
 
   canonicalizeUrl,
+
+  searchByEan,
 
   async resolveExternalId(canonicalUrl: string): Promise<string> {
     const id = extractProductIdFromUrl(canonicalUrl);

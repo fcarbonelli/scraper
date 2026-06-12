@@ -1,7 +1,8 @@
 /**
  * Client data endpoints.
  *
- *   GET /v1/data/pricing   — flat 31-column client view (paginated)
+ *   GET /v1/data/pricing   — flat 31-column client view (paginated JSON)
+ *   GET /v1/data/export    — download the same data as .xlsx or .csv
  *   GET /v1/data/coverage  — EAN coverage per supermarket (summary + detail)
  */
 
@@ -12,6 +13,12 @@ import { paginated, success } from '../lib/envelope.js';
 import { parseQuery } from '../lib/parseQuery.js';
 import { TAXONOMY_BY_EAN } from '../../shared/taxonomy.js';
 import { getAdapterCapabilities } from '../../adapters/registry.js';
+import {
+  fetchAllClientBase,
+  toCsv,
+  writeXlsx,
+  todayInBuenosAires,
+} from '../lib/exportClientBase.js';
 
 export const dataRouter = Router();
 
@@ -59,6 +66,71 @@ dataRouter.get('/pricing', async (req: Request, res: Response) => {
   if (error) throw error;
 
   res.json(paginated(data ?? [], count ?? 0, page, limit));
+});
+
+// =============================================================================
+// GET /v1/data/export
+//
+// Downloads client_base rows as a real .xlsx workbook (default) or .csv.
+// Intended for the "daily data" use case: with no params it returns just
+// today's data (Argentina time). Supports the same filters as /pricing.
+//
+//   ?format=xlsx|csv        file type (default xlsx)
+//   ?date=2026-06-11        single day (shorthand for from=to=date)
+//   ?from=...&to=...        explicit date range (on Fecha_Relevamiento)
+//   ?supermarket=coto,...   comma-separated chains
+//   ?canal=...  ?ean=...    channel / single EAN
+// =============================================================================
+
+const ExportQuery = z.object({
+  format: z.enum(['xlsx', 'csv']).default('xlsx'),
+  date: z.iso.date().optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  supermarket: z.string().trim().min(1).optional(),
+  canal: z.string().trim().min(1).optional(),
+  ean: z.string().trim().min(1).optional(),
+});
+
+dataRouter.get('/export', async (req: Request, res: Response) => {
+  const q = parseQuery(req, ExportQuery);
+
+  // Resolve the date window: an explicit `date` wins; otherwise use from/to;
+  // if nothing is given, default to today so "download daily data" just works.
+  let from = q.from;
+  let to = q.to;
+  if (q.date) {
+    from = q.date;
+    to = q.date;
+  }
+  if (!from && !to) {
+    const today = todayInBuenosAires();
+    from = today;
+    to = today;
+  }
+
+  // Fetch everything up front so any DB error surfaces as JSON before we
+  // start writing the download stream.
+  const rows = await fetchAllClientBase({
+    from,
+    to,
+    supermarket: q.supermarket,
+    canal: q.canal,
+    ean: q.ean,
+  });
+
+  const windowLabel = from && from === to ? from : `${from ?? 'inicio'}_${to ?? 'hoy'}`;
+  const filenameBase = `client-base_${windowLabel}`;
+
+  if (q.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filenameBase}.csv"`);
+    res.send(toCsv(rows));
+    return;
+  }
+
+  // xlsx: writeXlsx sets its own headers (after confirming exceljs is available).
+  await writeXlsx(res, rows, filenameBase);
 });
 
 // =============================================================================

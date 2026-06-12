@@ -21,6 +21,7 @@
 
 import { ScrapeError } from '../shared/errors.js';
 import type {
+  EanSearchResult,
   ProductInfo,
   Promotion,
   ScrapeContext,
@@ -31,8 +32,10 @@ import { runWithGeoFallback } from './geo-retry.js';
 import type { Zone } from './zones.js';
 
 const REQUEST_TIMEOUT_MS = 15_000;
+const SEARCH_TIMEOUT_MS = 20_000;
 const API_BASE = 'https://api.lacoopeencasa.coop/api';
 const PRODUCT_HOST = 'www.lacoopeencasa.coop';
+const SITE_ORIGIN = 'https://www.lacoopeencasa.coop';
 
 const USER_AGENT =
   'Mozilla/5.0 (compatible; PriceScraperBot/1.0; +https://example.com/bot)';
@@ -230,6 +233,120 @@ function parseFloatOrUndefined(v: string | null | undefined): number | undefined
 }
 
 // =============================================================================
+// EAN search (bulk product discovery)
+// =============================================================================
+
+/**
+ * Minimal shape of the `articulos/pagina_busqueda` response we read for search.
+ */
+interface LcecSearchArticulo {
+  cod_interno?: string;
+  descripcion?: string;
+}
+interface LcecSearchDatos {
+  cantidad_articulos?: number;
+  articulos?: LcecSearchArticulo[];
+}
+
+/**
+ * Slugify a product description into a single URL path segment so we can build
+ * the canonical `/producto/<slug>/<cod_interno>` URL. The slug is cosmetic —
+ * the Angular router (and our scraper) only need the trailing `cod_interno` —
+ * but we keep it human-readable for stored URLs.
+ */
+function slugify(input: string): string {
+  return (
+    input
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // strip accents
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'producto'
+  );
+}
+
+/**
+ * Find a product by EAN using the catalog search endpoint.
+ *
+ * La Coope's Angular SPA searches via `POST /api/articulos/pagina_busqueda`
+ * with the EAN as the free-text `termino`. The Be2 search indexes the barcode,
+ * so a real EAN returns exactly the matching article and a bogus one returns
+ * `cantidad_articulos: 0` with no recommendation fallback (verified) — meaning
+ * a non-empty result is a safe, exact match. The article's `cod_interno` is the
+ * same id the scraper uses, so we return it as the pre-resolved external id.
+ */
+async function searchByEan(
+  ean: string,
+  signal?: AbortSignal,
+): Promise<EanSearchResult | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  const body = JSON.stringify({
+    pagina: 0,
+    filtros: {
+      preciomenor: -1,
+      preciomayor: -1,
+      categoria: [],
+      marca: [],
+      tipo_seleccion: 'busqueda',
+      tipo_relacion: 'busqueda',
+      filtros_gramaje: [],
+      termino: ean,
+      cant_articulos: 0,
+      ofertas: false,
+      modificado: false,
+      primer_filtro: '',
+    },
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/articulos/pagina_busqueda`, {
+      method: 'POST',
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Content-Type': 'application/json',
+        Accept: 'application/json,text/plain,*/*',
+        'Accept-Language': 'es-AR,es;q=0.9',
+        Origin: SITE_ORIGIN,
+        Referer: `${SITE_ORIGIN}/`,
+      },
+      body,
+      signal: controller.signal,
+    });
+  } catch {
+    // Discovery treats any failure as "not found".
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) return null;
+
+  let parsed: LcecEnvelope<LcecSearchDatos>;
+  try {
+    parsed = JSON.parse(await res.text()) as LcecEnvelope<LcecSearchDatos>;
+  } catch {
+    return null;
+  }
+  if (parsed.estado !== 1 || !parsed.datos) return null;
+
+  // The barcode search returns the exact product (or nothing), and the API
+  // sorts by match relevance — so the first article is the EAN's product.
+  const top = parsed.datos.articulos?.[0];
+  const cod = top?.cod_interno?.trim();
+  if (!cod) return null;
+
+  const slug = top?.descripcion ? slugify(top.descripcion) : 'producto';
+  const url = `${SITE_ORIGIN}/producto/${slug}/${cod}`;
+  return { url, externalId: cod };
+}
+
+// =============================================================================
 // Adapter
 // =============================================================================
 
@@ -238,6 +355,8 @@ export const lacoopeencasaAdapter: SupermarketAdapter = {
   name: 'La Coope en Casa',
 
   canonicalizeUrl,
+
+  searchByEan,
 
   async resolveExternalId(canonicalUrl: string): Promise<string> {
     const id = extractProductId(canonicalUrl);
