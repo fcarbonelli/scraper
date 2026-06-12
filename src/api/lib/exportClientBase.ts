@@ -160,9 +160,14 @@ export async function writeXlsx(
   rows: ClientBaseRow[],
   filenameBase: string,
 ): Promise<void> {
-  let ExcelJS: (typeof import('exceljs'))['default'];
+  let ExcelJS: typeof import('exceljs');
   try {
-    ExcelJS = (await import('exceljs')).default;
+    // exceljs ships as CommonJS: under esModuleInterop the real module sits on
+    // `.default`, but its type only declares named exports (no `default`). Read
+    // it via an optional cast and fall back to the namespace so this compiles
+    // and runs regardless of the interop shape.
+    const mod = await import('exceljs');
+    ExcelJS = (mod as { default?: typeof import('exceljs') }).default ?? mod;
   } catch {
     throw new ApiError(
       'INTERNAL',
