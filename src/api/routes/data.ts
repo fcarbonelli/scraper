@@ -1,7 +1,7 @@
 /**
  * Client data endpoints.
  *
- *   GET /v1/data/pricing   — flat 31-column client view (paginated JSON)
+ *   GET /v1/data/pricing   — client pricing contract { ProcesadoOk, Error, PriceData, Paginacion }
  *   GET /v1/data/export    — download the same data as .xlsx or .csv
  *   GET /v1/data/coverage  — EAN coverage per supermarket (summary + detail)
  */
@@ -9,8 +9,9 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '../../shared/db.js';
-import { paginated, success } from '../lib/envelope.js';
+import { success } from '../lib/envelope.js';
 import { parseQuery } from '../lib/parseQuery.js';
+import { ApiError } from '../lib/apiError.js';
 import { TAXONOMY_BY_EAN } from '../../shared/taxonomy.js';
 import { getAdapterCapabilities } from '../../adapters/registry.js';
 import {
@@ -19,6 +20,11 @@ import {
   writeXlsx,
   todayInBuenosAires,
 } from '../lib/exportClientBase.js';
+import {
+  toPriceData,
+  buildPaginacion,
+  clientPricingSuccess,
+} from '../lib/clientPricing.js';
 
 export const dataRouter = Router();
 
@@ -34,7 +40,16 @@ const PricingQuery = z.object({
 });
 
 dataRouter.get('/pricing', async (req: Request, res: Response) => {
-  const q = parseQuery(req, PricingQuery);
+  // Validate explicitly so we can return a Spanish message in the client
+  // envelope (the global error handler renders it for this path).
+  const parsed = PricingQuery.safeParse(req.query);
+  if (!parsed.success) {
+    const detalle = parsed.error.issues
+      .map((i) => `${i.path.join('.') || 'query'}: ${i.message}`)
+      .join('; ');
+    throw ApiError.badRequest(`Parámetros de consulta inválidos: ${detalle}`);
+  }
+  const q = parsed.data;
   const page = q.page;
   const limit = q.limit;
   const offset = (page - 1) * limit;
@@ -63,9 +78,14 @@ dataRouter.get('/pricing', async (req: Request, res: Response) => {
   if (q.ean) query = query.eq('EAN', q.ean);
 
   const { data, error, count } = await query;
+  // On a DB error we throw: the global error handler renders the client-format
+  // error envelope ({ ProcesadoOk: false, ... }) for this path.
   if (error) throw error;
 
-  res.json(paginated(data ?? [], count ?? 0, page, limit));
+  const priceData = (data ?? []).map((row) =>
+    toPriceData(row as Record<string, unknown>),
+  );
+  res.json(clientPricingSuccess(priceData, buildPaginacion(page, limit, count ?? 0)));
 });
 
 // =============================================================================
