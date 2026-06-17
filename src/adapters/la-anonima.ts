@@ -1,0 +1,404 @@
+/**
+ * La Anónima Online adapter (bespoke platform).
+ *
+ * laanonima.com.ar runs a custom storefront (not VTEX/Magento/PrestaShop) but
+ * emits a clean schema.org `Product` JSON-LD block on every product page —
+ * including `gtin` (the EAN), `sku`, `brand.name`, `offers.price` and
+ * availability. We GET the page, regex out the JSON-LD, and read everything
+ * from there (no JS rendering, no auth).
+ *
+ * URL pattern: `/<slug>/art_<id>/`
+ *   e.g. `/aerosol-desinfectante-...-x-332-cc/art_2676140/`
+ *   → `<id>` (the numeric article id, also the JSON-LD `sku`) is the external_id.
+ *
+ * EAN discovery: the site search lives at `/buscar/<term>` and indexes the
+ * barcode. IMPORTANT — when a term has no match the site does NOT return an
+ * empty page; it renders a "No encontramos resultados" banner plus a
+ * "Quizás podría interesarte" carousel of ~unrelated recommended products. So
+ * `searchByEan` must detect that banner FIRST and bail, otherwise it would map
+ * every missing EAN onto a random recommended product. Only when the banner is
+ * absent do we take the (single) result's `art_<id>` link as the match.
+ *
+ * Branch note: prices are sucursal-scoped (the site shows e.g. "sucursal
+ * Neuquén"). We scrape whatever the site serves an anonymous visitor by
+ * default; per-branch geo-retry can be layered on later via config if needed.
+ */
+
+import { ScrapeError } from '../shared/errors.js';
+import type {
+  EanSearchResult,
+  ProductInfo,
+  Promotion,
+  ScrapeContext,
+  ScrapeResult,
+  SupermarketAdapter,
+} from './types.js';
+
+const REQUEST_TIMEOUT_MS = 20_000;
+const SEARCH_TIMEOUT_MS = 20_000;
+const LA_ANONIMA_HOST = 'laanonima.com.ar';
+const LA_ANONIMA_BASE_URL = 'https://www.laanonima.com.ar';
+
+// Present a realistic Chrome UA — the site's WAF 403s non-browser agents.
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// The "no results" banner the site renders for an unmatched search term.
+const NO_RESULTS_RE = /No encontramos resultados/i;
+
+// Capture the first product link of the form `/<slug>/art_<id>/`.
+const PRODUCT_LINK_RE = /href=["'](\/[^"']*\/art_(\d+)\/?)["']/i;
+
+// =============================================================================
+// JSON-LD shapes (only the fields we read are typed)
+// =============================================================================
+
+interface JsonLdNode {
+  '@type'?: string | string[];
+  [key: string]: unknown;
+}
+
+interface JsonLdProduct extends JsonLdNode {
+  name?: string;
+  sku?: string;
+  gtin?: string;
+  gtin13?: string;
+  category?: string;
+  image?: string | string[] | { url?: string };
+  brand?: { name?: string } | string;
+  offers?: JsonLdOffer | JsonLdOffer[];
+}
+
+interface JsonLdPriceSpec {
+  priceType?: string;
+  price?: string | number;
+}
+
+interface JsonLdOffer {
+  price?: string | number;
+  priceCurrency?: string;
+  availability?: string;
+  priceSpecification?: JsonLdPriceSpec | JsonLdPriceSpec[];
+}
+
+// =============================================================================
+// URL helpers
+// =============================================================================
+
+/** Strip query/hash, lowercase host; keep the path (incl. trailing slash). */
+function canonicalizeUrl(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    u.search = '';
+    u.hash = '';
+    u.hostname = u.hostname.toLowerCase();
+    return u.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+/** Pull the numeric `<id>` out of `…/art_<id>/`. */
+function extractProductIdFromUrl(canonicalUrl: string): string | null {
+  const m = canonicalUrl.match(/\/art_(\d+)\/?($|\?|#)/);
+  return m?.[1] ?? null;
+}
+
+// =============================================================================
+// HTTP layer
+// =============================================================================
+
+async function fetchLaAnonimaHtml(
+  url: string,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  if (signal) {
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'text/html,application/xhtml+xml,*/*',
+        'Accept-Language': 'es-AR,es;q=0.9',
+      },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new ScrapeError(
+        'network_timeout',
+        `La Anónima request timed out after ${timeoutMs}ms`,
+        { cause: err },
+      );
+    }
+    throw new ScrapeError(
+      'network_error',
+      `La Anónima request failed: ${(err as Error).message}`,
+      { cause: err },
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (res.status === 404) {
+    throw new ScrapeError('product_not_found', `La Anónima returned 404 for ${url}`, {
+      httpStatus: 404,
+    });
+  }
+  if (res.status === 403) {
+    throw new ScrapeError(
+      'network_error',
+      `La Anónima returned 403 (WAF block) for ${url}`,
+      { httpStatus: 403 },
+    );
+  }
+  if (res.status === 429) {
+    throw new ScrapeError('rate_limited', `La Anónima returned 429`, {
+      httpStatus: 429,
+    });
+  }
+  if (res.status >= 500) {
+    throw new ScrapeError('site_server_error', `La Anónima returned ${res.status}`, {
+      httpStatus: res.status,
+    });
+  }
+  if (!res.ok) {
+    throw new ScrapeError('unknown', `La Anónima returned status ${res.status}`, {
+      httpStatus: res.status,
+    });
+  }
+  return res.text();
+}
+
+// =============================================================================
+// JSON-LD extraction
+// =============================================================================
+
+const JSON_LD_RE =
+  /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+/** Pull the first `Product` JSON-LD block from the page. */
+export function extractProductJsonLd(html: string): JsonLdProduct | null {
+  for (const m of html.matchAll(JSON_LD_RE)) {
+    const raw = m[1];
+    if (!raw) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.trim());
+    } catch {
+      continue;
+    }
+    const found = findProductNode(parsed);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findProductNode(node: unknown): JsonLdProduct | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findProductNode(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  const o = node as JsonLdProduct & { '@graph'?: unknown };
+  if (typesIncludeProduct(o['@type'])) return o;
+  if (o['@graph']) return findProductNode(o['@graph']);
+  return null;
+}
+
+function typesIncludeProduct(t: unknown): boolean {
+  if (typeof t === 'string') return t === 'Product';
+  if (Array.isArray(t)) return t.includes('Product');
+  return false;
+}
+
+/** Coerce a JSON-LD price (number or string) into a finite number, else NaN. */
+function toNumber(v: string | number | undefined): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') return Number(v);
+  return NaN;
+}
+
+/** Normalize an EAN/gtin for comparison (digits only). */
+function normalizeEan(v: string): string {
+  return v.replace(/\D/g, '');
+}
+
+// =============================================================================
+// EAN search (bulk product discovery)
+// =============================================================================
+
+/**
+ * Find a product by EAN via the site search.
+ *
+ * Strategy:
+ *   1. GET `/buscar/<ean>`.
+ *   2. If the "No encontramos resultados" banner is present → not found. This
+ *      is essential: a no-match page is otherwise full of recommended-product
+ *      links that would cause false matches.
+ *   3. Otherwise take the first `/<slug>/art_<id>/` link as the match.
+ */
+async function searchByEan(
+  ean: string,
+  signal?: AbortSignal,
+): Promise<EanSearchResult | null> {
+  const searchUrl = `${LA_ANONIMA_BASE_URL}/buscar/${encodeURIComponent(ean)}`;
+
+  let html: string;
+  try {
+    html = await fetchLaAnonimaHtml(searchUrl, signal, SEARCH_TIMEOUT_MS);
+  } catch {
+    // Discovery treats any failure as "not found".
+    return null;
+  }
+
+  // No-match pages render a banner + recommendation carousel; bail before we
+  // mistake a recommended product for a real EAN match.
+  if (NO_RESULTS_RE.test(html)) return null;
+
+  const m = html.match(PRODUCT_LINK_RE);
+  if (!m?.[1] || !m[2]) return null;
+
+  const url = canonicalizeUrl(`${LA_ANONIMA_BASE_URL}${m[1].replace(/&amp;/g, '&')}`);
+  return { url, externalId: m[2] };
+}
+
+// =============================================================================
+// Adapter
+// =============================================================================
+
+export const laAnonimaAdapter: SupermarketAdapter = {
+  id: 'la-anonima',
+  name: 'La Anónima',
+
+  canonicalizeUrl,
+
+  searchByEan,
+
+  async resolveExternalId(canonicalUrl: string): Promise<string> {
+    const id = extractProductIdFromUrl(canonicalUrl);
+    if (!id) {
+      throw new ScrapeError(
+        'unknown',
+        `La Anónima URL doesn't match /<slug>/art_<id>/: ${canonicalUrl}`,
+      );
+    }
+    return id;
+  },
+
+  async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
+    if (!ctx.externalUrl) {
+      throw new ScrapeError(
+        'unknown',
+        `La Anónima adapter requires external_url; got null for sku=${ctx.externalId}`,
+      );
+    }
+    ctx.logger.debug({ url: ctx.externalUrl }, 'fetching La Anónima product HTML');
+    const html = await fetchLaAnonimaHtml(ctx.externalUrl, ctx.signal, REQUEST_TIMEOUT_MS);
+    return parseLaAnonimaHtml(html, ctx);
+  },
+};
+
+// =============================================================================
+// Pure parser — split for unit testing against saved HTML fixtures.
+// =============================================================================
+
+export function parseLaAnonimaHtml(
+  html: string,
+  ctx: Pick<ScrapeContext, 'externalId' | 'externalUrl'>,
+): ScrapeResult {
+  const product = extractProductJsonLd(html);
+  if (!product) {
+    throw new ScrapeError(
+      'selector_failed',
+      `La Anónima page has no Product JSON-LD block (sku=${ctx.externalId})`,
+    );
+  }
+
+  const offer: JsonLdOffer | undefined = Array.isArray(product.offers)
+    ? product.offers[0]
+    : product.offers;
+
+  // -- Price ---------------------------------------------------------------
+  const price = toNumber(offer?.price);
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new ScrapeError(
+      'price_missing',
+      `La Anónima JSON-LD has no usable price (sku=${ctx.externalId})`,
+    );
+  }
+  const currency = offer?.priceCurrency || 'ARS';
+
+  // -- List price (pre-discount): from a ListPrice priceSpecification, if it
+  //    is meaningfully above the offer price.
+  let listPrice: number | undefined;
+  const specs = offer?.priceSpecification;
+  const specList = Array.isArray(specs) ? specs : specs ? [specs] : [];
+  for (const s of specList) {
+    if (/ListPrice/i.test(s.priceType ?? '')) {
+      const lp = toNumber(s.price);
+      if (Number.isFinite(lp) && lp > price + 0.01) listPrice = lp;
+    }
+  }
+
+  // -- Stock ---------------------------------------------------------------
+  const availability = offer?.availability ?? '';
+  const inStock = availability ? /InStock/i.test(availability) : true;
+
+  // -- Image ---------------------------------------------------------------
+  let imageUrl: string | undefined;
+  if (typeof product.image === 'string') {
+    imageUrl = product.image;
+  } else if (Array.isArray(product.image)) {
+    const first = product.image[0];
+    if (typeof first === 'string') imageUrl = first;
+  } else if (product.image && typeof product.image === 'object') {
+    imageUrl = (product.image as { url?: string }).url;
+  }
+
+  // -- Brand (schema.org `brand.name`) -------------------------------------
+  let brand: string | undefined;
+  if (typeof product.brand === 'string') brand = product.brand;
+  else if (product.brand && typeof product.brand === 'object') brand = product.brand.name;
+
+  // -- Master catalog data -------------------------------------------------
+  const productInfo: ProductInfo = {};
+  if (product.name) productInfo.name = product.name.trim();
+  if (brand) productInfo.brand = brand.trim();
+  const ean = product.gtin ?? product.gtin13;
+  if (ean) productInfo.ean = normalizeEan(ean);
+  if (product.category) productInfo.category = product.category.trim();
+  if (imageUrl) productInfo.imageUrl = imageUrl;
+
+  const metadata: Record<string, unknown> = {};
+  if (product.sku) metadata.sku = product.sku;
+  if (Object.keys(metadata).length > 0) productInfo.metadata = metadata;
+
+  const result: ScrapeResult = {
+    price,
+    inStock,
+    currency,
+    tierUsed: 'html',
+    promotions: [] as Promotion[],
+    productInfo,
+    rawData: { jsonLd: product },
+  };
+  if (listPrice !== undefined) result.listPrice = listPrice;
+
+  return result;
+}
+
+/** Hostname helper used by `detectSupermarket`. Exported for tests. */
+export const LA_ANONIMA_HOSTNAME = LA_ANONIMA_HOST;
