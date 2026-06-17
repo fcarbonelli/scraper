@@ -5,7 +5,7 @@ Describe el endpoint disponible, la autenticación, los parámetros de consulta,
 estructura de la respuesta y el detalle de cada campo.
 
 > **Versión:** 1.0
-> **Base URL:** `https://<host>` (se informará el dominio definitivo en el entorno productivo)
+> **Base URL:** `https://api.meganalytics.net`
 > **Formato:** JSON (UTF-8)
 
 ---
@@ -48,7 +48,7 @@ grandes volúmenes de información.
 
 ```bash
 curl -H "X-API-Key: <clave-provista>" \
-  "https://<host>/v1/data/pricing?from=2025-10-01&to=2025-10-07&page=1&limit=100"
+  "https://api.meganalytics.net/v1/data/pricing?from=2025-10-01&to=2025-10-07&page=1&limit=100"
 ```
 
 ---
@@ -181,9 +181,9 @@ El objeto `Paginacion` permite recorrer la totalidad de los registros de a bloqu
 
 ```bash
 # Página 1
-curl -H "X-API-Key: <clave>" "https://<host>/v1/data/pricing?from=2025-10-06&to=2025-10-06&page=1&limit=500"
+curl -H "X-API-Key: <clave>" "https://api.meganalytics.net/v1/data/pricing?from=2025-10-06&to=2025-10-06&page=1&limit=500"
 # Página 2
-curl -H "X-API-Key: <clave>" "https://<host>/v1/data/pricing?from=2025-10-06&to=2025-10-06&page=2&limit=500"
+curl -H "X-API-Key: <clave>" "https://api.meganalytics.net/v1/data/pricing?from=2025-10-06&to=2025-10-06&page=2&limit=500"
 ```
 
 > **Recomendación:** para relevamientos diarios completos, filtrar por un día

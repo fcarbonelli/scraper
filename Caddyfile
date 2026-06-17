@@ -13,10 +13,10 @@
 #   sudo journalctl -u caddy -f
 
 # -----------------------------------------------------------------------------
-# REPLACE `api.example.com` with your real domain (e.g. api.megaanalytics.com)
-# before reloading Caddy. This is the only line you need to edit.
+# Production domain. Caddy auto-provisions and renews a Let's Encrypt TLS cert
+# for this host (requires DNS A record -> server IP, and ports 80 + 443 open).
 # -----------------------------------------------------------------------------
-api.example.com {
+api.meganalytics.net {
 	# Forward everything to the local Express API
 	reverse_proxy localhost:3000 {
 		# Pass real client IP through to the API logs
