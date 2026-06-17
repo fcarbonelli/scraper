@@ -357,13 +357,20 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
 
   searchByEan(ean: string) {
     // Maxi Carrefour URLs are literally /p/<EAN> — no search API needed.
-    // We probe the catalog to confirm the product exists before returning.
+    // We probe the public catalog (no cookie) to confirm the product exists.
+    // Unknown EANs return an empty fragment; known ones return the requested
+    // product as the FIRST cart_button (cross-sells follow). We require the
+    // first cart_button's data-ean to match so a recommendation can never be
+    // mistaken for the searched product.
     const url = `${BASE}/products?currentUrl=p/${encodeURIComponent(ean)}&method=getProductBasicData`;
     return fetchMaxiCarrefourFragment(url, undefined, undefined)
       .then((html) => {
         const desc = readCartButtonAttr(html, 'data-description');
-        // externalId = the EAN itself (that's how this adapter works)
-        return desc ? { url: `${BASE}/p/${ean}`, externalId: ean } : null;
+        const foundEan = readCartButtonAttr(html, 'data-ean');
+        // externalId = the EAN itself (that's how this adapter works).
+        return desc && foundEan === ean
+          ? { url: `${BASE}/p/${ean}`, externalId: ean }
+          : null;
       })
       .catch(() => null);
   },
