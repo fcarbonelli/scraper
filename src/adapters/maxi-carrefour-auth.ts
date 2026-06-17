@@ -744,6 +744,13 @@ export interface PersistOptions {
    * carries the operator's products). Set when verification passed.
    */
   autoPin?: boolean;
+  /**
+   * An EAN confirmed to unlock a real price with this cookie at the pinned
+   * sucursal. Stored as `config.canaryEan` and re-probed by the adapter to
+   * tell "cookie expired" apart from "product not stocked here". Set this
+   * when seeding so the server can detect expiry accurately.
+   */
+  canaryEan?: string;
 }
 
 /**
@@ -796,6 +803,9 @@ export async function persistCookie(
   if (result.expiresAt) next['phpSessIdExpiresAt'] = result.expiresAt;
   if (result.region) next['lastLoginRegion'] = result.region;
   if (result.seller) next['lastLoginSeller'] = result.seller;
+  // Store the canary EAN so the adapter can later distinguish an expired
+  // cookie from a product simply not stocked at the pinned sucursal.
+  if (opts.canaryEan) next['canaryEan'] = opts.canaryEan;
 
   // Auto-pin the verified sucursal: future refreshes start here instead of
   // scanning sellers from scratch. Operator can override by editing the
@@ -1081,7 +1091,11 @@ export async function refreshCookie(
           'maxi-carrefour: cookie unlocks prices for verifyEan — pinning sucursal',
         );
         // Persist + auto-pin so the NEXT refresh skips the sucursal search.
-        await persistCookie(config.id, result, logger, { autoPin: true });
+        // verifyEan unlocked a real price here, so it's a valid canary.
+        await persistCookie(config.id, result, logger, {
+          autoPin: true,
+          canaryEan: verifyEan,
+        });
         return result;
       }
 

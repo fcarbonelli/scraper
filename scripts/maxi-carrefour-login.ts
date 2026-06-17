@@ -151,6 +151,9 @@ async function main(): Promise<void> {
   // actually bound a seller — if data-price is "private" for everything,
   // the cookie isn't usable and there's no point persisting it.
   let probeRealCount: number | undefined;
+  // First EAN that unlocked a real price — stored as the cookie's canary so
+  // production can later tell "cookie expired" from "product not stocked".
+  let canaryEan: string | undefined;
   if (flags.probeEans?.length) {
     console.log('\n--- Cookie verification probes ---');
     let realCount = 0;
@@ -163,7 +166,10 @@ async function main(): Promise<void> {
             : dataPrice === 'private' || dataPrice === ''
             ? 'PRIVATE — cookie does NOT unlock prices for this EAN'
             : `REAL price = ${dataPrice}`;
-        if (dataPrice && dataPrice !== 'private' && dataPrice !== '') realCount++;
+        if (dataPrice && dataPrice !== 'private' && dataPrice !== '') {
+          realCount++;
+          if (!canaryEan) canaryEan = ean;
+        }
         console.log(`  ${ean}  →  ${verdict}${description ? ` [${description.slice(0, 60)}]` : ''}`);
       } catch (err) {
         console.log(`  ${ean}  →  ERROR: ${(err as Error).message}`);
@@ -199,8 +205,16 @@ async function main(): Promise<void> {
   }
 
   try {
-    await persistCookie('maxi-carrefour', result, logger);
-    console.log('\nPersisted to supermarkets.config.phpSessId');
+    await persistCookie(
+      'maxi-carrefour',
+      result,
+      logger,
+      canaryEan ? { canaryEan } : {},
+    );
+    console.log(
+      `\nPersisted to supermarkets.config.phpSessId` +
+        (canaryEan ? ` (canary EAN: ${canaryEan})` : ''),
+    );
   } catch (err) {
     logger.error({ err }, 'maxi-carrefour: failed to persist cookie to DB');
     process.exitCode = 1;

@@ -291,6 +291,61 @@ function extractProductInfo(html: string, externalId?: string): ProductInfo {
 }
 
 // =============================================================================
+// Cookie health canary
+// =============================================================================
+
+/**
+ * Process-level cache for the canary probe result, so a batch of "private"
+ * products in one scrape run doesn't re-probe the canary for each of them.
+ * Keyed by cookie value so a cookie change invalidates it.
+ */
+let canaryCache: { cookie: string; at: number; alive: boolean } | undefined;
+const CANARY_TTL_MS = 60_000;
+
+/**
+ * Check whether the current cookie still unlocks prices, by re-probing a
+ * "canary" EAN that was confirmed stocked at the pinned sucursal when the
+ * cookie was seeded. Used to tell a dead cookie (→ auth_required, re-seed)
+ * apart from a product that simply isn't carried at the pinned sucursal
+ * (→ product_not_found). Result is cached briefly (see canaryCache).
+ */
+async function isCookieAlive(
+  cookie: string,
+  canaryEan: string,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  if (
+    canaryCache &&
+    canaryCache.cookie === cookie &&
+    Date.now() - canaryCache.at < CANARY_TTL_MS
+  ) {
+    return canaryCache.alive;
+  }
+  const url = `${BASE}/products?currentUrl=p/${encodeURIComponent(
+    canaryEan,
+  )}&method=getProductBasicData`;
+  let alive = false;
+  try {
+    const html = await fetchMaxiCarrefourFragment(url, cookie, signal);
+    const price = readCartButtonAttr(html, 'data-price');
+    alive = Boolean(price && price !== 'private' && price !== '');
+  } catch {
+    alive = false;
+  }
+  canaryCache = { cookie, at: Date.now(), alive };
+  return alive;
+}
+
+/** Read `maxiCarrefourLogin.autoLogin` (default false — see scrape() notes). */
+function isAutoLoginEnabled(config: Record<string, unknown> | undefined): boolean {
+  const login = config?.['maxiCarrefourLogin'];
+  if (login && typeof login === 'object' && !Array.isArray(login)) {
+    return (login as { autoLogin?: boolean }).autoLogin === true;
+  }
+  return false;
+}
+
+// =============================================================================
 // Adapter
 // =============================================================================
 
@@ -381,18 +436,70 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
     });
     if (parsed.kind === 'ok') return parsed.result;
 
-    // -- Attempt 2: current seller didn't expose a price → log in via
-    // Playwright and search sucursales for THIS exact EAN. A cookie can be
-    // perfectly valid for one product but still return `private` for another
-    // product if the current sucursal doesn't carry it, so we must not use a
-    // "recently validated" cookie as proof that this EAN is unavailable.
+    // data-price="private" → the cookie didn't expose a price for THIS
+    // product. Two possible reasons:
+    //   (a) the product isn't stocked at the pinned sucursal, or
+    //   (b) the cookie expired / isn't bound to a seller.
     //
-    // refreshCookie loops sucursales until it finds one that returns a real
-    // price for THIS exact EAN, then auto-pins that sucursal so future
-    // refreshes start with the latest known-good seller.
-    // Process-level cooldown inside refreshCookie ensures we don't spam
-    // Playwright when reCAPTCHA is throttling — once one refresh fails,
-    // subsequent calls within ~30 min fail fast with the cached error.
+    // We used to resolve this with a headless Playwright re-login right here.
+    // But reCAPTCHA Enterprise scores our EC2 headless browser too low to
+    // EVER activate a session — verified empirically: local *headed* Edge
+    // harvests a working cookie, the SAME code headless on EC2 returns
+    // data-price="private" for everything. A headless re-login on the server
+    // therefore can't recover, and worse, it would overwrite the good cookie
+    // (seeded locally) with a dead one. So on the server we DON'T auto-login.
+    //
+    // Auto-login remains available behind an explicit opt-in
+    // (`maxiCarrefourLogin.autoLogin = true`) for environments with a real
+    // headed browser.
+    if (!isAutoLoginEnabled(ctx.config.config)) {
+      const canaryEan =
+        typeof ctx.config.config?.['canaryEan'] === 'string'
+          ? (ctx.config.config['canaryEan'] as string)
+          : undefined;
+
+      // No cookie configured at all → clearly an auth problem.
+      if (!cookie) {
+        throw new ScrapeError(
+          'auth_required',
+          `Maxi Carrefour: no PHPSESSID configured. Seed one locally: ` +
+            `npx tsx --env-file=.env scripts/maxi-carrefour-login.ts --edge --headed "--probe=<eans>"`,
+        );
+      }
+
+      // Canary present → disambiguate dead-cookie vs not-stocked.
+      if (canaryEan && canaryEan !== ctx.externalId) {
+        const alive = await isCookieAlive(cookie, canaryEan, ctx.signal);
+        if (alive) {
+          throw new ScrapeError(
+            'product_not_found',
+            `Maxi Carrefour: data-price="private" but cookie is alive ` +
+              `(canary ${canaryEan} unlocks) — product not stocked at the ` +
+              `pinned sucursal (ean=${ctx.externalId}).`,
+          );
+        }
+        throw new ScrapeError(
+          'auth_required',
+          `Maxi Carrefour: cookie expired/invalid (canary ${canaryEan} also ` +
+            `returns private). Re-seed locally: npx tsx --env-file=.env ` +
+            `scripts/maxi-carrefour-login.ts --edge --headed "--probe=<eans>"`,
+        );
+      }
+
+      // No canary to test (e.g. cookie seeded before canary support). Assume
+      // not-stocked to avoid spurious auth alerts on every missing product;
+      // a fully-dead cookie will surface as Maxi producing zero new prices.
+      throw new ScrapeError(
+        'product_not_found',
+        `Maxi Carrefour: data-price="private" (ean=${ctx.externalId}); no ` +
+          `canary configured to confirm cookie health. Re-seed locally to enable ` +
+          `accurate expiry detection.`,
+      );
+    }
+
+    // -- Attempt 2 (opt-in autoLogin only): log in via Playwright and search
+    // sucursales for THIS exact EAN. Only reachable in headed/real-browser
+    // environments where reCAPTCHA actually clears.
     ctx.logger.info(
       { hadCookie: Boolean(cookie), externalId: ctx.externalId },
       'maxi-carrefour: data-price=private, triggering Playwright relogin',
