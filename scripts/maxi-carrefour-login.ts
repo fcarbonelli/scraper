@@ -62,9 +62,11 @@ function parseFlags(argv: readonly string[]): Flags {
     if (arg.startsWith('--region=')) flags.region = arg.slice('--region='.length);
     if (arg.startsWith('--seller=')) flags.seller = arg.slice('--seller='.length);
     if (arg.startsWith('--probe=')) {
+      // Split on commas OR whitespace: some shells (notably PowerShell)
+      // rewrite `--probe=a,b,c` into `--probe=a b c`, so accept both.
       flags.probeEans = arg
         .slice('--probe='.length)
-        .split(',')
+        .split(/[\s,]+/)
         .map((s) => s.trim())
         .filter(Boolean);
     }
@@ -148,6 +150,7 @@ async function main(): Promise<void> {
   // report data-price. This is the ground-truth test of whether the login
   // actually bound a seller — if data-price is "private" for everything,
   // the cookie isn't usable and there's no point persisting it.
+  let probeRealCount: number | undefined;
   if (flags.probeEans?.length) {
     console.log('\n--- Cookie verification probes ---');
     let realCount = 0;
@@ -166,6 +169,7 @@ async function main(): Promise<void> {
         console.log(`  ${ean}  →  ERROR: ${(err as Error).message}`);
       }
     }
+    probeRealCount = realCount;
     console.log(
       `\nVerdict: ${realCount}/${flags.probeEans.length} EANs unlocked. ` +
         (realCount === 0
@@ -178,6 +182,19 @@ async function main(): Promise<void> {
 
   if (flags.dryRun) {
     console.log('\n(dry-run: not persisting to DB)');
+    return;
+  }
+
+  // Safety: never persist a cookie that we KNOW is broken. If probes were
+  // requested and NONE unlocked a price, the cookie doesn't bind a seller —
+  // writing it to the DB would just poison production with a dead session.
+  // (When no probes are requested we can't tell, so we persist as before.)
+  if (probeRealCount === 0) {
+    console.log(
+      '\nNOT persisting: 0 EANs unlocked — this cookie is broken. ' +
+        'Re-run (with --edge --headed) until the verdict shows at least 1 unlocked.',
+    );
+    process.exitCode = 1;
     return;
   }
 

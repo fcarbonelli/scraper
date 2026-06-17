@@ -43,6 +43,12 @@ import type { SupermarketConfig } from './types.js';
 const HOST = 'comerciante.carrefour.com.ar';
 const HOMEPAGE = `https://${HOST}/`;
 
+// Delivery mode passed to the `sellersLists` endpoint and selected in the
+// login wizard's step 2. '0' = "retiro" (pickup at store), '1' = "envio"
+// (ship to business). We use retiro: it exposes far more sucursales (e.g.
+// CABA returns 9 for retiro vs 2 for envio), maximizing product coverage.
+const DELIVERY_TYPE = '0';
+
 // Time budget for the whole login flow. The site can be slow (forms reveal
 // step-by-step, reCAPTCHA token fetch round-trips Google), so be generous —
 // but bail eventually so a stuck flow doesn't hang the worker.
@@ -298,53 +304,56 @@ export async function loginAndGetCookie(
       await ingresarBtn.click({ trial: false }).catch(() => undefined);
     }
 
-    // Step 1: choose "comerciante" (business). The visible #business card has
-    // onclick="goToStep2()" which only does setStep(2) + a GA event — it does
-    // NOT actually check the hidden radio button. The radios:
+    // ---------------------------------------------------------------------
+    // The login modal is a 3-step wizard (the site added step 2 — delivery
+    // mode — in mid-2026; before that it was 2 steps):
     //
-    //   <input type="radio" name="delivery" value="customer" style="display:none;">
-    //   <input type="radio" name="delivery" value="business" style="display:none;">
+    //   step1: choose "comerciante" (business) vs "consumidor" (customer).
+    //          #business has onclick="goToStep2()".
+    //   step2: choose delivery mode — "retiro" (pickup at store) or "envio"
+    //          (ship to business). Selecting one enables #btn_step2
+    //          ("Siguiente") AND triggers getZoneInfo(deliveryType) which
+    //          populates #region. #btn_step2 then calls goToStep3().
+    //   step3: province (#region) + sucursal (#seller) + contact fields.
+    //          #region/#seller only populate AFTER a delivery mode is picked,
+    //          and the contact inputs are display:none until step3 is shown.
     //
-    // are both unchecked at form-submit time unless we explicitly check one.
-    // Real users probably pass server validation by some lenient default,
-    // BUT crucially the server appears to use this field to bind the session
-    // to "comerciante" mode (= business with a seller). Without it, the
-    // PHPSESSID gets set but no seller binding happens — every product
-    // request comes back data-price="private" even after a "successful"
-    // login. That's exactly what we observed in production.
-    logger.debug({}, 'maxi-carrefour: clicking business card + setting delivery=business radio');
-    await page.locator('#business').click();
-    await page.evaluate(() => {
-      type Doc = { querySelector(s: string): unknown };
-      type Radio = { checked: boolean; dispatchEvent(e: Event): boolean };
-      const radio = (globalThis as { document?: Doc }).document?.querySelector(
-        'input[name="delivery"][value="business"]',
-      ) as Radio | null;
-      if (radio) {
-        radio.checked = true;
-        radio.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
+    // We use "retiro" (DELIVERY_TYPE='0'): the sellersLists endpoint returns
+    // far more sucursales for pickup than for ship (e.g. CABA: 9 vs 2), which
+    // maximizes product coverage.
+    // ---------------------------------------------------------------------
 
-    // Step 2: pick region (province), then load + pick a seller.
+    // Step 1 → 2: pick "comerciante".
+    logger.debug({}, 'maxi-carrefour: step1 → clicking business card');
+    await page.locator('#business').click();
+
+    // Step 2: select "retiro" delivery mode. The site's click handler sets the
+    // hidden `selected_delivery` input + `delivery` radio (which login.php uses
+    // to resolve the sucursal master), enables "Siguiente", and kicks off the
+    // region XHR. We click the real card so all of that fires natively.
+    logger.debug({}, 'maxi-carrefour: step2 → selecting retiro delivery mode');
+    await page.locator('#retiro').click();
+
+    // Advance to step3 so the contact inputs become visible (Playwright's
+    // fill() needs visible/editable elements). #btn_step2 only gets its
+    // click→goToStep3 handler after a delivery mode is chosen, hence the order.
+    logger.debug({}, 'maxi-carrefour: step2 → clicking Siguiente');
+    await page.locator('#btn_step2').click();
+
+    // Step 3: pick region (province), then load + pick a seller.
     //
     // We DON'T rely on the site's inline `onchange="onchangeSelect(this)"`
     // handler chain to populate the seller dropdown. That chain is fragile
     // under automation — Playwright's selectOption fires synthetic events
     // that occasionally don't trigger the inline handler, and even when they
     // do, there's a race between the XHR completing and our pick logic.
+    // Instead we fetch the seller list ourselves (same endpoint) and inject it.
     //
-    // Instead we:
-    //   1. Wait for #region to populate (the site loads it on doc.ready).
-    //   2. Pick a region value from the populated <option>s.
-    //   3. Fetch the seller list DIRECTLY from /seller?method=sellersLists
-    //      inside the page context (same endpoint the site uses), giving us
-    //      full visibility into which sellers carry delivery (envio="1")
-    //      and which don't.
-    //   4. Inject the response into #seller.innerHTML and set the value
-    //      ourselves — no inline-onchange dependency.
-    logger.debug({}, 'maxi-carrefour: waiting for regions to load');
-    await waitForOptions(page, '#region', 20_000);
+    // #region is populated by getFilteredZoneInfo(), which fires one
+    // sellersLists probe PER zone (~23) to mark zones with no stock as
+    // disabled — so it can take a while. Use a generous timeout.
+    logger.debug({}, 'maxi-carrefour: step3 → waiting for regions to load');
+    await waitForOptions(page, '#region', 40_000);
 
     logger.debug({}, 'maxi-carrefour: selecting region');
     const region = await pickFirstRealOption(page, '#region', loginCfg, 'region');
@@ -361,8 +370,8 @@ export async function loginAndGetCookie(
     if (!seller) {
       throw new ScrapeError(
         'auth_required',
-        `Maxi Carrefour: no seller with delivery (envio="1") in region ` +
-          `"${region}" (skipSellers=${(loginCfg.skipSellers ?? []).join(',')}).`,
+        `Maxi Carrefour: no seller available in region ` +
+          `"${region}" for retiro (skipSellers=${(loginCfg.skipSellers ?? []).join(',')}).`,
       );
     }
 
@@ -542,7 +551,12 @@ async function pickFirstRealOption(
       field: 'region' | 'seller';
       regionPriority: readonly string[];
     }): string | undefined => {
-      type Opt = { value: string; text?: string; textContent?: string | null };
+      type Opt = {
+        value: string;
+        text?: string;
+        textContent?: string | null;
+        disabled?: boolean;
+      };
       type Sel = { options: ArrayLike<Opt> } | null;
       const el = (globalThis as { document?: { querySelector(s: string): unknown } })
         .document?.querySelector(args.sel) as Sel;
@@ -553,6 +567,9 @@ async function pickFirstRealOption(
       for (let i = 0; i < el.options.length; i++) {
         const o = el.options[i];
         if (!o || !o.value) continue;
+        // Skip disabled options. getFilteredZoneInfo() marks zones with no
+        // sucursales for the chosen delivery type as disabled.
+        if (o.disabled) continue;
         if (placeholderValues.has(o.value)) continue;
         const txt = (o.text ?? o.textContent ?? '').trim();
         if (placeholderText.test(txt)) continue;
@@ -607,7 +624,7 @@ async function fetchAndPickSeller(
   // 1. Fetch the raw <option>...</option> HTML the site would inject.
   type FetchResult = { ok: true; html: string } | { ok: false; error: string };
   const fetched = (await page.evaluate(
-    async (zone: string): Promise<FetchResult> => {
+    async (args: { zone: string; deliveryType: string }): Promise<FetchResult> => {
       type FetchFn = (
         url: string,
         init: { method: string; headers: Record<string, string>; body: string },
@@ -623,7 +640,7 @@ async function fetchAndPickSeller(
             'Content-Type': 'application/x-www-form-urlencoded',
             'X-Requested-With': 'XMLHttpRequest',
           },
-          body: `zoneId=${encodeURIComponent(zone)}`,
+          body: `zoneId=${encodeURIComponent(args.zone)}&deliveryType=${encodeURIComponent(args.deliveryType)}`,
         });
         if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
         return { ok: true, html: await res.text() };
@@ -631,7 +648,7 @@ async function fetchAndPickSeller(
         return { ok: false, error: (err as Error).message };
       }
     },
-    region,
+    { zone: region, deliveryType: DELIVERY_TYPE },
   )) as FetchResult;
   if (!fetched.ok) {
     throw new ScrapeError(
@@ -641,15 +658,19 @@ async function fetchAndPickSeller(
   }
 
   // 2. Parse + pick a seller in page context. We pick the first option with
-  //    a real numeric value, envio="1" (carrier ships from there), and
-  //    that isn't on the skip list. Operator pin overrides the search.
+  //    a real numeric value that isn't on the skip list. Operator pin
+  //    overrides the search.
+  //
+  //    Note: the `sellersLists` endpoint now takes a `deliveryType` param and
+  //    pre-filters server-side, so EVERY returned option is valid for retiro.
+  //    The old `envio="1"` attribute is gone — we no longer filter on it.
   const exactSellerPin =
     cfg.pick !== 'first' && cfg.pick.seller ? cfg.pick.seller : undefined;
   const skipSellers = cfg.skipSellers ?? [];
-  type PickResult = { value: string; text: string; envio: string } | null;
+  type PickResult = { value: string; text: string } | null;
   const picked = (await page.evaluate(
     (args: { html: string; skip: string[]; exact: string | undefined }): PickResult => {
-      type Opt = { value: string; text?: string; getAttribute(name: string): string | null };
+      type Opt = { value: string; text?: string; disabled?: boolean };
       type Doc = {
         createElement(tag: string): { innerHTML: string; querySelector(s: string): unknown };
       };
@@ -665,16 +686,15 @@ async function fetchAndPickSeller(
       for (let i = 0; i < select.options.length; i++) {
         const o = select.options[i];
         if (!o || !o.value) continue;
+        if (o.disabled) continue;
         if (placeholderValues.has(o.value)) continue;
-        const envio = o.getAttribute('envio') ?? '';
         const text = (o.text ?? '').trim();
         if (args.exact !== undefined) {
-          if (o.value === args.exact) return { value: o.value, text, envio };
+          if (o.value === args.exact) return { value: o.value, text };
           continue;
         }
-        if (envio !== '1') continue; // skip envio="0" — site silently rejects
         if (args.skip.indexOf(o.value) !== -1) continue;
-        return { value: o.value, text, envio };
+        return { value: o.value, text };
       }
       return null;
     },
@@ -691,8 +711,8 @@ async function fetchAndPickSeller(
   // 3. Inject the freshly-fetched options into #seller and commit our pick.
   //    Setting innerHTML mirrors what the site's getSellerList() would have
   //    done. Then we set the value + fire change, which runs the site's
-  //    onchangeSelect handler (envio check, ship-info display) for parity
-  //    with a manual selection.
+  //    onchangeSelect handler (updates step3 button state) for parity with a
+  //    manual selection.
   await page.evaluate(
     (args: { html: string; sellerValue: string }) => {
       type Sel = { innerHTML: string; value: string; dispatchEvent(e: Event): boolean };
@@ -707,7 +727,7 @@ async function fetchAndPickSeller(
     { html: fetched.html, sellerValue: picked.value },
   );
   logger.debug(
-    { region, seller: picked.value, sellerText: picked.text, envio: picked.envio },
+    { region, seller: picked.value, sellerText: picked.text },
     'maxi-carrefour: seller injected + selected',
   );
   return picked.value;
