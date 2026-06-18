@@ -18,7 +18,8 @@
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { getAdapter } from '../adapters/registry.js';
-import type { ScrapeContext } from '../adapters/types.js';
+import type { ProductInfo, ScrapeContext } from '../adapters/types.js';
+import { ScrapeError } from '../shared/errors.js';
 import { lookupTaxonomy } from '../shared/taxonomy.js';
 import { processJob, type ProcessJobResult } from '../worker/processJob.js';
 
@@ -193,9 +194,32 @@ export async function ensureSupermarketProduct(
     logger: logger.child({ supermarket: supermarketId, externalId }),
   };
   logger.debug({ url: canonical, externalId }, 'adapter probe to extract product info');
-  const info = adapter.probe
-    ? await adapter.probe(ctx)
-    : (await adapter.scrape(ctx)).productInfo ?? {};
+
+  // The probe is best-effort ENRICHMENT, not a gate. The operator is adding a
+  // URL they already know is valid (e.g. pasted from the "missing products"
+  // view), so a momentarily-down adapter, a network blip, a rate limit, or an
+  // unparseable page must NOT block registration — the URL still gets stored
+  // and the next scheduled scrape (running in the worker with a far larger
+  // time budget) backfills price + metadata.
+  //
+  // The single exception is a hard `product_not_found`: the site explicitly
+  // says this URL is a 404, which is the one signal that the URL itself is bad.
+  // That re-throws so the API surfaces a 400.
+  let info: ProductInfo;
+  try {
+    info = adapter.probe
+      ? await adapter.probe(ctx)
+      : (await adapter.scrape(ctx)).productInfo ?? {};
+  } catch (err) {
+    if (err instanceof ScrapeError && err.type === 'product_not_found') {
+      throw err;
+    }
+    ctx.logger.warn(
+      { err, url: canonical },
+      'adapter probe failed during ingest; registering URL with placeholder metadata for the next scheduled scrape',
+    );
+    info = {};
+  }
 
   // Auto-enrich from client's taxonomy reference when the EAN is known.
   const taxonomy = info.ean ? lookupTaxonomy(info.ean) : undefined;

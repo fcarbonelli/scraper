@@ -130,9 +130,12 @@ productsRouter.post('/', async (req: Request, res: Response) => {
       skipScrapeIfExists: true,
     });
   } catch (err) {
-    // Anything thrown here is the user's URL being unprocessable —
-    // unknown supermarket host, dead URL, supermarket marked inactive,
-    // adapter probe failure, etc. Surface as 400 with the message.
+    // Anything thrown here means the URL is genuinely unprocessable —
+    // unknown supermarket host, supermarket marked inactive, or the site
+    // explicitly says the product doesn't exist (404 / product_not_found).
+    // A merely-down adapter or transient fetch failure does NOT reach here:
+    // the ingest layer tolerates probe failures and still registers the URL
+    // (the next scheduled scrape backfills price + metadata). Surface as 400.
     const message = err instanceof Error ? err.message : String(err);
     logger.warn({ err, url: body.url }, 'POST /v1/products ingest failed');
     throw ApiError.badRequest(message);
