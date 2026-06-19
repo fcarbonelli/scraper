@@ -25,6 +25,7 @@ import { elCondorAdapter } from './el-condor.js';
 import { laReinaAdapter } from './la-reina.js';
 import { laAnonimaAdapter } from './la-anonima.js';
 import { californiaAdapter } from './california.js';
+import { laGenovesaAdapter } from './la-genovesa.js';
 
 const adapters = new Map<string, SupermarketAdapter>();
 
@@ -54,6 +55,7 @@ register(elCondorAdapter);
 register(laReinaAdapter);
 register(laAnonimaAdapter);
 register(californiaAdapter);
+register(laGenovesaAdapter);
 
 export function getAdapter(supermarketId: string): SupermarketAdapter {
   const adapter = adapters.get(supermarketId);
