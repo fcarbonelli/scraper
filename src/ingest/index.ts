@@ -97,6 +97,7 @@ export function detectSupermarket(url: string): string {
   if (host.includes('atomoconviene')) return 'atomo';
   if (host.includes('lacoopeencasa')) return 'lacoopeencasa';
   if (host.includes('laanonima')) return 'la-anonima';
+  if (host.includes('californiasa')) return 'california';
   throw new Error(`No supermarket adapter known for host "${host}"`);
 }
 
