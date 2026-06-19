@@ -35,9 +35,16 @@ import { logger } from '../src/shared/logger.js';
 
 const HOST = 'comerciante.carrefour.com.ar';
 
+interface MaxiSession {
+  phpSessId?: string;
+  canaryEan?: string;
+  seller?: string;
+}
+
 interface MaxiConfig {
   phpSessId?: string;
   canaryEan?: string;
+  maxiSessions?: MaxiSession[];
 }
 
 /** Fetch the canary product with the cookie; return its data-price (or null). */
@@ -78,48 +85,74 @@ async function main(): Promise<void> {
   }
 
   const config = (row?.config ?? {}) as MaxiConfig;
-  const cookie = config.phpSessId;
-  const canaryEan = config.canaryEan;
 
-  if (!cookie) {
-    logger.warn({}, 'maxi-keepalive: no PHPSESSID configured — nothing to keep warm');
+  // Collect every seeded session: the primary cookie plus any fallback
+  // sucursales in config.maxiSessions. We keep them ALL warm so the adapter's
+  // multi-sucursal retry has live cookies to fall back on. Dedupe by cookie.
+  const sessions: MaxiSession[] = [];
+  const seen = new Set<string>();
+  if (config.phpSessId) {
+    sessions.push({ phpSessId: config.phpSessId, canaryEan: config.canaryEan, seller: 'primary' });
+    seen.add(config.phpSessId);
+  }
+  for (const s of config.maxiSessions ?? []) {
+    if (s?.phpSessId && !seen.has(s.phpSessId)) {
+      sessions.push(s);
+      seen.add(s.phpSessId);
+    }
+  }
+
+  if (sessions.length === 0) {
+    logger.warn({}, 'maxi-keepalive: no sessions configured — nothing to keep warm');
     return;
   }
-  if (!canaryEan) {
-    logger.warn(
-      {},
-      'maxi-keepalive: no canaryEan configured — re-seed locally to enable keepalive checks',
-    );
-    return;
+
+  let aliveCount = 0;
+  let deadCount = 0;
+  for (const session of sessions) {
+    const cookie = session.phpSessId!;
+    const canaryEan = session.canaryEan;
+    if (!canaryEan) {
+      logger.warn(
+        { seller: session.seller },
+        'maxi-keepalive: session has no canaryEan — cannot verify (re-seed to enable)',
+      );
+      continue;
+    }
+
+    // Touch the homepage first with the cookie. The product endpoint is a
+    // read; the homepage does a full session_start and is more likely to
+    // re-write the session (CSRF/flash state), refreshing its last-write time
+    // so PHP's GC (mtime-based) doesn't reap it. Best-effort — ignore errors.
+    await fetch(`https://${HOST}/`, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        'Accept-Language': 'es-AR,es;q=0.9',
+        Cookie: `PHPSESSID=${cookie}`,
+      },
+    }).catch(() => undefined);
+
+    const price = await probePrice(cookie, canaryEan);
+    const alive = Boolean(price && price !== 'private' && price !== '');
+    if (alive) {
+      aliveCount++;
+      logger.info({ seller: session.seller, canaryEan, price }, 'maxi-keepalive: session alive (kept warm)');
+    } else {
+      deadCount++;
+      logger.warn(
+        { seller: session.seller, canaryEan, price: price ?? 'none' },
+        'maxi-keepalive: session DEAD — re-seed from a residential IP ' +
+          '(npx tsx --env-file=.env scripts/maxi-carrefour-login.ts --edge --headed "--probe=<eans>")',
+      );
+    }
   }
 
-  // Touch the homepage first with the cookie. The product endpoint is a
-  // read; the homepage does a full session_start and is more likely to
-  // re-write the session (CSRF/flash state), refreshing its last-write time
-  // so PHP's GC (mtime-based) doesn't reap it. Best-effort — ignore errors.
-  await fetch(`https://${HOST}/`, {
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-      'Accept-Language': 'es-AR,es;q=0.9',
-      Cookie: `PHPSESSID=${cookie}`,
-    },
-  }).catch(() => undefined);
-
-  const price = await probePrice(cookie, canaryEan);
-  const alive = Boolean(price && price !== 'private' && price !== '');
-
-  if (alive) {
-    logger.info({ canaryEan, price }, 'maxi-keepalive: session alive (kept warm)');
-  } else {
-    logger.warn(
-      { canaryEan, price: price ?? 'none' },
-      'maxi-keepalive: session DEAD — re-seed from a residential IP ' +
-        '(npx tsx --env-file=.env scripts/maxi-carrefour-login.ts --edge --headed "--probe=<eans>")',
-    );
-    process.exitCode = 1;
-  }
+  logger.info({ aliveCount, deadCount, total: sessions.length }, 'maxi-keepalive: done');
+  // Non-zero exit if every session is dead — signals an operator alert while
+  // tolerating a single stale fallback.
+  if (aliveCount === 0) process.exitCode = 1;
 }
 
 void main();

@@ -345,6 +345,53 @@ function isAutoLoginEnabled(config: Record<string, unknown> | undefined): boolea
   return false;
 }
 
+/** One seeded session: a cookie bound to a sucursal, plus a canary EAN. */
+export interface MaxiSession {
+  phpSessId: string;
+  canaryEan?: string;
+  seller?: string;
+}
+
+/**
+ * Build the ordered list of sessions the scrape should try, each bound to a
+ * different sucursal so a product missing at one can be found at another.
+ *
+ *   - The primary session (`config.phpSessId` + `config.canaryEan`) always
+ *     comes first — this is the original single-cookie behavior, untouched.
+ *   - Any extra sessions in `config.maxiSessions` (seeded with the login
+ *     script's `--append`) are appended as fallbacks.
+ *
+ * Dedupe by cookie value so the primary isn't tried twice.
+ */
+function loadSessions(config: Record<string, unknown> | undefined): MaxiSession[] {
+  const sessions: MaxiSession[] = [];
+  const seen = new Set<string>();
+
+  const primaryCookie = loadCookieFromConfig(config);
+  const primaryCanary =
+    typeof config?.['canaryEan'] === 'string' ? (config['canaryEan'] as string) : undefined;
+  if (primaryCookie) {
+    sessions.push({ phpSessId: primaryCookie, ...(primaryCanary ? { canaryEan: primaryCanary } : {}) });
+    seen.add(primaryCookie);
+  }
+
+  const extra = config?.['maxiSessions'];
+  if (Array.isArray(extra)) {
+    for (const s of extra) {
+      if (!s || typeof s !== 'object') continue;
+      const rec = s as Record<string, unknown>;
+      const phpSessId = typeof rec['phpSessId'] === 'string' ? rec['phpSessId'] : undefined;
+      if (!phpSessId || seen.has(phpSessId)) continue;
+      const session: MaxiSession = { phpSessId };
+      if (typeof rec['canaryEan'] === 'string') session.canaryEan = rec['canaryEan'];
+      if (typeof rec['seller'] === 'string') session.seller = rec['seller'];
+      sessions.push(session);
+      seen.add(phpSessId);
+    }
+  }
+  return sessions;
+}
+
 // =============================================================================
 // Adapter
 // =============================================================================
@@ -433,93 +480,104 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
       ctx.externalId,
     )}&method=getProductBasicData`;
 
-    // -- Attempt 1: use whatever cookie is already configured (DB → env). ---
-    let cookie = loadCookieFromConfig(ctx.config.config);
-    ctx.logger.debug({ url, hasSession: Boolean(cookie) }, 'fetching Maxi Carrefour fragment');
-    let html = await fetchMaxiCarrefourFragment(url, cookie, ctx.signal);
-    let parsed = parseMaxiCarrefourFragment(html, ctx, {
-      hasSession: Boolean(cookie),
-      throwOnPrivate: false,
-    });
-    if (parsed.kind === 'ok') return parsed.result;
+    // Try each seeded session (each bound to a different sucursal) in order.
+    // The first one that exposes a real price wins. A product missing at the
+    // primary sucursal (data-price="private" or no cart_button) is retried at
+    // the fallback sucursales — without any re-login, since the price endpoint
+    // only depends on the session's bound seller. See loadSessions().
+    const sessions = loadSessions(ctx.config.config);
 
-    // data-price="private" → the cookie didn't expose a price for THIS
-    // product. Two possible reasons:
-    //   (a) the product isn't stocked at the pinned sucursal, or
-    //   (b) the cookie expired / isn't bound to a seller.
-    //
-    // We used to resolve this with a headless Playwright re-login right here.
-    // But reCAPTCHA Enterprise scores our EC2 headless browser too low to
-    // EVER activate a session — verified empirically: local *headed* Edge
-    // harvests a working cookie, the SAME code headless on EC2 returns
-    // data-price="private" for everything. A headless re-login on the server
-    // therefore can't recover, and worse, it would overwrite the good cookie
-    // (seeded locally) with a dead one. So on the server we DON'T auto-login.
-    //
-    // Auto-login remains available behind an explicit opt-in
-    // (`maxiCarrefourLogin.autoLogin = true`) for environments with a real
-    // headed browser.
-    if (!isAutoLoginEnabled(ctx.config.config)) {
-      const canaryEan =
-        typeof ctx.config.config?.['canaryEan'] === 'string'
-          ? (ctx.config.config['canaryEan'] as string)
-          : undefined;
-
-      // No cookie configured at all → clearly an auth problem.
-      if (!cookie) {
-        throw new ScrapeError(
-          'auth_required',
-          `Maxi Carrefour: no PHPSESSID configured. Seed one locally: ` +
-            `npx tsx --env-file=.env scripts/maxi-carrefour-login.ts --edge --headed "--probe=<eans>"`,
-        );
-      }
-
-      // Canary present → disambiguate dead-cookie vs not-stocked.
-      if (canaryEan && canaryEan !== ctx.externalId) {
-        const alive = await isCookieAlive(cookie, canaryEan, ctx.signal);
-        if (alive) {
-          throw new ScrapeError(
-            'product_not_found',
-            `Maxi Carrefour: data-price="private" but cookie is alive ` +
-              `(canary ${canaryEan} unlocks) — product not stocked at the ` +
-              `pinned sucursal (ean=${ctx.externalId}).`,
-          );
-        }
-        throw new ScrapeError(
-          'auth_required',
-          `Maxi Carrefour: cookie expired/invalid (canary ${canaryEan} also ` +
-            `returns private). Re-seed locally: npx tsx --env-file=.env ` +
-            `scripts/maxi-carrefour-login.ts --edge --headed "--probe=<eans>"`,
-        );
-      }
-
-      // No canary to test (e.g. cookie seeded before canary support). Assume
-      // not-stocked to avoid spurious auth alerts on every missing product;
-      // a fully-dead cookie will surface as Maxi producing zero new prices.
+    // No cookie configured anywhere → clearly an auth problem.
+    if (sessions.length === 0) {
       throw new ScrapeError(
-        'product_not_found',
-        `Maxi Carrefour: data-price="private" (ean=${ctx.externalId}); no ` +
-          `canary configured to confirm cookie health. Re-seed locally to enable ` +
-          `accurate expiry detection.`,
+        'auth_required',
+        `Maxi Carrefour: no PHPSESSID configured. Seed one locally: ` +
+          `npx tsx --env-file=.env scripts/maxi-carrefour-login.ts --edge --headed "--probe=<eans>"`,
       );
     }
 
-    // -- Attempt 2 (opt-in autoLogin only): log in via Playwright and search
-    // sucursales for THIS exact EAN. Only reachable in headed/real-browser
-    // environments where reCAPTCHA actually clears.
-    ctx.logger.info(
-      { hadCookie: Boolean(cookie), externalId: ctx.externalId },
-      'maxi-carrefour: data-price=private, triggering Playwright relogin',
+    let anyAlive = false;
+    for (let i = 0; i < sessions.length; i++) {
+      const session = sessions[i]!;
+      ctx.logger.debug(
+        { url, sessionIndex: i, seller: session.seller, total: sessions.length },
+        'fetching Maxi Carrefour fragment',
+      );
+      try {
+        const html = await fetchMaxiCarrefourFragment(url, session.phpSessId, ctx.signal);
+        const parsed = parseMaxiCarrefourFragment(html, ctx, {
+          hasSession: true,
+          throwOnPrivate: false,
+        });
+        if (parsed.kind === 'ok') return parsed.result;
+        // kind:'private' → not available here; fall through to the canary check.
+      } catch (err) {
+        // An empty fragment (PHP emits nothing when the EAN is unknown at this
+        // sucursal) surfaces as product_not_found. That's a per-sucursal
+        // coverage gap, not a hard failure — try the next session. Any other
+        // error (network, rate-limit, 5xx, price parse) is real: rethrow.
+        if (!(err instanceof ScrapeError) || err.type !== 'product_not_found') {
+          throw err;
+        }
+      }
+
+      // Not available at this sucursal. Use the session's canary to tell a
+      // dead cookie from a genuine not-stocked-here, so we know whether to
+      // keep this session in the "alive" tally (and whether to alert later).
+      if (session.canaryEan && session.canaryEan !== ctx.externalId) {
+        if (await isCookieAlive(session.phpSessId, session.canaryEan, ctx.signal)) {
+          anyAlive = true;
+        } else {
+          ctx.logger.warn(
+            { sessionIndex: i, seller: session.seller, canary: session.canaryEan },
+            'maxi-carrefour: a seeded session is dead (canary returns private)',
+          );
+        }
+      } else {
+        // No canary to verify — assume the session is usable so we don't
+        // false-alarm an auth error on a simple coverage gap.
+        anyAlive = true;
+      }
+    }
+
+    // -- Opt-in Playwright relogin (headed/real-browser environments only).
+    // Not reachable on EC2 — reCAPTCHA scores its datacenter IP too low — so
+    // it's gated behind maxiCarrefourLogin.autoLogin. When enabled, search
+    // sucursales for THIS exact EAN via a fresh login.
+    if (isAutoLoginEnabled(ctx.config.config)) {
+      ctx.logger.info(
+        { externalId: ctx.externalId },
+        'maxi-carrefour: not found in seeded sessions, triggering Playwright relogin',
+      );
+      const fresh = await refreshCookie(ctx.config, ctx.logger, {
+        verifyEan: ctx.externalId,
+      });
+      const html = await fetchMaxiCarrefourFragment(url, fresh.phpSessId, ctx.signal);
+      return parseMaxiCarrefourFragment(html, ctx, {
+        hasSession: true,
+        throwOnPrivate: true,
+      }).result!;
+    }
+
+    // Exhausted all seeded sessions without a price.
+    if (anyAlive) {
+      // At least one cookie is alive → the product just isn't stocked at any
+      // of the seeded sucursales. Normal coverage gap, not an auth failure.
+      throw new ScrapeError(
+        'product_not_found',
+        `Maxi Carrefour: ean=${ctx.externalId} not stocked at any of the ` +
+          `${sessions.length} seeded sucursal(es). Seed an additional sucursal ` +
+          `that carries it: npx tsx --env-file=.env scripts/maxi-carrefour-login.ts ` +
+          `--edge --append --region="<REGION>" --seller=<ID> "--probe=${ctx.externalId}"`,
+      );
+    }
+    // No session is alive → cookies expired. Alert so the operator re-seeds.
+    throw new ScrapeError(
+      'auth_required',
+      `Maxi Carrefour: all ${sessions.length} seeded session(s) are expired ` +
+        `(canaries return private). Re-seed locally: npx tsx --env-file=.env ` +
+        `scripts/maxi-carrefour-login.ts --edge "--probe=<eans>"`,
     );
-    const fresh = await refreshCookie(ctx.config, ctx.logger, {
-      verifyEan: ctx.externalId,
-    });
-    cookie = fresh.phpSessId;
-    html = await fetchMaxiCarrefourFragment(url, cookie, ctx.signal);
-    return parseMaxiCarrefourFragment(html, ctx, {
-      hasSession: true,
-      throwOnPrivate: true,
-    }).result!;
   },
 };
 
@@ -548,10 +606,19 @@ export function parseMaxiCarrefourFragment(
 ): ParseOutcome {
   const dataPrice = readCartButtonAttr(html, 'data-price');
   if (dataPrice === undefined) {
-    throw new ScrapeError(
-      'selector_failed',
-      `Maxi Carrefour fragment missing cart_button (ean=${ctx.externalId})`,
-    );
+    // No cart_button at all. Empirically this happens when the product isn't
+    // carried at the bound sucursal — the page renders without the cart block
+    // rather than returning a clean "not found". Treat it the SAME as
+    // data-price="private": not available at this sucursal, so the caller can
+    // move on to the next seeded session. Only the post-relogin path
+    // (throwOnPrivate) treats it as a hard failure worth surfacing.
+    if (opts.throwOnPrivate) {
+      throw new ScrapeError(
+        'selector_failed',
+        `Maxi Carrefour fragment missing cart_button (ean=${ctx.externalId})`,
+      );
+    }
+    return { kind: 'private' };
   }
 
   // -- Price gating --------------------------------------------------------

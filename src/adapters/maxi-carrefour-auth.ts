@@ -837,6 +837,113 @@ export async function persistCookie(
   logger.info({ supermarketId }, 'maxi-carrefour: persisted fresh PHPSESSID to DB');
 }
 
+/**
+ * Append (or refresh) a *fallback* session in `config.maxiSessions` without
+ * touching the primary `phpSessId`. Each fallback is bound to a different
+ * sucursal so the adapter can retry a product that's missing at the primary
+ * sucursal. Dedupe by seller: re-seeding the same sucursal replaces its cookie
+ * instead of piling up stale entries.
+ *
+ * Used by the login script's `--append` flag for multi-sucursal seeding.
+ */
+export async function appendSession(
+  supermarketId: string,
+  result: LoginResult,
+  logger: Logger,
+  opts: { canaryEan?: string } = {},
+): Promise<void> {
+  const { db } = await import('../shared/db.js');
+
+  const { data: row, error: readErr } = await db
+    .from('supermarkets')
+    .select('config')
+    .eq('id', supermarketId)
+    .single();
+  if (readErr) {
+    logger.warn({ err: readErr.message }, 'maxi-carrefour: failed to read config — skipping append');
+    return;
+  }
+
+  const existing = (row?.config ?? {}) as Record<string, unknown>;
+  const prior = Array.isArray(existing['maxiSessions'])
+    ? (existing['maxiSessions'] as Array<Record<string, unknown>>)
+    : [];
+
+  const entry: Record<string, unknown> = {
+    phpSessId: result.phpSessId,
+    refreshedAt: new Date().toISOString(),
+  };
+  if (result.seller) entry['seller'] = result.seller;
+  if (result.region) entry['region'] = result.region;
+  if (opts.canaryEan) entry['canaryEan'] = opts.canaryEan;
+
+  // Replace any prior entry for the same sucursal (seller); else append.
+  const sameSeller = (s: Record<string, unknown>): boolean =>
+    Boolean(result.seller) && s['seller'] === result.seller;
+  const next = [...prior.filter((s) => !sameSeller(s)), entry];
+
+  const { error: writeErr } = await db
+    .from('supermarkets')
+    .update({ config: { ...existing, maxiSessions: next } })
+    .eq('id', supermarketId);
+  if (writeErr) {
+    logger.warn({ err: writeErr.message }, 'maxi-carrefour: failed to append fallback session');
+    return;
+  }
+  logger.info(
+    { supermarketId, seller: result.seller, region: result.region, total: next.length },
+    'maxi-carrefour: appended fallback session to config.maxiSessions',
+  );
+}
+
+/**
+ * Remove a fallback session from `config.maxiSessions` by seller id. Used to
+ * prune a sucursal that's redundant (duplicates the primary) or no longer
+ * useful. Returns the number of entries removed.
+ */
+export async function removeSession(
+  supermarketId: string,
+  seller: string,
+  logger: Logger,
+): Promise<number> {
+  const { db } = await import('../shared/db.js');
+
+  const { data: row, error: readErr } = await db
+    .from('supermarkets')
+    .select('config')
+    .eq('id', supermarketId)
+    .single();
+  if (readErr) {
+    logger.warn({ err: readErr.message }, 'maxi-carrefour: failed to read config — skipping remove');
+    return 0;
+  }
+
+  const existing = (row?.config ?? {}) as Record<string, unknown>;
+  const prior = Array.isArray(existing['maxiSessions'])
+    ? (existing['maxiSessions'] as Array<Record<string, unknown>>)
+    : [];
+  const next = prior.filter((s) => s['seller'] !== seller);
+  const removed = prior.length - next.length;
+  if (removed === 0) {
+    logger.info({ supermarketId, seller }, 'maxi-carrefour: no matching fallback session to remove');
+    return 0;
+  }
+
+  const { error: writeErr } = await db
+    .from('supermarkets')
+    .update({ config: { ...existing, maxiSessions: next } })
+    .eq('id', supermarketId);
+  if (writeErr) {
+    logger.warn({ err: writeErr.message }, 'maxi-carrefour: failed to remove fallback session');
+    return 0;
+  }
+  logger.info(
+    { supermarketId, seller, removed, total: next.length },
+    'maxi-carrefour: removed fallback session(s) from config.maxiSessions',
+  );
+  return removed;
+}
+
 // =============================================================================
 // Cookie verification probe (Node fetch, mirrors what the adapter does)
 // =============================================================================
