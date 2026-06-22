@@ -1,0 +1,63 @@
+{
+  "data": {
+    "run": {
+      "id": "8b1c5e30-3c8a-4933-8c11-eeff99887766",
+      "status": "completed",
+      "review_status": "pending_review",
+      "started_at": "2026-05-06T09:00:00.000Z",
+      "finished_at": "2026-05-06T09:32:14.000Z",
+      "total_jobs": 200,
+      "published_at": null
+    },
+    "coverage": {
+      "expected": 200,
+      "succeeded": 196,
+      "resolved_by_fix": 1,
+      "gaps": 3,
+      "coveragePct": 98.5
+    },
+    "bySupermarket": [
+      { "supermarket_id": "coto", "total": 50, "succeeded": 50, "failed": 0, "gaps": 0 },
+      { "supermarket_id": "carrefour", "total": 50, "succeeded": 48, "failed": 2, "gaps": 1 },
+      { "supermarket_id": "disco", "total": 50, "succeeded": 49, "failed": 1, "gaps": 1 },
+      { "supermarket_id": "jumbo", "total": 50, "succeeded": 49, "failed": 1, "gaps": 1 }
+    ],
+    "gaps": [
+      {
+        "supermarket_product_id": "a1111111-1111-4111-8111-111111111111",
+        "supermarket_id": "carrefour",
+        "ean": "7790070411234",
+        "name": "Gaseosa Cola 2.25l",
+        "external_url": "https://www.carrefour.com.ar/gaseosa-cola-225l/p",
+        "error_type": "selector_failed",
+        "error_message": "price node not found on product page",
+        "lifecycle_status": "active",
+        "resolved_status": "scrape_failed"
+      },
+      {
+        "supermarket_product_id": "b2222222-2222-4222-8222-222222222222",
+        "supermarket_id": "disco",
+        "ean": "7791234567890",
+        "name": "Yerba Mate 1kg",
+        "external_url": "https://www.disco.com.ar/yerba-mate-1kg/p",
+        "error_type": "product_not_found",
+        "error_message": "404 from catalog",
+        "lifecycle_status": "active",
+        "resolved_status": "not_found"
+      },
+      {
+        "supermarket_product_id": "c3333333-3333-4333-8333-333333333333",
+        "supermarket_id": "jumbo",
+        "ean": "7790040999111",
+        "name": "Aceite Girasol 1.5l",
+        "external_url": "https://www.jumbo.com.ar/aceite-girasol-15l/p",
+        "error_type": "network_timeout",
+        "error_message": "ETIMEDOUT after 3 attempts",
+        "lifecycle_status": "out_of_stock",
+        "resolved_status": "out_of_stock"
+      }
+    ],
+    "recovery_run_ids": ["dd44dd44-4444-4444-8444-444444444444"]
+  },
+  "meta": { "ts": "2026-05-06T18:30:14.679Z" }
+}

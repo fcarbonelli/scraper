@@ -19,6 +19,7 @@ import { requestLogger } from './middleware/requestLogger.js';
 import { healthRouter } from './routes/health.js';
 import { productsRouter } from './routes/products.js';
 import { supermarketsRouter } from './routes/supermarkets.js';
+import { supermarketProductsRouter } from './routes/supermarketProducts.js';
 import { snapshotsRouter } from './routes/snapshots.js';
 import { runsRouter } from './routes/runs.js';
 import { alertsRouter } from './routes/alerts.js';
@@ -56,6 +57,7 @@ export function buildApp(): Express {
 
   app.use('/v1/products', productsRouter);
   app.use('/v1/supermarkets', supermarketsRouter);
+  app.use('/v1/supermarket-products', supermarketProductsRouter);
   app.use('/v1/snapshots', snapshotsRouter);
   app.use('/v1/runs', runsRouter);
   app.use('/v1/alerts', alertsRouter);

@@ -18,6 +18,8 @@ export interface RunRow {
   started_at: string;
   finished_at: string | null;
   status: string;
+  review_status: string;
+  published_at: string | null;
   total_jobs: number;
   succeeded: number;
   failed: number;
@@ -133,7 +135,7 @@ export async function loadRunDiagnostics(scrapeRunId: string): Promise<RunDiagno
   const runRes = await db
     .from('scrape_runs')
     .select(
-      'id, started_at, finished_at, status, total_jobs, succeeded, failed, retried, metadata',
+      'id, started_at, finished_at, status, review_status, published_at, total_jobs, succeeded, failed, retried, metadata',
     )
     .eq('id', scrapeRunId)
     .maybeSingle();

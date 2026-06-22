@@ -5,6 +5,8 @@
       "started_at": "2026-05-05T09:00:00.000Z",
       "finished_at": "2026-05-05T09:38:07.000Z",
       "status": "completed",
+      "review_status": "published",
+      "published_at": "2026-05-05T15:10:22.000Z",
       "total_jobs": 200,
       "succeeded": 121,
       "failed": 79,

@@ -246,8 +246,12 @@ export type ApiErrorCode =
 // ============================================================================
 
 export type HealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown';
-export type Tier         = 'api' | 'html' | 'ai' | 'manual';
+export type Tier         = 'api' | 'html' | 'ai' | 'manual' | 'marker';
 export type RunStatus    = 'running' | 'completed' | 'failed';
+export type ReviewStatus = 'pending_review' | 'published';
+/** Per-snapshot outcome. 'scrape_failed' is internal-only (never in client_base). */
+export type SnapshotStatus = 'ok' | 'out_of_stock' | 'not_found' | 'delisted' | 'scrape_failed';
+export type LifecycleStatus = 'active' | 'out_of_stock' | 'delisted';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 export type AlertStatus   = 'open' | 'acknowledged' | 'resolved';
@@ -372,7 +376,9 @@ export interface ScrapeRun {
   id: string;                            // uuid
   started_at: string;
   finished_at: string | null;
-  status: RunStatus;
+  status: RunStatus;                     // execution lifecycle
+  review_status: ReviewStatus;           // publication lifecycle (client visibility)
+  published_at: string | null;           // when an operator published the run
   total_jobs: number;
   succeeded: number;
   failed: number;
@@ -1114,6 +1120,124 @@ All body fields are optional. If `supermarket_product_ids` is present, only thos
 ```
 
 If nothing matches, `retry_run_id` is `null` and `total_enqueued` is `0`.
+
+---
+
+### `GET /v1/runs/:id/review`
+
+Coverage summary + the unresolved **gap list** for the daily-review screen. A gap
+is a product that failed and was not fixed by a re-run or a manual price.
+
+#### Response — 200
+
+```json
+{
+  "data": {
+    "run": { "id": "...", "status": "completed", "review_status": "pending_review",
+             "started_at": "...", "finished_at": "...", "total_jobs": 200, "published_at": null },
+    "coverage": { "expected": 200, "succeeded": 196, "resolved_by_fix": 1, "gaps": 3, "coveragePct": 98.5 },
+    "bySupermarket": [
+      { "supermarket_id": "carrefour", "total": 50, "succeeded": 48, "failed": 2, "gaps": 1 }
+    ],
+    "gaps": [
+      { "supermarket_product_id": "...", "supermarket_id": "carrefour", "ean": "...",
+        "name": "...", "external_url": "...", "error_type": "selector_failed",
+        "error_message": "...", "lifecycle_status": "active", "resolved_status": "scrape_failed" }
+    ],
+    "recovery_run_ids": ["..."]
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+`resolved_status` is the marker status the gap would get if published as-is.
+
+---
+
+### `POST /v1/runs/:id/publish`
+
+Reconcile remaining gaps (insert one no-price marker row each) and flip the run —
+plus any recovery runs spawned from it — to `published`, making the day visible in
+the client `client_base` feed. Idempotent: re-publishing only fills new gaps.
+
+#### Body
+
+```json
+{ "force": false }
+```
+
+With unresolved gaps and `force: false`, returns **409 CONFLICT** (`details.gaps`
+holds the count) so the UI can prompt "publish anyway?". With `force: true` (or no
+gaps), publishes and any leftover gaps become `scrape_failed` markers (internal,
+hidden from the client).
+
+#### Response — 200
+
+```json
+{
+  "data": { "published": true, "markers_inserted": 3,
+            "published_run_ids": ["...", "..."], "published_at": "..." },
+  "meta": { "ts": "..." }
+}
+```
+
+---
+
+### `POST /v1/runs/:id/snapshots/flag`
+
+Mark specific products in this run with a no-price, real-world status.
+
+#### Body
+
+```json
+{
+  "status": "out_of_stock",
+  "supermarket_product_ids": ["...", "..."],
+  "note": "Confirmed OOS on site",
+  "set_lifecycle": true
+}
+```
+
+`status` ∈ `{ "out_of_stock", "not_found", "delisted" }`. When `set_lifecycle` is
+true and `status` is `out_of_stock`/`delisted`, the product's mapping lifecycle is
+pinned so future runs auto-emit the same marker.
+
+#### Response — 200
+
+```json
+{ "data": { "inserted": 2, "lifecycle_updated": 2 }, "meta": { "ts": "..." } }
+```
+
+---
+
+## Supermarket products
+
+### `PATCH /v1/supermarket-products/:id/lifecycle`
+
+Set a product's durable lifecycle at a chain, independent of any run.
+
+#### Body
+
+```json
+{ "lifecycle_status": "delisted", "note": "Discontinued by Carrefour" }
+```
+
+`lifecycle_status` ∈ `{ "active", "out_of_stock", "delisted" }`.
+
+#### Response — 200
+
+```json
+{
+  "data": { "id": "...", "supermarket_id": "carrefour", "external_id": "...",
+            "external_url": "...", "lifecycle_status": "delisted",
+            "lifecycle_note": "Discontinued by Carrefour",
+            "lifecycle_changed_at": "..." },
+  "meta": { "ts": "..." }
+}
+```
+
+#### Errors
+- `404 NOT_FOUND` — mapping does not exist
 
 ---
 

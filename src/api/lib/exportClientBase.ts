@@ -53,6 +53,7 @@ const COLUMNS: { key: string; header: string }[] = [
   { key: 'Descripcion_para_Forms', header: 'Descripcion_para_Forms' },
   { key: 'EAN', header: 'EAN' },
   { key: 'Desc_Sku_Sitio', header: 'Desc_Sku_Sitio' },
+  { key: 'Estado', header: 'Estado' },
   { key: 'Precio_Regular', header: 'Precio_Regular' },
   { key: 'Precio_c_Oferta_1', header: 'Precio_c_Oferta_1' },
   { key: 'Precio_c_Oferta_2', header: 'Precio_c_Oferta_2' },

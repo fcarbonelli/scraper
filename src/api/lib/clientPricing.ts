@@ -47,6 +47,13 @@ export interface PriceDataItem {
   Descripcion_Para_Forms: string;
   EAN: string;
   Desc_Sku_Sitio: string;
+  /**
+   * Real-world situation of the record: 'ok' (a real price), 'out_of_stock',
+   * 'not_found', or 'delisted'. When not 'ok', the price fields come back empty.
+   * The internal 'scrape_failed' marker is filtered out by the client_base view
+   * and never reaches the client.
+   */
+  Estado: string;
   Precio_Regular: string;
   URL: string;
   Precio_Mas_Bajo: string;
@@ -95,6 +102,7 @@ export function toPriceData(row: Record<string, unknown>): PriceDataItem {
     Descripcion_Para_Forms: str(row['Descripcion_para_Forms']),
     EAN: str(row['EAN']),
     Desc_Sku_Sitio: str(row['Desc_Sku_Sitio']),
+    Estado: str(row['Estado']),
     Precio_Regular: str(row['Precio_Regular']),
     URL: str(row['URL']),
     Precio_Mas_Bajo: str(row['Precio_MasBajo']),

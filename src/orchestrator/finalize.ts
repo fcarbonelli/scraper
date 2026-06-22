@@ -76,11 +76,16 @@ async function finalizeRun(
 ): Promise<void> {
   const log = logger.child({ runId: run.id });
 
-  // 1. Update scrape_runs row
+  // 1. Update scrape_runs row.
+  //    `review_status` stays at its 'pending_review' default — the run is now
+  //    finished but NOT yet visible to the client. An operator publishes it via
+  //    POST /v1/runs/:id/publish (see src/orchestrator/publish.ts). We set it
+  //    explicitly here so intent is clear and pre-default rows are covered.
   const { error: updateErr } = await db
     .from('scrape_runs')
     .update({
       status: 'completed',
+      review_status: 'pending_review',
       finished_at: new Date().toISOString(),
       succeeded: progress.succeeded,
       failed: progress.failed,

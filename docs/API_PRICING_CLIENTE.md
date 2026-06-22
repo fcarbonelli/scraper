@@ -102,9 +102,36 @@ La respuesta es un objeto con la siguiente estructura:
       "Descripcion_Para_Forms": "AERO DESINF LYSOFORM 360 OR",
       "EAN": "7790520995285",
       "Desc_Sku_Sitio": "DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML.",
+      "Estado": "ok",
       "Precio_Regular": "3648",
       "URL": "https://www.atomoconviene.com/...",
       "Precio_Mas_Bajo": "3648",
+      "Index_Competencia": "",
+      "Marca_Competencia": ""
+    },
+    {
+      "Pricing_Id": "1025",
+      "Fecha_Creacion": "2025-10-06T09:16:00.000Z",
+      "Fecha_Modificacion": "2025-10-06T09:16:00.000Z",
+      "Provincia": "MENDOZA",
+      "Zona": "OESTE",
+      "Mes": "Octubre del 2025",
+      "Semana": "40",
+      "Canal": "SPM REGIONAL",
+      "Cadena": "ATOMO",
+      "Categoria": "AERO",
+      "Subcategoria": "DESINF",
+      "Fabricante": "S.C. JOHNSON Y SON S.A.I.C.",
+      "Marca": "GLADE",
+      "Formato": "360",
+      "Variedad": "OR",
+      "Descripcion_Para_Forms": "AERO DESINF GLADE 360 OR",
+      "EAN": "7794000123456",
+      "Desc_Sku_Sitio": "DESINF.AMBIENTE GLADE ORIGINAL 360 ML.",
+      "Estado": "out_of_stock",
+      "Precio_Regular": "",
+      "URL": "https://www.atomoconviene.com/...",
+      "Precio_Mas_Bajo": "",
       "Index_Competencia": "",
       "Marca_Competencia": ""
     }
@@ -154,11 +181,31 @@ La respuesta es un objeto con la siguiente estructura:
 | `Descripcion_Para_Forms` | Sí | Descripción normalizada del producto. | `"AERO DESINF LYSOFORM 360 OR"` |
 | `EAN` | Sí | Código de barras (EAN-13). | `"7790520995285"` |
 | `Desc_Sku_Sitio` | Sí | Descripción del producto tal como figura en el sitio relevado. | `"DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML."` |
-| `Precio_Regular` | Sí | Precio regular (de lista). | `"3648"` |
+| `Estado` | Sí | Estado del relevamiento del registro. `ok` indica un precio real; cualquier otro valor indica que ese día no hubo precio y explica el motivo (ver [Estados](#51-estados-del-registro-estado)). | `"ok"` |
+| `Precio_Regular` | Sí | Precio regular (de lista). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"ok"`. | `"3648"` |
 | `URL` | Sí | URL de la página del producto relevada. | `"https://..."` |
-| `Precio_Mas_Bajo` | Sí | Precio más bajo detectado (considerando ofertas vigentes). | `"3648"` |
+| `Precio_Mas_Bajo` | Sí | Precio más bajo detectado (considerando ofertas vigentes). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"ok"`. | `"3648"` |
 | `Index_Competencia` | Sí | Índice de competencia. **Pendiente** (ver sección 8). | `""` |
 | `Marca_Competencia` | Sí | Marca de competencia asociada. **Pendiente** (ver sección 8). | `""` |
+
+### 5.1 Estados del registro (`Estado`)
+
+Para que la serie histórica **no tenga huecos**, todo producto relevado genera un
+registro por día, incluso cuando no se obtuvo un precio. El campo `Estado` indica
+qué ocurrió en cada caso:
+
+| `Estado` | Significado | Precio |
+|----------|-------------|--------|
+| `ok` | Precio relevado correctamente. | Presente |
+| `out_of_stock` | Producto sin stock confirmado ese día. | Vacío (o último precio conocido) |
+| `not_found` | La página del producto no existe / fue dada de baja en el sitio. | Vacío |
+| `delisted` | Producto discontinuado o removido del catálogo de la cadena. | Vacío |
+
+Todos los estados describen una **situación real del producto** (con precio, sin
+stock, o dado de baja). Solo se publican registros ya verificados.
+
+> **Recomendación:** filtrar por `Estado == "ok"` cuando solo se necesiten precios
+> efectivos; conservar los demás estados para auditar la continuidad de la serie.
 
 ---
 
@@ -243,6 +290,13 @@ Estos campos se mantendrán presentes en la respuesta para no alterar la estruct
   integración. De disponerse de información adicional (por ejemplo, precios de oferta o
   promociones), podrá incorporarse como campos extra **sin afectar** los campos
   obligatorios ya definidos.
+- El servicio entrega únicamente la información de **días ya verificados y
+  publicados** por nuestro equipo. Por eso "los datos más recientes" corresponden al
+  último día publicado, que puede tener una breve demora respecto del relevamiento.
+- Cada producto verificado tiene un registro por día. Cuando no hubo precio pero sí
+  una situación real (sin stock, baja del catálogo), el registro se entrega igualmente
+  con el `Estado` correspondiente (ver sección 5.1). Los inconvenientes operativos del
+  relevamiento no se publican como registros.
 - Todos los valores de `PriceData` se entregan como texto (string).
 - Las fechas (`Fecha_Creacion`, `Fecha_Modificacion`) se expresan en formato ISO 8601
   (UTC).

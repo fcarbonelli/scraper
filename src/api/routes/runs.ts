@@ -19,6 +19,12 @@ import {
   type FinalJobOutcome,
   type SupermarketProductDebugRow,
 } from '../../shared/runDiagnostics.js';
+import {
+  computeRunReview,
+  publishRun,
+  insertMarkerRows,
+  FLAGGABLE_STATUSES,
+} from '../../orchestrator/publish.js';
 
 export const runsRouter = Router();
 
@@ -35,7 +41,7 @@ runsRouter.get('/', async (req: Request, res: Response) => {
   const { data, error, count } = await db
     .from('scrape_runs')
     .select(
-      'id, started_at, finished_at, status, total_jobs, succeeded, failed, retried, metadata',
+      'id, started_at, finished_at, status, review_status, published_at, total_jobs, succeeded, failed, retried, metadata',
       { count: 'exact' },
     )
     .order('started_at', { ascending: false })
@@ -189,7 +195,7 @@ runsRouter.get('/:id', async (req: Request, res: Response) => {
   const runRes = await db
     .from('scrape_runs')
     .select(
-      'id, started_at, finished_at, status, total_jobs, succeeded, failed, retried, metadata',
+      'id, started_at, finished_at, status, review_status, published_at, total_jobs, succeeded, failed, retried, metadata',
     )
     .eq('id', req.params.id)
     .maybeSingle();
@@ -461,4 +467,104 @@ runsRouter.post('/:id/retry-failed', async (req: Request, res: Response) => {
       by_supermarket: bySupermarket,
     }),
   );
+});
+
+// =============================================================================
+// GET /v1/runs/:id/review
+//
+// Coverage summary + the unresolved gap list the operator must act on before
+// publishing a day to the client.
+// =============================================================================
+
+runsRouter.get('/:id/review', async (req: Request, res: Response) => {
+  const runId = pathParam(req, 'id');
+  const review = await computeRunReview(runId);
+  res.json(success(review));
+});
+
+// =============================================================================
+// POST /v1/runs/:id/publish
+//
+// Reconcile gaps → insert no-price markers → flip the run (and its recovery
+// runs) to 'published', making the day visible in client_base. With unresolved
+// gaps and no `force`, returns 409 so the UI can confirm "publish anyway?".
+// =============================================================================
+
+const PublishBody = z.object({
+  force: z.boolean().default(false),
+});
+
+runsRouter.post('/:id/publish', async (req: Request, res: Response) => {
+  const runId = pathParam(req, 'id');
+  const body = parseBody(req, PublishBody);
+  const publishedBy = req.apiKey?.name ?? 'operator';
+
+  const result = await publishRun({ runId, publishedBy, force: body.force });
+
+  if (!result.published) {
+    throw ApiError.conflict(
+      `Run has ${result.gaps} unresolved gap(s). Resolve them or publish with { "force": true }.`,
+      { gaps: result.gaps },
+    );
+  }
+
+  res.json(success(result));
+});
+
+// =============================================================================
+// POST /v1/runs/:id/snapshots/flag
+//
+// Operator marks specific products in this run with a no-price, real-world
+// status (out_of_stock / not_found / delisted). Optionally sets the product's
+// lifecycle so future runs auto-emit the same marker.
+// =============================================================================
+
+const FlagBody = z.object({
+  status: z.enum(FLAGGABLE_STATUSES),
+  supermarket_product_ids: z.array(z.string().uuid()).min(1).max(1000),
+  note: z.string().trim().max(1000).optional(),
+  set_lifecycle: z.boolean().default(false),
+});
+
+runsRouter.post('/:id/snapshots/flag', async (req: Request, res: Response) => {
+  const runId = pathParam(req, 'id');
+  const body = parseBody(req, FlagBody);
+
+  // Confirm the run exists so we don't write orphan markers.
+  const run = await db.from('scrape_runs').select('id').eq('id', runId).maybeSingle();
+  if (run.error) throw run.error;
+  if (!run.data) throw ApiError.notFound('Run');
+
+  const ids = Array.from(new Set(body.supermarket_product_ids));
+
+  const inserted = await insertMarkerRows(
+    ids.map((id) => ({
+      supermarketProductId: id,
+      scrapeRunId: runId,
+      status: body.status,
+      note: body.note ?? null,
+      source: 'operator_flag',
+    })),
+  );
+
+  // Optionally pin the product lifecycle (delisted / out_of_stock only —
+  // 'not_found' is a per-day site state, not a durable lifecycle).
+  let lifecycleUpdated = 0;
+  if (body.set_lifecycle && (body.status === 'delisted' || body.status === 'out_of_stock')) {
+    const { error, count } = await db
+      .from('supermarket_products')
+      .update(
+        {
+          lifecycle_status: body.status,
+          lifecycle_note: body.note ?? null,
+          lifecycle_changed_at: new Date().toISOString(),
+        },
+        { count: 'exact' },
+      )
+      .in('id', ids);
+    if (error) throw error;
+    lifecycleUpdated = count ?? 0;
+  }
+
+  res.json(success({ inserted, lifecycle_updated: lifecycleUpdated }));
 });
