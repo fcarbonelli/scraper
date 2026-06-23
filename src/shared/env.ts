@@ -53,6 +53,15 @@ const EnvSchema = z.object({
   // var is just a fallback / bootstrap seed for local debugging.
   // See src/adapters/maxi-carrefour-auth.ts for the full lifecycle.
   MAXI_CARREFOUR_PHPSESSID: z.string().optional().default(''),
+
+  // MercadoLibre official API (OAuth). The Client ID / Secret come from the
+  // app registered in the ML DevCenter; the redirect URI must match exactly
+  // what's registered there. The access/refresh tokens themselves are NOT env
+  // vars — they're minted by `npm run ml:auth` and stored (and auto-rotated)
+  // in supermarkets.config.mlTokens. See src/adapters/mercadolibre-auth.ts.
+  ML_CLIENT_ID: z.string().optional().default(''),
+  ML_CLIENT_SECRET: z.string().optional().default(''),
+  ML_REDIRECT_URI: z.string().optional().default('https://httpbin.org/anything'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

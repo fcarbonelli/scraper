@@ -25,6 +25,7 @@
     "smoke": "tsx --env-file=.env scripts/smoke-test.ts",
     "smoke:db": "tsx --env-file=.env scripts/smoke-test.ts --from-db",
     "test:telegram": "tsx --env-file=.env scripts/test-telegram.ts",
+    "ml:auth": "tsx --env-file=.env scripts/ml-auth.ts",
     "maxi-carrefour:login": "tsx --env-file=.env scripts/maxi-carrefour-login.ts",
     "maxi-carrefour:keepalive": "tsx --env-file=.env scripts/maxi-carrefour-keepalive.ts",
     "db:setup": "tsx --env-file=.env scripts/setup-db.ts",

@@ -205,7 +205,7 @@ const SUPERMARKETS: SupermarketSeed[] = [
     base_url: 'https://www.mercadolibre.com.ar',
     rate_limit_ms: 500,
     concurrency: 3,
-    is_active: false,
+    is_active: true,
     provincia: 'BUENOS AIRES',
     zona: 'CAPITAL Y GBA',
     canal: 'SPM NACIONAL',
