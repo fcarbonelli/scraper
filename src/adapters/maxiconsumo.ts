@@ -22,7 +22,9 @@
  * `products` rows for Maxiconsumo can't dedupe by EAN.
  */
 
+import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
+import { getProxyDispatcher } from '../shared/proxy.js';
 import type {
   ProductInfo,
   Promotion,
@@ -79,9 +81,13 @@ async function fetchMaxiconsumoHtml(
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  let res: Response;
+  // Maxiconsumo's Azion edge drops non-AR/datacenter IPs, so route via the AR
+  // proxy when one is configured (undefined otherwise — direct connection).
+  const dispatcher = getProxyDispatcher('maxiconsumo');
+
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await fetch(url, {
+    res = await undiciFetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -89,6 +95,7 @@ async function fetchMaxiconsumoHtml(
         'Accept-Language': 'es-AR,es;q=0.9',
       },
       signal: controller.signal,
+      ...(dispatcher ? { dispatcher } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {

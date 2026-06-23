@@ -1,0 +1,63 @@
+/**
+ * Optional Argentine egress proxy.
+ *
+ * A couple of regional sites (Super Mami, Maxiconsumo) sit behind a CDN edge
+ * that silently drops non-Argentine / datacenter IPs, so requests from the
+ * cloud worker hang until they time out. When `AR_PROXY_URL` is set, those (and
+ * ONLY those) adapters route their HTTP requests through it via an undici
+ * ProxyAgent; every other supermarket keeps going direct.
+ *
+ * Environment:
+ *   AR_PROXY_URL           Full proxy endpoint, e.g.
+ *                          http://user:pass@geo.iproyal.com:12321
+ *                          (country/city targeting, if any, is encoded by the
+ *                          provider inside the username/password.)
+ *   AR_PROXY_SUPERMARKETS  Optional comma-separated allowlist of supermarket
+ *                          ids to route through the proxy. Defaults to
+ *                          "mami,maxiconsumo".
+ *
+ * If `AR_PROXY_URL` is unset, `getProxyDispatcher()` always returns undefined
+ * and behaviour is identical to before (direct connection).
+ */
+
+import { ProxyAgent, type Dispatcher } from 'undici';
+
+const PROXY_URL = process.env.AR_PROXY_URL?.trim();
+
+const DEFAULT_PROXIED = ['mami', 'maxiconsumo'];
+
+/** Supermarket ids whose traffic should egress through the AR proxy. */
+const proxiedIds = new Set(
+  process.env.AR_PROXY_SUPERMARKETS
+    ? process.env.AR_PROXY_SUPERMARKETS.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : DEFAULT_PROXIED,
+);
+
+// Build the ProxyAgent once and reuse it so connections are pooled (creating a
+// new agent per request would leak sockets and defeat keep-alive).
+let agent: ProxyAgent | undefined;
+
+function proxyAgent(): ProxyAgent | undefined {
+  if (!PROXY_URL) return undefined;
+  if (!agent) agent = new ProxyAgent(PROXY_URL);
+  return agent;
+}
+
+/**
+ * Return an undici dispatcher that routes through the AR proxy for the given
+ * supermarket, or `undefined` to use the default (direct) connection.
+ *
+ * Adapters pass the result as `fetch(url, { dispatcher })`; passing `undefined`
+ * is a no-op, so callers don't need to branch.
+ */
+export function getProxyDispatcher(supermarketId: string): Dispatcher | undefined {
+  if (!PROXY_URL || !proxiedIds.has(supermarketId)) return undefined;
+  return proxyAgent();
+}
+
+/** Whether an AR proxy is configured AND enabled for this supermarket. */
+export function usesProxy(supermarketId: string): boolean {
+  return Boolean(PROXY_URL) && proxiedIds.has(supermarketId);
+}

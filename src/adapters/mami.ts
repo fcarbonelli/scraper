@@ -16,7 +16,9 @@
  *     build URLs with a slug derived from the product name.
  */
 
+import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
+import { getProxyDispatcher } from '../shared/proxy.js';
 import type {
   EanSearchResult,
   Promotion,
@@ -216,9 +218,13 @@ async function fetchMami(
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  let res: Response;
+  // Super Mami's CDN drops non-AR/datacenter IPs, so route via the AR proxy
+  // when one is configured (no-op/undefined otherwise — direct connection).
+  const dispatcher = getProxyDispatcher('mami');
+
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await fetch(url, {
+    res = await undiciFetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -226,6 +232,7 @@ async function fetchMami(
         'Accept-Language': 'es-AR,es;q=0.9',
       },
       signal: controller.signal,
+      ...(dispatcher ? { dispatcher } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {

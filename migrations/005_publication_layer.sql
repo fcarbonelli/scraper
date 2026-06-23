@@ -145,9 +145,15 @@ END $$;
 --   (c) NULL-price tolerance: Precio_Regular / Precio_MasBajo / Descuento are
 --       all NULL-safe (LEAST/GREATEST ignore NULLs; the discount CASE folds to
 --       0 when price is NULL), so marker rows render as empty price + a status.
+--
+-- DROP + CREATE (not CREATE OR REPLACE): the new `Estado` column is inserted in
+-- the middle of the column list, and CREATE OR REPLACE only allows appending
+-- columns at the end. Dropping first is safe — the view holds no data.
 -- =============================================================================
 
-CREATE OR REPLACE VIEW client_base AS
+DROP VIEW IF EXISTS client_base;
+
+CREATE VIEW client_base AS
 SELECT
   -- Row metadata
   ps.id                                             AS "ID",
