@@ -17,6 +17,8 @@
  * Options:
  *   --search-only  Search only, don't ingest. Shows which EANs would be added.
  *   --delay=N      Milliseconds between EANs (default: 1500). Be polite.
+ *   --exclude=A,B  Skip these EANs entirely (e.g. to drop bad matches that a
+ *                  review of `--search-only` output flagged as wrong).
  */
 
 import { getAdapter } from '../src/adapters/registry.js';
@@ -39,6 +41,13 @@ async function main(): Promise<void> {
   const searchOnly = args.includes('--search-only');
   const delayArg = args.find((a) => a.startsWith('--delay='));
   const delay = delayArg ? parseInt(delayArg.split('=')[1] ?? '1500', 10) : 1500;
+  const excludeArg = args.find((a) => a.startsWith('--exclude='));
+  const excluded = new Set(
+    (excludeArg?.split('=')[1] ?? '')
+      .split(',')
+      .map((s) => s.replace(/\D/g, ''))
+      .filter(Boolean),
+  );
   const supermarketId = args.filter((a) => !a.startsWith('--'))[0];
 
   if (!supermarketId) {
@@ -69,6 +78,9 @@ async function main(): Promise<void> {
     ingested: [],
     errors: [],
   };
+  // ean → matched product URL, so --search-only can show what was matched
+  // (essential for adapters whose matches aren't EAN-confirmed, e.g. Maxiconsumo).
+  const foundUrls = new Map<string, string>();
 
   logger.info(
     { supermarket: supermarketId, totalEans: total, searchOnly, delay },
@@ -81,6 +93,11 @@ async function main(): Promise<void> {
     const label = taxonomy?.descriptionForms ?? ean;
     const progress = `[${i + 1}/${total}]`;
 
+    if (excluded.has(ean)) {
+      logger.debug({ ean, progress }, 'excluded — skipping');
+      continue;
+    }
+
     try {
       const found = await adapter.searchByEan!(ean);
 
@@ -92,6 +109,7 @@ async function main(): Promise<void> {
       }
 
       result.found.push(ean);
+      foundUrls.set(ean, found.url);
       logger.info({ ean, url: found.url, label, progress }, 'found product');
 
       if (!searchOnly) {
@@ -137,10 +155,11 @@ async function main(): Promise<void> {
 
   if (searchOnly && result.found.length > 0) {
     console.log('');
-    console.log('Found URLs (search-only — not ingested):');
+    console.log('Found URLs (search-only — not ingested). Review each match:');
     for (const ean of result.found) {
       const tax = TAXONOMY_BY_EAN.get(ean);
-      console.log(`  ${ean}  ${tax?.descriptionForms ?? ''}`);
+      const desc = (tax?.descriptionForms ?? '').padEnd(34);
+      console.log(`  ${ean}  ${desc}  ${foundUrls.get(ean) ?? ''}`);
     }
   }
 }

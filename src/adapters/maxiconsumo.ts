@@ -25,7 +25,9 @@
 import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
 import { getProxyDispatcher } from '../shared/proxy.js';
+import { TAXONOMY_BY_EAN, type TaxonomyEntry } from '../shared/taxonomy.js';
 import type {
+  EanSearchResult,
   ProductInfo,
   Promotion,
   ScrapeContext,
@@ -229,6 +231,228 @@ function extractBranchFromUrl(canonicalUrl: string): string | undefined {
 }
 
 // =============================================================================
+// EAN discovery — name-similarity search (NO barcode confirmation possible)
+// =============================================================================
+//
+// Maxiconsumo hides EANs entirely: its search doesn't index barcodes and the
+// product page exposes none. So unlike every other adapter we CANNOT confirm a
+// match by EAN. Instead we look the EAN up in the client taxonomy, search the
+// site by brand, and score the result names against the taxonomy's brand +
+// size + variety. To keep precision high we only return a match when exactly
+// ONE candidate fits; any ambiguity yields null (better a miss than a wrong
+// EAN→product mapping). Matches are meant to be reviewed before ingest.
+
+// Only `sucursal_moreno` has a live storefront today (see file header).
+const SEARCH_BASE = `https://www.${MAXICONSUMO_HOST}/sucursal_moreno/catalogsearch/result/`;
+const MAX_SEARCH_PAGES = 8;
+
+/** Strip accents + lowercase for tolerant text comparison. */
+function normalizeText(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/** Parse "27,5" / "1.8" → number (treat comma as decimal separator). */
+function toNum(s: string): number {
+  return Number(s.replace(',', '.'));
+}
+
+/** A normalized size: a magnitude plus whether it's a volume or a weight. */
+interface Size {
+  value: number; // canonical units: millilitres (vol) or grams (wt)
+  kind: 'vol' | 'wt';
+}
+
+/**
+ * Normalize one "<number><unit>" token into canonical ml / g.
+ * Liters→ml (×1000), kg→g (×1000); ml/cc and g/gr pass through.
+ */
+function normalizeUnit(value: number, unit: string): Size {
+  const u = unit.toUpperCase();
+  if (u === 'KG') return { value: value * 1000, kind: 'wt' };
+  if (u.startsWith('L')) return { value: value * 1000, kind: 'vol' };
+  if (u === 'ML' || u === 'CC') return { value, kind: 'vol' };
+  return { value, kind: 'wt' }; // G / GR / GRS
+}
+
+/**
+ * Derive the product size from a taxonomy `format` field. Handles bare numbers
+ * (332, 360 → ml), unit-suffixed (1L, 500ML, 27.5G) and the prefix-coded
+ * packaging shorthands (GAT500, DP450, BOT700 → trailing number = ml).
+ */
+function parseFormatSize(format: string): Size | null {
+  const f = format.toUpperCase().trim();
+  let m = f.match(/(\d+(?:[.,]\d+)?)\s*(ML|CC|LTS|LT|L|KG|GRS|GR|G)\b/);
+  if (m?.[1] && m[2]) return normalizeUnit(toNum(m[1]), m[2]);
+  // Prefix-coded packaging (e.g. GAT500, DP450, BOT700) — number = ml.
+  m = f.match(/^[A-Z]+\s*(\d{2,4})$/);
+  if (m?.[1]) return { value: toNum(m[1]), kind: 'vol' };
+  // Bare number (aerosols / liquid cleaners are ml/cc).
+  m = f.match(/^(\d+(?:[.,]\d+)?)$/);
+  if (m?.[1]) return { value: toNum(m[1]), kind: 'vol' };
+  return null;
+}
+
+/** Extract every "<number><unit>" size token present in a product name. */
+function parseNameSizes(name: string): Size[] {
+  const out: Size[] = [];
+  const re = /(\d+(?:[.,]\d+)?)\s*(ML|CC|LTS|LT|L|KG|GRS|GR|G)\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(name.toUpperCase())) !== null) {
+    if (m[1] && m[2]) out.push(normalizeUnit(toNum(m[1]), m[2]));
+  }
+  return out;
+}
+
+/** Two sizes match if same kind and magnitudes are within 1% (rounding slack). */
+function sizeMatches(a: Size, b: Size): boolean {
+  if (a.kind !== b.kind) return false;
+  const tol = Math.max(1, a.value * 0.01);
+  return Math.abs(a.value - b.value) <= tol;
+}
+
+/**
+ * Map a taxonomy variety code to the words that would appear in a product name.
+ * Only well-known codes are listed; unknown codes return [] so the caller skips
+ * variety filtering rather than guessing.
+ */
+const VARIETY_WORDS: Record<string, string[]> = {
+  OR: ['original'],
+  ORIGINAL: ['original'],
+  LAV: ['lavanda'],
+  LAVANDA: ['lavanda'],
+  BB: ['bebe'],
+  PR: ['primavera'],
+  PRIMAVERA: ['primavera'],
+  SPT: ['suavidad'],
+  MAR: ['marina', 'marino'],
+  FL: ['floral', 'flores'],
+  CITRICA: ['citrica'],
+  COLOR: ['color'],
+  BLANCOS: ['blanco'],
+};
+
+function varietyWords(variety: string): string[] {
+  return VARIETY_WORDS[variety.toUpperCase().trim()] ?? [];
+}
+
+interface SearchCard {
+  url: string;
+  name: string;
+  externalId: string;
+}
+
+/** Parse `<a class="product-item-link" href=…>NAME</a>` cards from a results page. */
+function parseMaxiSearchCards(html: string): SearchCard[] {
+  const cards: SearchCard[] = [];
+  const re = /class="product-item-link"\s+href="([^"]+)"[^>]*>\s*([^<]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const url = m[1];
+    const name = m[2]?.trim();
+    if (!url || !name) continue;
+    const id = extractProductIdFromUrl(url);
+    if (id) cards.push({ url, name, externalId: id });
+  }
+  return cards;
+}
+
+// brandQuery → all result cards, cached so each brand is searched once per run.
+const brandSearchCache = new Map<string, SearchCard[]>();
+
+/** Search Maxiconsumo for a brand, paginating until the listing clamps. */
+async function searchBrand(query: string, signal: AbortSignal | undefined): Promise<SearchCard[]> {
+  const cached = brandSearchCache.get(query);
+  if (cached) return cached;
+
+  const all: SearchCard[] = [];
+  const seen = new Set<string>();
+  let prevFirstId: string | null = null;
+
+  for (let page = 1; page <= MAX_SEARCH_PAGES; page++) {
+    const url = `${SEARCH_BASE}?q=${encodeURIComponent(query)}&p=${page}`;
+    const html = await fetchMaxiconsumoHtml(url, signal);
+    const cards = parseMaxiSearchCards(html);
+    const firstId = cards[0]?.externalId ?? null;
+    if (!firstId) break;
+    // Magento clamps to the last page once you page past it (repeats it).
+    if (firstId === prevFirstId) break;
+    prevFirstId = firstId;
+    for (const c of cards) {
+      if (!seen.has(c.externalId)) {
+        seen.add(c.externalId);
+        all.push(c);
+      }
+    }
+  }
+
+  brandSearchCache.set(query, all);
+  return all;
+}
+
+/**
+ * Does a Maxiconsumo product name match a taxonomy entry? Requires the brand
+ * and the size, and (when the entry has a known variety) a variety word too.
+ */
+function matchesEntry(card: SearchCard, entry: TaxonomyEntry): boolean {
+  const name = normalizeText(card.name);
+  if (!name.includes(normalizeText(entry.brand))) return false;
+
+  const size = parseFormatSize(entry.format);
+  if (!size || !parseNameSizes(card.name).some((s) => sizeMatches(s, size))) return false;
+
+  const words = varietyWords(entry.variety);
+  if (words.length > 0 && !words.some((w) => name.includes(w))) return false;
+
+  return true;
+}
+
+/** Count how many taxonomy entries of the same brand a product name matches. */
+function countMatchingEntries(card: SearchCard, brandNorm: string): number {
+  let n = 0;
+  for (const entry of TAXONOMY_BY_EAN.values()) {
+    if (normalizeText(entry.brand) !== brandNorm) continue;
+    if (matchesEntry(card, entry)) n++;
+  }
+  return n;
+}
+
+/**
+ * EAN discovery via brand search + name scoring. Because Maxiconsumo exposes no
+ * barcode we can't confirm matches, so we apply a strict "distinctive match"
+ * rule: accept a product ONLY if it matches this entry AND no sibling EAN of
+ * the same brand also matches it (i.e. the mapping is unambiguous). Anything
+ * ambiguous returns null — better a miss than a wrong EAN→product mapping.
+ * Matches are still NOT EAN-confirmed and should be reviewed before ingest.
+ */
+async function searchByEan(ean: string, signal?: AbortSignal): Promise<EanSearchResult | null> {
+  const digits = ean.replace(/\D/g, '');
+  const entry: TaxonomyEntry | undefined = TAXONOMY_BY_EAN.get(digits);
+  if (!entry?.brand) return null;
+  // Without a parseable size we can't disambiguate — skip.
+  if (!parseFormatSize(entry.format)) return null;
+
+  const brandNorm = normalizeText(entry.brand);
+  const query = brandNorm.replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!query) return null;
+
+  const cards = await searchBrand(query, signal);
+
+  // Candidates that match this entry AND are distinctive to it (no other
+  // same-brand client product also matches that Maxiconsumo product).
+  const distinctive = cards.filter(
+    (c) => matchesEntry(c, entry) && countMatchingEntries(c, brandNorm) === 1,
+  );
+
+  if (distinctive.length === 1) {
+    return { url: distinctive[0]!.url, externalId: distinctive[0]!.externalId };
+  }
+  return null;
+}
+
+// =============================================================================
 // Adapter
 // =============================================================================
 
@@ -237,6 +461,8 @@ export const maxiconsumoAdapter: SupermarketAdapter = {
   name: 'Maxiconsumo',
 
   canonicalizeUrl,
+
+  searchByEan,
 
   async resolveExternalId(canonicalUrl: string): Promise<string> {
     const id = extractProductIdFromUrl(canonicalUrl);
