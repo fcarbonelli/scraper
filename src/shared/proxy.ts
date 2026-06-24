@@ -24,7 +24,7 @@ import { ProxyAgent, type Dispatcher } from 'undici';
 
 const PROXY_URL = process.env.AR_PROXY_URL?.trim();
 
-const DEFAULT_PROXIED = ['mami', 'maxiconsumo'];
+const DEFAULT_PROXIED = ['mami', 'maxiconsumo', 'mercadolibre'];
 
 /** Supermarket ids whose traffic should egress through the AR proxy. */
 const proxiedIds = new Set(
@@ -60,4 +60,30 @@ export function getProxyDispatcher(supermarketId: string): Dispatcher | undefine
 /** Whether an AR proxy is configured AND enabled for this supermarket. */
 export function usesProxy(supermarketId: string): boolean {
   return Boolean(PROXY_URL) && proxiedIds.has(supermarketId);
+}
+
+/** Playwright-shaped proxy config (server URL + split-out credentials). */
+export interface PlaywrightProxy {
+  server: string;
+  username?: string;
+  password?: string;
+}
+
+/**
+ * Return a Playwright `proxy` launch/context option for the given supermarket,
+ * or `undefined` to connect directly. Playwright wants the credentials split
+ * out of the URL, so we parse `AR_PROXY_URL` (http://user:pass@host:port) into
+ * `{ server, username, password }`.
+ */
+export function getPlaywrightProxy(supermarketId: string): PlaywrightProxy | undefined {
+  if (!PROXY_URL || !proxiedIds.has(supermarketId)) return undefined;
+  try {
+    const u = new URL(PROXY_URL);
+    const proxy: PlaywrightProxy = { server: `${u.protocol}//${u.host}` };
+    if (u.username) proxy.username = decodeURIComponent(u.username);
+    if (u.password) proxy.password = decodeURIComponent(u.password);
+    return proxy;
+  } catch {
+    return undefined;
+  }
 }

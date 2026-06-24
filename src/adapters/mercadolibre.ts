@@ -23,6 +23,7 @@
 
 import { ScrapeError } from '../shared/errors.js';
 import { getAccessToken } from './mercadolibre-auth.js';
+import { fetchMlPdp } from './mercadolibre-browser.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -229,29 +230,8 @@ function readAttr(attrs: ProductAttribute[] | undefined, ids: string[]): string 
   return undefined;
 }
 
-/** Build a ScrapeResult from a /products/<id> detail object. */
-function parseProductDetail(product: ProductDetail): ScrapeResult {
-  const winner = product.buy_box_winner ?? undefined;
-
-  // Primary price source: the buy-box winner. Fall back to the cheapest end of
-  // the price range when no single offer is winning the box.
-  let price = typeof winner?.price === 'number' ? winner.price : NaN;
-  if (!Number.isFinite(price)) {
-    const min = product.buy_box_winner_price_range?.min?.price;
-    if (typeof min === 'number') price = min;
-  }
-  if (!Number.isFinite(price) || price <= 0) {
-    throw new ScrapeError(
-      'price_missing',
-      `MercadoLibre product ${product.id ?? '?'} has no active offer / buy-box price`,
-    );
-  }
-
-  const currency = winner?.currency_id || 'ARS';
-  // In stock if the winning offer reports positive quantity; if there's a
-  // winner at all we treat it as available.
-  const inStock = winner ? (winner.available_quantity ?? 1) > 0 : false;
-
+/** Extract master-catalog metadata (no price) from a /products/<id> object. */
+function extractProductInfo(product: ProductDetail): ProductInfo {
   const productInfo: ProductInfo = {};
   if (product.name) productInfo.name = product.name;
   const brand = readAttr(product.attributes, ['BRAND']);
@@ -265,24 +245,9 @@ function parseProductDetail(product: ProductDetail): ScrapeResult {
   if (imageUrl) productInfo.imageUrl = imageUrl;
   productInfo.metadata = {
     catalogProductId: product.id,
-    buyBoxItemId: winner?.item_id,
-    sellerId: winner?.seller_id,
-    condition: winner?.condition,
     domainId: product.domain_id,
   };
-
-  const promotions: Promotion[] = [];
-
-  const result: ScrapeResult = {
-    price,
-    inStock,
-    currency,
-    tierUsed: 'api',
-    promotions,
-    productInfo,
-    rawData: { product: product as unknown as Record<string, unknown> },
-  };
-  return result;
+  return productInfo;
 }
 
 // =============================================================================
@@ -297,29 +262,61 @@ async function resolveExternalId(canonicalUrl: string): Promise<string> {
   return id;
 }
 
-/** Daily scrape: fetch the catalog product and read the buy-box price. */
+/**
+ * Daily scrape: read the price from the public product page via a real browser.
+ *
+ * The catalog API doesn't expose a price for this product category (buy-box is
+ * null and the listings search is 403-gated), so pricing comes from the PDP.
+ * We enrich it with catalog metadata from the API (one cheap GET) when possible.
+ */
 async function scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
   const id = ctx.externalId?.trim();
   if (!id) {
     throw new ScrapeError('product_not_found', 'MercadoLibre scrape called without an external_id');
   }
-  const json = await fetchMlJson(`/products/${encodeURIComponent(id)}`, ctx.signal, REQUEST_TIMEOUT_MS);
-  const product = json as ProductDetail;
-  if (!product || typeof product !== 'object' || !product.id) {
-    throw new ScrapeError('product_not_found', `MercadoLibre product ${id} returned no data`);
+
+  const pdp = await fetchMlPdp(id, ctx.logger, ctx.signal);
+
+  // Best-effort metadata enrichment from the API (brand/EAN/image). Never let a
+  // metadata hiccup fail a scrape that already has a valid price.
+  let productInfo: ProductInfo = {};
+  if (pdp.name) productInfo.name = pdp.name;
+  if (pdp.imageUrl) productInfo.imageUrl = pdp.imageUrl;
+  try {
+    const json = await fetchMlJson(`/products/${encodeURIComponent(id)}`, ctx.signal, REQUEST_TIMEOUT_MS);
+    const product = json as ProductDetail;
+    if (product && typeof product === 'object' && product.id) {
+      productInfo = { ...extractProductInfo(product), ...productInfo };
+    }
+  } catch {
+    /* metadata is optional — price already in hand */
   }
-  return parseProductDetail(product);
+
+  const promotions: Promotion[] = [];
+  return {
+    price: pdp.price,
+    inStock: pdp.inStock,
+    currency: pdp.currency,
+    tierUsed: 'html',
+    promotions,
+    productInfo,
+    rawData: { source: 'pdp', productId: id },
+  };
 }
 
 /**
- * Lightweight ingest probe. Unlike most adapters this DOES hit the API, but
- * the call is a single cheap GET (no Playwright / interactive auth), so it's
- * safe to run inside the ingest request.
+ * Lightweight ingest probe — metadata only, via a single cheap API GET. Must
+ * NOT launch the browser (this runs inside the ingest request), so it never
+ * touches the PDP path.
  */
 async function probe(ctx: ScrapeContext): Promise<ProductInfo> {
+  const id = ctx.externalId?.trim();
+  if (!id) return {};
   try {
-    const result = await scrape(ctx);
-    return result.productInfo ?? {};
+    const json = await fetchMlJson(`/products/${encodeURIComponent(id)}`, ctx.signal, REQUEST_TIMEOUT_MS);
+    const product = json as ProductDetail;
+    if (!product || typeof product !== 'object' || !product.id) return {};
+    return extractProductInfo(product);
   } catch {
     return {};
   }
