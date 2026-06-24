@@ -36,7 +36,9 @@
  * the EAN to the new article and re-map the row in place.
  */
 
+import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
+import { getProxyDispatcher } from '../shared/proxy.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -132,9 +134,16 @@ async function fetchLaAnonimaHtml(
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  let res: Response;
+  // La Anónima prices/availability are scoped to the sucursal the site picks
+  // from the visitor's egress IP. A non-AR datacenter IP lands in a sucursal
+  // with patchy catalog coverage (the recurring `price_missing` / homepage-302
+  // failures), so route through the AR residential proxy when one is configured
+  // for this adapter (opt-in via AR_PROXY_SUPERMARKETS; no-op/direct otherwise).
+  const dispatcher = getProxyDispatcher('la-anonima');
+
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await fetch(url, {
+    res = await undiciFetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -143,6 +152,7 @@ async function fetchLaAnonimaHtml(
       },
       redirect: 'follow',
       signal: controller.signal,
+      ...(dispatcher ? { dispatcher } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -311,6 +321,47 @@ async function searchByEan(
 
   const url = canonicalizeUrl(`${LA_ANONIMA_BASE_URL}${m[1].replace(/&amp;/g, '&')}`);
   return { url, externalId: m[2] };
+}
+
+// Capture ALL product links on a page (for name-based re-discovery candidates).
+const PRODUCT_LINK_RE_GLOBAL =
+  /href=["'](\/[^"']*\/art_(\d+)\/?)["']/gi;
+
+/**
+ * Free-text search returning ALL distinct product candidates (url + art id) on
+ * the results page. Used by the re-discovery healer to find the replacement for
+ * a delisted article when we have NO EAN to search by — the caller matches the
+ * candidates against the dead product's slug (incl. a hard size check) before
+ * accepting one. Returns [] on the "no results" banner or any failure.
+ */
+export async function searchProductCandidates(
+  query: string,
+  signal?: AbortSignal,
+  limit = 12,
+): Promise<EanSearchResult[]> {
+  const searchUrl = `${LA_ANONIMA_BASE_URL}/buscar/${encodeURIComponent(query)}`;
+  let html: string;
+  try {
+    html = await fetchLaAnonimaHtml(searchUrl, signal, SEARCH_TIMEOUT_MS);
+  } catch {
+    return [];
+  }
+  if (NO_RESULTS_RE.test(html)) return [];
+
+  const out: EanSearchResult[] = [];
+  const seen = new Set<string>();
+  for (const m of html.matchAll(PRODUCT_LINK_RE_GLOBAL)) {
+    const path = m[1];
+    const id = m[2];
+    if (!path || !id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      url: canonicalizeUrl(`${LA_ANONIMA_BASE_URL}${path.replace(/&amp;/g, '&')}`),
+      externalId: id,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 // =============================================================================

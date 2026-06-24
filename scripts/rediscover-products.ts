@@ -19,10 +19,20 @@
  * NOT part of the scrape hot path: adapters have no DB access by design, and a
  * re-map is a discovery concern, not a scrape concern.
  *
+ * NO-EAN PRODUCTS (La Anónima)
+ * ----------------------------
+ * Some failing rows have no EAN recorded (ingested with placeholder metadata),
+ * so EAN search can't help. For La Anónima we fall back to matching the dead
+ * product's URL slug against search-result slugs — but this is REVIEW-ONLY and
+ * never auto-applied: token+size similarity can't reliably tell varieties apart
+ * (OFF "Extra Duración" vs "Family", Raid "cucarachas" vs "mata moscas"), so the
+ * script just prints ranked candidates for an operator to confirm by hand.
+ *
  * SAFE BY DEFAULT
  * ---------------
  * Runs as a DRY RUN unless you pass `--apply`. Dry run prints exactly what it
- * WOULD change so you can eyeball the EAN→new-URL matches first.
+ * WOULD change so you can eyeball the EAN→new-URL matches first. (EAN matches
+ * are exact; only those are ever auto-applied.)
  *
  * Usage:
  *   npx tsx --env-file=.env scripts/rediscover-products.ts la-anonima
@@ -42,6 +52,7 @@
 
 import { db, fetchInChunks } from '../src/shared/db.js';
 import { getAdapter } from '../src/adapters/registry.js';
+import { searchProductCandidates } from '../src/adapters/la-anonima.js';
 import { logger } from '../src/shared/logger.js';
 
 // Error types that mean "the URL/article is gone", i.e. worth re-resolving.
@@ -150,6 +161,158 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// ---- Slug matching (no-EAN re-discovery fallback, La Anónima) --------------
+
+const SLUG_STOPWORDS = new Set(['de', 'la', 'el', 'para', 'con', 'sin', 'y', 'x', 'en', 'al']);
+
+/** Extract the slug segment ("foo-bar" from "/foo-bar/art_123/"). */
+function slugFromUrl(url: string): string | null {
+  try {
+    const m = new URL(url).pathname.match(/\/([^/]+)\/art_\d+/i);
+    return m?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Meaningful tokens from a slug (lowercased, stopwords + 1-char tokens dropped). */
+function slugTokens(slug: string): Set<string> {
+  return new Set(
+    slug
+      .toLowerCase()
+      .split('-')
+      .filter((t) => t.length > 1 && !SLUG_STOPWORDS.has(t)),
+  );
+}
+
+/** The size/format token of a slug ("170cc", "900ml", "2.5lt"), or null. */
+function slugSize(slug: string): string | null {
+  const m = slug
+    .toLowerCase()
+    .replace(/-/g, ' ')
+    .match(/(\d+(?:[.,]\d+)?)\s*-?\s*(cc|ml|lt?|grs?|gr?|kg|kgs|un|u|cm|mts?|mt)\b/);
+  if (!m?.[1] || !m[2]) return null;
+  return `${m[1].replace(',', '.')}${m[2]}`;
+}
+
+/** Jaccard similarity of two token sets (0..1). */
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+interface RemapApply {
+  status: 'remapped' | 'superseded' | 'error';
+  detail: string;
+}
+
+/**
+ * Apply a re-map: point the dead row at `newUrl`/`newExternalId`. Guards the
+ * (supermarket_id, external_id) unique constraint — if a live row already
+ * tracks the new id, deactivate the dead row instead of colliding.
+ */
+async function applyRemap(
+  supermarketId: string,
+  c: Candidate,
+  newUrl: string,
+  newExternalId: string | null,
+): Promise<RemapApply> {
+  let collision: { id: string } | null = null;
+  if (newExternalId) {
+    const existing = await db
+      .from('supermarket_products')
+      .select('id')
+      .eq('supermarket_id', supermarketId)
+      .eq('external_id', newExternalId)
+      .neq('id', c.supermarketProductId)
+      .maybeSingle();
+    if (existing.error) return { status: 'error', detail: existing.error.message };
+    collision = (existing.data as { id: string } | null) ?? null;
+  }
+
+  if (collision) {
+    const { error } = await db
+      .from('supermarket_products')
+      .update({ is_active: false })
+      .eq('id', c.supermarketProductId);
+    if (error) return { status: 'error', detail: error.message };
+    return { status: 'superseded', detail: `new id already tracked by ${collision.id}; deactivated dead row` };
+  }
+
+  const update: Record<string, unknown> = { external_url: newUrl };
+  if (newExternalId) update.external_id = newExternalId;
+  const { error } = await db
+    .from('supermarket_products')
+    .update(update)
+    .eq('id', c.supermarketProductId);
+  if (error) return { status: 'error', detail: error.message };
+  return { status: 'remapped', detail: 'remapped in place' };
+}
+
+interface Tally {
+  remapped: string[];
+  superseded: string[];
+  stillListed: string[];
+  missing: string[];
+  deactivated: string[];
+  noEan: string[];
+  needsReview: string[];
+  errors: string[];
+}
+
+/**
+ * No-EAN fallback (La Anónima): find the replacement article by matching the
+ * dead product's URL slug against search-result slugs. Returns true when it
+ * produced a verdict (re-map or needs-review), false to fall through to the
+ * plain no-ean skip (e.g. search returned nothing).
+ */
+async function trySlugRemap(
+  args: Args,
+  c: Candidate,
+  label: string,
+  tally: Tally,
+): Promise<boolean> {
+  if (!c.externalUrl) return false;
+  const slug = slugFromUrl(c.externalUrl);
+  if (!slug) return false;
+
+  let cands;
+  try {
+    cands = await searchProductCandidates(slug.replace(/-/g, ' '));
+  } catch {
+    return false;
+  }
+  if (cands.length === 0) return false;
+
+  const target = slugTokens(slug);
+  const targetSize = slugSize(slug);
+  const ranked = cands
+    .map((cd) => {
+      const cs = slugFromUrl(cd.url) ?? '';
+      return { cd, cs, score: jaccard(target, slugTokens(cs)), size: slugSize(cs) };
+    })
+    .filter((r) => r.cs && r.cd.externalId !== c.externalId)
+    .sort((a, b) => b.score - a.score);
+  if (ranked.length === 0) return false;
+
+  // Name matching is REVIEW-ONLY, never auto-applied. Token+size similarity
+  // can't reliably distinguish VARIETY (e.g. OFF "Extra Duración" vs "Family",
+  // Raid "cucarachas" vs "mata moscas") — and variety is exactly what matters —
+  // so a high token score can still be the wrong product. We surface ranked
+  // candidates with their art id + slug for an operator to confirm and re-map
+  // by hand (or feed into a targeted apply). Auto-applying here would corrupt
+  // the price series with a similarly-named-but-different SKU.
+  tally.needsReview.push(c.supermarketProductId);
+  console.log(`${label}\n  NEEDS-REVIEW (no EAN — pick the replacement by hand):`);
+  for (const r of ranked.slice(0, 5)) {
+    const sizeFlag = targetSize && r.size !== targetSize ? ' (size≠)' : '';
+    console.log(`     ${r.score.toFixed(2)} size=${r.size ?? '-'}${sizeFlag}  ${r.cd.externalId}  ${r.cd.url}`);
+  }
+  return true;
+}
+
 async function main(): Promise<void> {
   const args = parseArgs();
   const adapter = getAdapter(args.supermarketId);
@@ -179,8 +342,11 @@ async function main(): Promise<void> {
     missing: [] as string[],
     deactivated: [] as string[],
     noEan: [] as string[],
+    needsReview: [] as string[],
     errors: [] as string[],
   };
+
+  const canSlugMatch = args.supermarketId === 'la-anonima';
 
   console.log(`\nFound ${candidates.length} stale candidate(s) for ${args.supermarketId}.\n`);
 
@@ -191,6 +357,17 @@ async function main(): Promise<void> {
     const label = `[${i + 1}/${candidates.length}] ${meta?.name ?? c.productId}`;
 
     if (!ean) {
+      // No EAN to search by. For La Anónima we can still recover the replacement
+      // article via slug matching: the product's URL slug is its full
+      // description, as is every search result's URL, so we match slug↔slug with
+      // a hard size check to avoid grabbing a different-sized SKU.
+      if (canSlugMatch && c.externalUrl) {
+        const handled = await trySlugRemap(args, c, label, tally);
+        if (handled) {
+          if (args.delay > 0) await sleep(args.delay);
+          continue;
+        }
+      }
       tally.noEan.push(c.supermarketProductId);
       console.log(`${label}\n  SKIP no-ean (current ${c.externalId})`);
       continue;
@@ -248,53 +425,9 @@ async function main(): Promise<void> {
       continue;
     }
 
-    // Guard against the (supermarket_id, external_id) unique constraint: if a
-    // live row for the NEW id already exists, don't collide — just deactivate
-    // the dead row so it stops failing (the live row already tracks the price).
-    let collision: { id: string } | null = null;
-    if (newExternalId) {
-      const existing = await db
-        .from('supermarket_products')
-        .select('id')
-        .eq('supermarket_id', args.supermarketId)
-        .eq('external_id', newExternalId)
-        .neq('id', c.supermarketProductId)
-        .maybeSingle();
-      if (existing.error) {
-        tally.errors.push(c.supermarketProductId);
-        console.log(`  ! collision check failed: ${existing.error.message}`);
-        continue;
-      }
-      collision = (existing.data as { id: string } | null) ?? null;
-    }
-
-    if (collision) {
-      const { error } = await db
-        .from('supermarket_products')
-        .update({ is_active: false })
-        .eq('id', c.supermarketProductId);
-      if (error) {
-        tally.errors.push(c.supermarketProductId);
-        console.log(`  ! deactivate-on-collision failed: ${error.message}`);
-      } else {
-        tally.superseded.push(c.supermarketProductId);
-        console.log(`  -> new id already tracked by ${collision.id}; deactivated dead row`);
-      }
-    } else {
-      const update: Record<string, unknown> = { external_url: found.url };
-      if (newExternalId) update.external_id = newExternalId;
-      const { error } = await db
-        .from('supermarket_products')
-        .update(update)
-        .eq('id', c.supermarketProductId);
-      if (error) {
-        tally.errors.push(c.supermarketProductId);
-        console.log(`  ! update failed: ${error.message}`);
-      } else {
-        tally.remapped.push(c.supermarketProductId);
-        console.log(`  -> remapped in place`);
-      }
-    }
+    const applied = await applyRemap(args.supermarketId, c, found.url, newExternalId);
+    tally[applied.status === 'error' ? 'errors' : applied.status].push(c.supermarketProductId);
+    console.log(`  -> ${applied.status === 'error' ? '! ' + applied.detail : applied.detail}`);
 
     if (args.delay > 0) await sleep(args.delay);
   }
@@ -306,6 +439,7 @@ async function main(): Promise<void> {
   console.log(`  Still-listed:      ${tally.stillListed.length}`);
   console.log(`  Missing (gone):    ${tally.missing.length}`);
   console.log(`  Deactivated:       ${tally.deactivated.length}`);
+  console.log(`  Needs review:      ${tally.needsReview.length}`);
   console.log(`  No EAN (skipped):  ${tally.noEan.length}`);
   console.log(`  Errors:            ${tally.errors.length}`);
   if (!args.apply && tally.remapped.length > 0) {
