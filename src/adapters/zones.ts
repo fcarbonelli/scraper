@@ -56,13 +56,20 @@ export const DEFAULT_ZONES: Zone[] = [
 export interface GeoRetryConfig {
   /** Whether geo-fallback is enabled for this supermarket. Default true. */
   enabled: boolean;
-  /** Max non-default zones to try before giving up. Default 5. */
+  /** Max non-default zones to try before giving up. Default = all DEFAULT_ZONES. */
   maxZonesToTry: number;
   /** The zone list to iterate (the default zone is implicit = no region). */
   zones: Zone[];
 }
 
-const DEFAULTS = { enabled: true, maxZonesToTry: 5 } as const;
+// Sweep the whole default zone list by default. The previous cap of 5 only
+// reached the five most-populated zones (CABA, GBA-Oeste, La Plata, Córdoba,
+// Rosario), so products stocked ONLY in the south/Patagonia (Mendoza, Mar del
+// Plata, Bahía Blanca, Tucumán, Neuquén — zones 6-10) failed every day even
+// though geo-fallback was "on". The sweep only runs for products that already
+// failed the default zone, and region lookups are cached per (store, CP) for a
+// day, so the extra cost is bounded. Narrow it per-store via config.geoRetry.
+const DEFAULTS = { enabled: true, maxZonesToTry: DEFAULT_ZONES.length } as const;
 
 /**
  * Build the effective geo-retry config for a supermarket, merging the code

@@ -32,6 +32,7 @@
     "db:seed-taxonomy": "tsx --env-file=.env scripts/seed-taxonomy.ts",
     "discover": "tsx --env-file=.env scripts/discover-products.ts",
     "discover:search": "tsx --env-file=.env scripts/discover-products.ts --search-only",
+    "rediscover": "tsx --env-file=.env scripts/rediscover-products.ts",
     "scrape:url": "tsx --env-file=.env scripts/scrape-url.ts",
     "scrape:bulk": "tsx --env-file=.env scripts/import-urls.ts",
     "apikey:create": "tsx --env-file=.env scripts/create-api-key.ts"

@@ -19,9 +19,21 @@
  * every missing EAN onto a random recommended product. Only when the banner is
  * absent do we take the (single) result's `art_<id>` link as the match.
  *
- * Branch note: prices are sucursal-scoped (the site shows e.g. "sucursal
- * Neuquén"). We scrape whatever the site serves an anonymous visitor by
- * default; per-branch geo-retry can be layered on later via config if needed.
+ * Branch note: prices/availability are sucursal-scoped, and the active sucursal
+ * is chosen by the visitor's EGRESS IP (geolocation) — NOT by cookies. Verified
+ * live (2026-06): replaying the site's own `codigoPostal`/`idZonaPrecio`/… cookies
+ * via plain fetch does NOT switch the super sucursal (price is identical across
+ * every zone), and the only cookie that *does* change anything, `Id-Sucursal-Electro`,
+ * just flips to the electro storefront and 302s super products to the homepage.
+ * So a cookie-based per-sucursal geo-sweep is NOT possible here; the only lever
+ * is the egress IP (a region-specific proxy). We therefore scrape whatever the
+ * egress sees and rely on EAN re-discovery (scripts/rediscover-products.ts) to
+ * heal products whose `art_<id>` was replaced (see below).
+ *
+ * Stale-id healing: La Anónima periodically REPLACES a product's `art_<id>`
+ * while the EAN stays constant. The old PDP then 302s to the homepage, which we
+ * report as `product_not_found` so `scripts/rediscover-products.ts` can re-resolve
+ * the EAN to the new article and re-map the row in place.
  */
 
 import { ScrapeError } from '../shared/errors.js';
@@ -176,7 +188,33 @@ async function fetchLaAnonimaHtml(
       httpStatus: res.status,
     });
   }
+
+  // A dead/replaced article id (or one not carried in the egress IP's sucursal)
+  // 302s to the homepage. Detect that here — a 200 at the site root for a
+  // non-root request — and surface it as product_not_found so the re-discovery
+  // healer can re-resolve the EAN to the current article. (searchByEan calls
+  // this too, but it swallows all errors and returns null, so this is safe.)
+  if (isHomeRedirect(url, res.url)) {
+    throw new ScrapeError(
+      'product_not_found',
+      `La Anónima redirected ${url} to the homepage (article delisted or not in this sucursal)`,
+    );
+  }
   return res.text();
+}
+
+/**
+ * True when a request for a real path came back at the site root, i.e. the
+ * server bounced us to the homepage instead of serving the product.
+ */
+function isHomeRedirect(requestedUrl: string, finalUrl: string): boolean {
+  try {
+    const reqPath = new URL(requestedUrl).pathname.replace(/\/+$/, '');
+    const finPath = new URL(finalUrl).pathname.replace(/\/+$/, '');
+    return reqPath !== '' && finPath === '';
+  } catch {
+    return false;
+  }
 }
 
 // =============================================================================
