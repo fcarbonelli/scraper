@@ -252,7 +252,16 @@ export async function fetchMlPdp(
       return null;
     });
 
-    if (!parsed || !Number.isFinite(parsed.price) || parsed.price <= 0) {
+    // ML reports out-of-stock catalog products as price:0 / availability
+    // OutOfStock. The pipeline can't record a snapshot without a positive price,
+    // so we surface a clear "out of stock" price_missing (vs. a parse failure).
+    if (parsed && (parsed.price <= 0 || /OutOfStock/i.test(parsed.availability))) {
+      throw new ScrapeError(
+        'price_missing',
+        `MercadoLibre ${productId} is out of stock (no active seller offer)`,
+      );
+    }
+    if (!parsed || !Number.isFinite(parsed.price)) {
       throw new ScrapeError(
         'price_missing',
         `MercadoLibre PDP for ${productId} loaded but no offer price was found`,
