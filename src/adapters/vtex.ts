@@ -435,6 +435,38 @@ export interface VtexAdapterOptions {
    * stores (Cencosud) don't 429 us.
    */
   userAgent?: string;
+  /**
+   * Non-default VTEX sales channels (trade policies) to sweep when the default
+   * channel returns the product as missing / unavailable / price-less.
+   *
+   * Some VTEX stores gate part (or all) of their catalog behind a non-default
+   * sales channel rather than a postal-code region. El Abastecedor is the clear
+   * case: it's a pickup/wholesaler whose default channel ("Principal", sc=1) is
+   * empty for branch-exclusive products, while sc=2 ("Martin Fierro") and sc=3
+   * ("La Reja") carry them. For these stores the regionId mechanism does NOT
+   * work (a regionId-scoped catalog still comes back empty), so we sweep sales
+   * channels instead of geo zones.
+   *
+   * When set, `scrape` tries the default channel first (zero regression for
+   * products already visible there) and only sweeps these channels on a
+   * recoverable failure. Mutually exclusive with the geo-fallback path.
+   */
+  salesChannels?: number[];
+}
+
+/**
+ * VTEX failures a different sales channel might fix: an empty catalog
+ * (product_not_found), a missing offer (selector_failed), or a missing price
+ * (price_missing) can all be channel-specific. Transport-level failures
+ * (timeout / rate-limit / 5xx) are NOT swept — retrying other channels would
+ * just hammer the same blocked endpoint.
+ */
+function isChannelRecoverable(type: ScrapeError['type']): boolean {
+  return (
+    type === 'product_not_found' ||
+    type === 'selector_failed' ||
+    type === 'price_missing'
+  );
 }
 
 /**
@@ -513,6 +545,55 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
     return parseVtexResponse(body, ctx, opts.name);
   }
 
+  /**
+   * Single catalog scrape scoped to a sales channel (`sc`). `sc === null` is the
+   * store's default channel (today's behaviour); a number queries that trade
+   * policy's catalog, which may expose channel-exclusive products.
+   */
+  async function scrapeSalesChannel(
+    ctx: ScrapeContext,
+    sc: number | null,
+  ): Promise<ScrapeResult> {
+    let url = `${base}/api/catalog_system/pub/products/search?fq=productId:${encodeURIComponent(
+      ctx.externalId,
+    )}`;
+    let context = 'catalog lookup';
+    if (sc !== null) {
+      url += `&sc=${sc}`;
+      context = `catalog lookup [sc=${sc}]`;
+    }
+    ctx.logger.debug({ url, sc: sc ?? 'default' }, `fetching ${opts.name} catalog`);
+    const body = await fetchVtex<VtexProduct[]>(url, ctx.signal, opts.name, context, userAgent);
+    return parseVtexResponse(body, ctx, opts.name);
+  }
+
+  /**
+   * Try the default sales channel, then sweep the configured fallback channels
+   * until one stocks the product. First success wins; otherwise the last
+   * recoverable error propagates.
+   */
+  async function scrapeWithSalesChannelSweep(ctx: ScrapeContext): Promise<ScrapeResult> {
+    const channels: Array<number | null> = [null, ...(opts.salesChannels ?? [])];
+    let lastError: unknown;
+    for (let i = 0; i < channels.length; i++) {
+      const sc = channels[i] ?? null;
+      try {
+        const result = await scrapeSalesChannel(ctx, sc);
+        if (i > 0) {
+          ctx.logger.debug({ sc }, `${opts.name} resolved via fallback sales channel`);
+        }
+        return result;
+      } catch (err) {
+        if (err instanceof ScrapeError && isChannelRecoverable(err.type)) {
+          lastError = err;
+          continue;
+        }
+        throw err; // transport / WAF / 5xx — don't sweep
+      }
+    }
+    throw lastError;
+  }
+
   return {
     id: opts.id,
     name: opts.name,
@@ -520,7 +601,17 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
     canonicalizeUrl,
     resolveExternalId,
 
-    searchByEan: (ean, signal) => vtexSearchByEan(base, ean, signal, userAgent),
+    // Sweep configured fallback channels on discovery too, so channel-exclusive
+    // products (e.g. El Abastecedor sc=2/3) are still found by EAN.
+    async searchByEan(ean, signal) {
+      const hit = await vtexSearchByEan(base, ean, signal, userAgent);
+      if (hit || !opts.salesChannels?.length) return hit;
+      for (const sc of opts.salesChannels) {
+        const r = await vtexSearchByEan(base, ean, signal, userAgent, sc);
+        if (r) return r;
+      }
+      return null;
+    },
 
     async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
       if (!ctx.externalId) {
@@ -529,9 +620,15 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
           `${opts.name} adapter requires external_id (productId), got empty.`,
         );
       }
-      // VTEX regionalizes availability/price. Try the default sales channel
-      // first; if the product is missing / price-less / out of stock there,
-      // runWithGeoFallback re-scrapes from other AR zones via a VTEX regionId.
+      // Stores that gate their catalog by SALES CHANNEL (e.g. El Abastecedor)
+      // can't be regionalized via regionId, so sweep sales channels instead.
+      if (opts.salesChannels?.length) {
+        return scrapeWithSalesChannelSweep(ctx);
+      }
+      // Otherwise VTEX regionalizes availability/price by postal code: try the
+      // default sales channel first; if the product is missing / price-less /
+      // out of stock there, runWithGeoFallback re-scrapes from other AR zones
+      // via a VTEX regionId.
       return runWithGeoFallback({
         logger: ctx.logger,
         config: ctx.config.config,

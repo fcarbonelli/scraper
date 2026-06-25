@@ -38,6 +38,7 @@ export async function vtexSearchByEan(
   ean: string,
   signal?: AbortSignal,
   userAgent: string = USER_AGENT,
+  salesChannel?: number,
 ): Promise<EanSearchResult | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -45,7 +46,11 @@ export async function vtexSearchByEan(
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  const url = `${baseUrl}/api/catalog_system/pub/products/search?fq=alternateIds_Ean:${encodeURIComponent(ean)}`;
+  // Some VTEX stores (e.g. El Abastecedor) hide part of their catalog behind a
+  // non-default sales channel; pass `salesChannel` so discovery can see it.
+  const url =
+    `${baseUrl}/api/catalog_system/pub/products/search?fq=alternateIds_Ean:${encodeURIComponent(ean)}` +
+    (salesChannel !== undefined ? `&sc=${salesChannel}` : '');
 
   let res: Response;
   try {
