@@ -19,26 +19,28 @@
  * every missing EAN onto a random recommended product. Only when the banner is
  * absent do we take the (single) result's `art_<id>` link as the match.
  *
- * Branch note: prices/availability are sucursal-scoped, and the active sucursal
- * is chosen by the visitor's EGRESS IP (geolocation) — NOT by cookies. Verified
- * live (2026-06): replaying the site's own `codigoPostal`/`idZonaPrecio`/… cookies
- * via plain fetch does NOT switch the super sucursal (price is identical across
- * every zone), and the only cookie that *does* change anything, `Id-Sucursal-Electro`,
- * just flips to the electro storefront and 302s super products to the homepage.
- * So a cookie-based per-sucursal geo-sweep is NOT possible here; the only lever
- * is the egress IP (a region-specific proxy). We therefore scrape whatever the
- * egress sees and rely on EAN re-discovery (scripts/rediscover-products.ts) to
- * heal products whose `art_<id>` was replaced (see below).
+ * Location note (corrected 2026-06): the SUPER (grocery) catalog IS sucursal-
+ * scoped, and the lever is the `Id-Sucursal-Super` cookie — NOT the postal-code
+ * cookies (those do nothing on their own). With no super sucursal selected the
+ * site has `super:null` and 302s every super product to the homepage, regardless
+ * of egress IP. Setting `Id-Sucursal-Super=<id>` (+ `Id-Sucursal-Super-DisponibleYa`,
+ * `seleccionocp=1`) reveals the product and its price for any branch that stocks
+ * it. Verified live: a plain GET with just those cookies recovers products that
+ * otherwise redirect home. Different branches carry different assortments (a SKU
+ * stocked in Neuquén may be absent in Bariloche), so when the default attempt
+ * 302s home / yields no price we sweep a list of super sucursal ids (Patagonia +
+ * NEA — BA/Córdoba/Mendoza have no super catalog) until one resolves. The sweep
+ * is purely additive: the first attempt keeps today's IP-default behaviour, so
+ * products that already work are untouched; the sweep only RECOVERS failures.
  *
  * Stale-id healing: La Anónima periodically REPLACES a product's `art_<id>`
- * while the EAN stays constant. The old PDP then 302s to the homepage, which we
- * report as `product_not_found` so `scripts/rediscover-products.ts` can re-resolve
- * the EAN to the new article and re-map the row in place.
+ * while the EAN stays constant. The old PDP then 302s to the homepage from EVERY
+ * sucursal, so once the full sweep still home-redirects we report
+ * `product_not_found` and `scripts/rediscover-products.ts` re-resolves the EAN to
+ * the new article and re-maps the row in place.
  */
 
-import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
-import { getProxyDispatcher } from '../shared/proxy.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -60,6 +62,75 @@ const USER_AGENT =
 
 // The "no results" banner the site renders for an unmatched search term.
 const NO_RESULTS_RE = /No encontramos resultados/i;
+
+// -----------------------------------------------------------------------------
+// Super sucursal selection
+// -----------------------------------------------------------------------------
+// The super (grocery) catalog is scoped by the `Id-Sucursal-Super` cookie. When
+// the default attempt 302s home / has no price, we retry against each of these
+// branch ids until one stocks the product. IDs span La Anónima's super footprint
+// (Patagonia + NEA); discovered live from /sucursal/<cp>. Override the order/set
+// with LA_ANONIMA_SUCURSAL_FALLBACKS="8,22,4,…" if the assortment shifts.
+const DEFAULT_SUCURSAL_FALLBACKS = [8, 22, 4, 47, 33, 59, 32, 165, 164, 6];
+
+const SUCURSAL_FALLBACKS: number[] = (() => {
+  const raw = process.env.LA_ANONIMA_SUCURSAL_FALLBACKS;
+  if (!raw) return DEFAULT_SUCURSAL_FALLBACKS;
+  const ids = raw
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return ids.length > 0 ? ids : DEFAULT_SUCURSAL_FALLBACKS;
+})();
+
+// Optional: force a specific super sucursal as the PRIMARY attempt (deterministic
+// pricing). Unset → the first attempt uses the egress IP's default sucursal,
+// preserving today's behaviour for products that already scrape fine.
+const PRIMARY_SUCURSAL: number | null = (() => {
+  const raw = process.env.LA_ANONIMA_SUCURSAL_SUPER;
+  if (!raw) return null;
+  const n = Number(raw.trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+})();
+
+/** Cookie header that scopes the storefront to a given super sucursal branch. */
+function buildSucursalCookie(id: number): string {
+  return `Id-Sucursal-Super=${id}; Id-Sucursal-Super-DisponibleYa=${id}; seleccionocp=1`;
+}
+
+/**
+ * Ordered list of Cookie headers to try for a product scrape. The first entry is
+ * the PRIMARY attempt (configured branch, else `undefined` = IP default); the
+ * rest are the fallback-sweep branches (deduped against the primary).
+ */
+function buildSucursalAttempts(): Array<string | undefined> {
+  if (PRIMARY_SUCURSAL !== null) {
+    const rest = SUCURSAL_FALLBACKS.filter((id) => id !== PRIMARY_SUCURSAL);
+    return [buildSucursalCookie(PRIMARY_SUCURSAL), ...rest.map(buildSucursalCookie)];
+  }
+  return [undefined, ...SUCURSAL_FALLBACKS.map(buildSucursalCookie)];
+}
+
+// Cookie used for discovery (EAN / free-text search) so the super catalog is
+// visible to the search index. Uses the configured primary branch, else the
+// first fallback (a large hipermercado with a broad assortment).
+const DISCOVERY_COOKIE = buildSucursalCookie(
+  PRIMARY_SUCURSAL ?? SUCURSAL_FALLBACKS[0] ?? DEFAULT_SUCURSAL_FALLBACKS[0]!,
+);
+
+/**
+ * Errors a different sucursal might fix: a home-redirect (product_not_found),
+ * a missing price, or a missing JSON-LD block can all be branch-specific.
+ * Network/WAF/rate-limit failures are NOT swept (retrying other branches would
+ * just hammer the same blocked egress).
+ */
+function isSucursalRecoverable(type: ScrapeError['type']): boolean {
+  return (
+    type === 'product_not_found' ||
+    type === 'price_missing' ||
+    type === 'selector_failed'
+  );
+}
 
 // Capture the first product link of the form `/<slug>/art_<id>/`.
 const PRODUCT_LINK_RE = /href=["'](\/[^"']*\/art_(\d+)\/?)["']/i;
@@ -127,6 +198,7 @@ async function fetchLaAnonimaHtml(
   url: string,
   signal: AbortSignal | undefined,
   timeoutMs: number,
+  cookie?: string,
 ): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -134,25 +206,18 @@ async function fetchLaAnonimaHtml(
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  // La Anónima prices/availability are scoped to the sucursal the site picks
-  // from the visitor's egress IP. A non-AR datacenter IP lands in a sucursal
-  // with patchy catalog coverage (the recurring `price_missing` / homepage-302
-  // failures), so route through the AR residential proxy when one is configured
-  // for this adapter (opt-in via AR_PROXY_SUPERMARKETS; no-op/direct otherwise).
-  const dispatcher = getProxyDispatcher('la-anonima');
-
-  let res: Awaited<ReturnType<typeof undiciFetch>>;
+  let res: Response;
   try {
-    res = await undiciFetch(url, {
+    res = await fetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
         Accept: 'text/html,application/xhtml+xml,*/*',
         'Accept-Language': 'es-AR,es;q=0.9',
+        ...(cookie ? { Cookie: cookie } : {}),
       },
       redirect: 'follow',
       signal: controller.signal,
-      ...(dispatcher ? { dispatcher } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -306,7 +371,7 @@ async function searchByEan(
 
   let html: string;
   try {
-    html = await fetchLaAnonimaHtml(searchUrl, signal, SEARCH_TIMEOUT_MS);
+    html = await fetchLaAnonimaHtml(searchUrl, signal, SEARCH_TIMEOUT_MS, DISCOVERY_COOKIE);
   } catch {
     // Discovery treats any failure as "not found".
     return null;
@@ -342,7 +407,7 @@ export async function searchProductCandidates(
   const searchUrl = `${LA_ANONIMA_BASE_URL}/buscar/${encodeURIComponent(query)}`;
   let html: string;
   try {
-    html = await fetchLaAnonimaHtml(searchUrl, signal, SEARCH_TIMEOUT_MS);
+    html = await fetchLaAnonimaHtml(searchUrl, signal, SEARCH_TIMEOUT_MS, DISCOVERY_COOKIE);
   } catch {
     return [];
   }
@@ -395,8 +460,40 @@ export const laAnonimaAdapter: SupermarketAdapter = {
       );
     }
     ctx.logger.debug({ url: ctx.externalUrl }, 'fetching La Anónima product HTML');
-    const html = await fetchLaAnonimaHtml(ctx.externalUrl, ctx.signal, REQUEST_TIMEOUT_MS);
-    return parseLaAnonimaHtml(html, ctx);
+
+    // Try the primary attempt (IP-default or configured branch); on a
+    // sucursal-recoverable failure, sweep alternate super branches until one
+    // stocks the product. First success wins; otherwise the last error (a real
+    // product_not_found once every branch home-redirects) propagates so the
+    // re-discovery healer can re-resolve the EAN.
+    const attempts = buildSucursalAttempts();
+    let lastError: unknown;
+    for (let i = 0; i < attempts.length; i++) {
+      const cookie = attempts[i];
+      try {
+        const html = await fetchLaAnonimaHtml(
+          ctx.externalUrl,
+          ctx.signal,
+          REQUEST_TIMEOUT_MS,
+          cookie,
+        );
+        const result = parseLaAnonimaHtml(html, ctx);
+        if (i > 0) {
+          ctx.logger.debug(
+            { sucursalCookie: cookie },
+            'La Anónima resolved via fallback sucursal sweep',
+          );
+        }
+        return result;
+      } catch (err) {
+        if (err instanceof ScrapeError && isSucursalRecoverable(err.type)) {
+          lastError = err;
+          continue;
+        }
+        throw err; // network / WAF / rate-limit / server error — don't sweep
+      }
+    }
+    throw lastError;
   },
 };
 

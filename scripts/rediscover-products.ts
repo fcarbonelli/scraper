@@ -48,12 +48,25 @@
  *   --deactivate-missing   For products whose EAN no longer resolves at all
  *                          (truly discontinued), set is_active=false so they
  *                          stop failing daily. Off by default.
+ *
+ * Targeted mode (skips the scan; for committing reviewed no-EAN picks):
+ *   --map=<smpId>=<newUrl>   Re-map a specific row to a chosen article URL, and
+ *                            backfill its master EAN/name from that article so
+ *                            it stays healable. Repeatable. Needs --apply.
+ *   --retire=<smpId>[,...]   Deactivate rows for genuinely discontinued products
+ *                            (no valid replacement). Repeatable. Needs --apply.
+ *
+ *   e.g.  npm run rediscover -- la-anonima --apply \
+ *           --map=<smpId>=https://www.laanonima.com.ar/<slug>/art_3094480/ \
+ *           --retire=<smpId-a> --retire=<smpId-b>
  */
 
 import { db, fetchInChunks } from '../src/shared/db.js';
 import { getAdapter } from '../src/adapters/registry.js';
 import { searchProductCandidates } from '../src/adapters/la-anonima.js';
+import { lookupTaxonomy } from '../src/shared/taxonomy.js';
 import { logger } from '../src/shared/logger.js';
+import type { ProductInfo, ScrapeContext, SupermarketConfig } from '../src/adapters/types.js';
 
 // Error types that mean "the URL/article is gone", i.e. worth re-resolving.
 // Transient errors (network_timeout, rate_limited, …) are deliberately excluded
@@ -75,6 +88,10 @@ interface Args {
   limit: number | null;
   staleTypes: string[];
   deactivateMissing: boolean;
+  /** Targeted manual re-maps: `--map=<smpId>=<newUrl>` (repeatable). */
+  maps: Array<{ smpId: string; url: string }>;
+  /** Targeted retirements: `--retire=<smpId>[,<smpId>...]` (repeatable). */
+  retire: string[];
 }
 
 function parseArgs(): Args {
@@ -82,6 +99,21 @@ function parseArgs(): Args {
   const flag = (name: string): string | undefined =>
     argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
   const supermarketId = argv.filter((a) => !a.startsWith('--'))[0] ?? 'la-anonima';
+
+  // Targeted re-maps: each `--map=<smpId>=<url>`. We split on the FIRST '=' only
+  // (URLs contain no '=', but be safe).
+  const maps: Array<{ smpId: string; url: string }> = [];
+  for (const a of argv.filter((x) => x.startsWith('--map='))) {
+    const rest = a.slice('--map='.length);
+    const eq = rest.indexOf('=');
+    if (eq > 0) maps.push({ smpId: rest.slice(0, eq), url: rest.slice(eq + 1) });
+  }
+  const retire = argv
+    .filter((x) => x.startsWith('--retire='))
+    .flatMap((x) => x.slice('--retire='.length).split(','))
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   return {
     supermarketId,
     apply: argv.includes('--apply'),
@@ -90,6 +122,8 @@ function parseArgs(): Args {
     limit: flag('limit') ? Number(flag('limit')) : null,
     staleTypes: (flag('error-types') ?? DEFAULT_STALE_TYPES.join(',')).split(',').filter(Boolean),
     deactivateMissing: argv.includes('--deactivate-missing'),
+    maps,
+    retire,
   };
 }
 
@@ -305,12 +339,171 @@ async function trySlugRemap(
   // by hand (or feed into a targeted apply). Auto-applying here would corrupt
   // the price series with a similarly-named-but-different SKU.
   tally.needsReview.push(c.supermarketProductId);
-  console.log(`${label}\n  NEEDS-REVIEW (no EAN — pick the replacement by hand):`);
+  console.log(
+    `${label}\n  NEEDS-REVIEW smpId=${c.supermarketProductId} current=${c.externalId} ` +
+      `(no EAN — pick one, then apply with --map=${c.supermarketProductId}=<url>):`,
+  );
   for (const r of ranked.slice(0, 5)) {
     const sizeFlag = targetSize && r.size !== targetSize ? ' (size≠)' : '';
     console.log(`     ${r.score.toFixed(2)} size=${r.size ?? '-'}${sizeFlag}  ${r.cd.externalId}  ${r.cd.url}`);
   }
   return true;
+}
+
+/** Load the minimal supermarket_products fields for a targeted op. */
+async function loadSmp(
+  smpId: string,
+): Promise<{ productId: string; externalId: string; externalUrl: string | null } | null> {
+  const { data, error } = await db
+    .from('supermarket_products')
+    .select('product_id, external_id, external_url')
+    .eq('id', smpId)
+    .maybeSingle();
+  if (error) throw error;
+  return data
+    ? {
+        productId: data.product_id as string,
+        externalId: data.external_id as string,
+        externalUrl: (data.external_url as string | null) ?? null,
+      }
+    : null;
+}
+
+/** Re-scrape a URL purely to extract ProductInfo (EAN/name/etc.) for backfill. */
+async function probeInfo(
+  supermarketId: string,
+  url: string,
+  externalId: string,
+): Promise<ProductInfo> {
+  const adapter = getAdapter(supermarketId);
+  const config: SupermarketConfig = {
+    id: supermarketId,
+    name: supermarketId,
+    baseUrl: null,
+    rateLimitMs: 0,
+    concurrency: 1,
+    config: {},
+  };
+  const ctx: ScrapeContext = {
+    supermarketProductId: 'rediscover',
+    externalId,
+    externalUrl: url,
+    config,
+    logger: logger.child({ supermarket: supermarketId, externalId }),
+  };
+  if (adapter.probe) return adapter.probe(ctx);
+  return (await adapter.scrape(ctx)).productInfo ?? {};
+}
+
+/**
+ * Backfill the master products row from a freshly-scraped article: fill the EAN
+ * (+ client taxonomy) and a real name when they're currently missing, so the
+ * product can be healed by EAN if its article id is ever replaced again.
+ * Returns the list of fields changed.
+ */
+async function backfillMaster(productId: string, info: ProductInfo): Promise<string[]> {
+  const cur = await db.from('products').select('ean, name').eq('id', productId).maybeSingle();
+  if (cur.error || !cur.data) return [];
+  const update: Record<string, unknown> = {};
+  const changed: string[] = [];
+
+  const ean = info.ean?.replace(/\D/g, '') ?? '';
+  if (ean && !cur.data.ean) {
+    update.ean = ean;
+    changed.push('ean');
+    const tax = lookupTaxonomy(ean);
+    if (tax) {
+      update.category = tax.category;
+      update.subcategory = tax.subcategory;
+      update.manufacturer = tax.manufacturer;
+      update.brand = tax.brand;
+      update.format = tax.format || null;
+      update.variety = tax.variety || null;
+      update.description_forms = tax.descriptionForms || null;
+      changed.push('taxonomy');
+    }
+  }
+  if (info.name && (!cur.data.name || cur.data.name === 'Unknown product')) {
+    update.name = info.name;
+    changed.push('name');
+  }
+  if (changed.length === 0) return [];
+
+  const { error } = await db.from('products').update(update).eq('id', productId);
+  if (error) {
+    // Most likely an EAN unique-constraint collision (another product already
+    // owns this EAN). Retry without the EAN so at least the name lands.
+    if (update.ean) {
+      delete update.ean;
+      const retry = await db.from('products').update(update).eq('id', productId);
+      if (retry.error) throw new Error(retry.error.message);
+      return changed.filter((c) => c !== 'ean' && c !== 'taxonomy');
+    }
+    throw new Error(error.message);
+  }
+  return changed;
+}
+
+/**
+ * Targeted mode: apply explicit `--map`/`--retire` operations from a reviewed
+ * candidate list. Runs instead of the scan when either flag is present.
+ */
+async function runTargeted(args: Args): Promise<void> {
+  console.log(
+    `\nTargeted re-discovery for ${args.supermarketId} (${args.apply ? 'APPLY' : 'DRY RUN'}): ` +
+      `${args.maps.length} map(s), ${args.retire.length} retire(s)\n`,
+  );
+  const adapter = getAdapter(args.supermarketId);
+
+  for (const m of args.maps) {
+    const smp = await loadSmp(m.smpId);
+    if (!smp) {
+      console.log(`MAP ${m.smpId}: row NOT FOUND`);
+      continue;
+    }
+    const canonical = adapter.canonicalizeUrl ? adapter.canonicalizeUrl(m.url) : m.url;
+    let newId: string;
+    try {
+      newId = adapter.resolveExternalId
+        ? await adapter.resolveExternalId(canonical)
+        : new URL(canonical).pathname;
+    } catch (e) {
+      console.log(`MAP ${m.smpId}: bad url — ${(e as Error).message}`);
+      continue;
+    }
+    console.log(`MAP ${m.smpId}: ${smp.externalId} -> ${newId}\n        ${canonical}`);
+    if (!args.apply) continue;
+
+    const applied = await applyRemap(
+      args.supermarketId,
+      { supermarketProductId: m.smpId, externalId: smp.externalId, externalUrl: smp.externalUrl, productId: smp.productId },
+      canonical,
+      newId,
+    );
+    console.log(`  -> ${applied.status === 'error' ? '! ' + applied.detail : applied.detail}`);
+    if (applied.status === 'error') continue;
+
+    // Best-effort: backfill the master EAN/name so it stays healable in future.
+    try {
+      const info = await probeInfo(args.supermarketId, canonical, newId);
+      const changed = await backfillMaster(smp.productId, info);
+      if (changed.length) console.log(`  -> backfilled master (${changed.join(', ')})`);
+    } catch (e) {
+      console.log(`  (master backfill skipped: ${(e as Error).message})`);
+    }
+  }
+
+  for (const id of args.retire) {
+    console.log(`RETIRE ${id}`);
+    if (!args.apply) continue;
+    const { error } = await db
+      .from('supermarket_products')
+      .update({ is_active: false })
+      .eq('id', id);
+    console.log(error ? `  ! ${error.message}` : '  -> deactivated (is_active=false)');
+  }
+
+  if (!args.apply) console.log('\n(dry run — re-run with --apply to write)');
 }
 
 async function main(): Promise<void> {
@@ -319,6 +512,12 @@ async function main(): Promise<void> {
   if (!adapter.searchByEan) {
     console.error(`Adapter "${args.supermarketId}" has no searchByEan(); cannot re-discover.`);
     process.exit(1);
+  }
+
+  // Targeted mode: explicit operator-reviewed re-maps / retirements.
+  if (args.maps.length > 0 || args.retire.length > 0) {
+    await runTargeted(args);
+    process.exit(0);
   }
 
   logger.info(
