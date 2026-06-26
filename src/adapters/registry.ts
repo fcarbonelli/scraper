@@ -30,6 +30,7 @@ import { laGallegaAdapter } from './la-gallega.js';
 import { josimarAdapter } from './josimar.js';
 import { supertopAdapter } from './supertop.js';
 import { elAbastecedorAdapter } from './el-abastecedor.js';
+import { comodinAdapter } from './comodin.js';
 import { mercadolibreAdapter } from './mercadolibre.js';
 
 const adapters = new Map<string, SupermarketAdapter>();
@@ -65,6 +66,7 @@ register(laGallegaAdapter);
 register(josimarAdapter);
 register(supertopAdapter);
 register(elAbastecedorAdapter);
+register(comodinAdapter);
 register(mercadolibreAdapter);
 
 export function getAdapter(supermarketId: string): SupermarketAdapter {

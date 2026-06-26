@@ -274,6 +274,18 @@ const SUPERMARKETS: SupermarketSeed[] = [
     cadena_display_name: 'CORDIEZ',
   },
   {
+    id: 'comodin',
+    name: 'Comodín en Casa',
+    base_url: 'https://www.comodinencasa.com.ar',
+    rate_limit_ms: 500,
+    concurrency: 3,
+    is_active: true,
+    provincia: 'JUJUY',
+    zona: 'NOA',
+    canal: 'SPM REGIONAL',
+    cadena_display_name: 'COMODIN',
+  },
+  {
     id: 'el-abastecedor',
     name: 'El Abastecedor',
     base_url: 'https://www.abastecedor.com.ar',
