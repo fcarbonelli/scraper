@@ -27,6 +27,24 @@ interface SupermarketSeed {
   zona: string | null;
   canal: string;
   cadena_display_name: string;
+  /**
+   * Adapter-specific config (jsonb). Only set when needed — omit to leave the
+   * existing DB config untouched. Used to flag magazine-sourced chains:
+   *   config = { source_type: 'revista', revista: { strategy, offersUrl, ... } }
+   * See src/revistas/ and docs/REVISTA_REVIEW.md.
+   */
+  config?: Record<string, unknown>;
+}
+
+/** config payload for a magazine-sourced (revista) chain. */
+function revista(
+  strategy: 'html-pdf-links' | 'pubhtml5' | 'publuu',
+  offersUrl: string,
+  pubhtml5Url?: string,
+): Record<string, unknown> {
+  const r: Record<string, unknown> = { strategy, offersUrl };
+  if (pubhtml5Url) r.pubhtml5Url = pubhtml5Url;
+  return { source_type: 'revista', revista: r };
 }
 
 // =============================================================================
@@ -47,11 +65,15 @@ const SUPERMARKETS: SupermarketSeed[] = [
     base_url: 'https://www.makro.com.ar',
     rate_limit_ms: 500,
     concurrency: 3,
-    is_active: false,
+    // Magazine-sourced (no web price adapter): active so the daily revista
+    // check picks it up. The daily URL scrape enqueues 0 jobs for it (no
+    // supermarket_products), which is harmless.
+    is_active: true,
     provincia: 'BUENOS AIRES',
     zona: 'CAPITAL Y GBA',
     canal: 'MAY NACIONAL',
     cadena_display_name: 'MAKRO',
+    config: revista('html-pdf-links', 'https://makro.com.ar/ofertas/'),
   },
   {
     id: 'maxi-carrefour',
@@ -83,11 +105,27 @@ const SUPERMARKETS: SupermarketSeed[] = [
     base_url: 'https://www.vital.com.ar',
     rate_limit_ms: 500,
     concurrency: 3,
-    is_active: false,
+    // Magazine-sourced — see Makro note above.
+    is_active: true,
     provincia: 'BUENOS AIRES',
     zona: 'CAPITAL Y GBA',
     canal: 'MAY NACIONAL',
     cadena_display_name: 'VITAL',
+    config: revista('html-pdf-links', 'https://www.vital.com.ar/ofertas/'),
+  },
+  {
+    id: 'rosental',
+    name: 'Rosental',
+    base_url: 'https://www.rosental.com.ar',
+    rate_limit_ms: 500,
+    concurrency: 2,
+    // Magazine-sourced (PubHTML5 flipbook discovered from the home page).
+    is_active: true,
+    provincia: 'MISIONES',
+    zona: 'NEA',
+    canal: 'MAY REGIONAL',
+    cadena_display_name: 'ROSENTAL',
+    config: revista('pubhtml5', 'https://www.rosental.com.ar/', 'https://online.pubhtml5.com/oggo/ignq/'),
   },
 
   // --- SPM NACIONAL (national supermarkets) ---------------------------------
@@ -384,6 +422,21 @@ const SUPERMARKETS: SupermarketSeed[] = [
     cadena_display_name: 'COMODIN',
   },
   {
+    id: 'maxicomodin',
+    name: 'Maxicomodín',
+    base_url: 'https://supermercadoscomodin.com',
+    rate_limit_ms: 1000,
+    concurrency: 2,
+    // Magazine-sourced (Publuu flipbook). Kept SEPARATE from the retail
+    // `comodin` VTEX chain on purpose — this is the wholesale (mayorista) tier.
+    is_active: true,
+    provincia: 'JUJUY',
+    zona: 'NOA',
+    canal: 'MAY REGIONAL',
+    cadena_display_name: 'MAXICOMODIN',
+    config: revista('publuu', 'https://supermercadoscomodin.com/maxicomodin/'),
+  },
+  {
     id: 'parodi',
     name: 'Parodi (DIPA)',
     base_url: 'https://cordoba.dipa.ar',
@@ -416,23 +469,24 @@ async function main(): Promise<void> {
   let failed = 0;
 
   for (const sm of SUPERMARKETS) {
-    const { error } = await db
-      .from('supermarkets')
-      .upsert(
-        {
-          id: sm.id,
-          name: sm.name,
-          base_url: sm.base_url,
-          rate_limit_ms: sm.rate_limit_ms,
-          concurrency: sm.concurrency,
-          is_active: sm.is_active,
-          provincia: sm.provincia,
-          zona: sm.zona,
-          canal: sm.canal,
-          cadena_display_name: sm.cadena_display_name,
-        },
-        { onConflict: 'id' },
-      );
+    // Only send `config` when the seed defines it, so we never clobber an
+    // existing DB config (e.g. self-healed auth cookies) for chains that
+    // manage their config at runtime.
+    const row: Record<string, unknown> = {
+      id: sm.id,
+      name: sm.name,
+      base_url: sm.base_url,
+      rate_limit_ms: sm.rate_limit_ms,
+      concurrency: sm.concurrency,
+      is_active: sm.is_active,
+      provincia: sm.provincia,
+      zona: sm.zona,
+      canal: sm.canal,
+      cadena_display_name: sm.cadena_display_name,
+    };
+    if (sm.config) row.config = sm.config;
+
+    const { error } = await db.from('supermarkets').upsert(row, { onConflict: 'id' });
     if (error) {
       logger.error({ err: error, supermarket: sm.id }, 'failed to upsert supermarket');
       failed++;

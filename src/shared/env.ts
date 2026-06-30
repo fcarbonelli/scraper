@@ -33,6 +33,28 @@ const EnvSchema = z.object({
   DEFAULT_RATE_LIMIT_MS: z.coerce.number().int().nonnegative().default(500),
   DEFAULT_CONCURRENCY: z.coerce.number().int().positive().default(3),
 
+  // Revista (magazine) pipeline — AI reads promo PDFs/flipbooks for chains that
+  // don't publish prices on the web. See src/revistas/ and docs/REVISTA_REVIEW.md.
+  // OPENAI_API_KEY is optional at startup (smoke tests run without it); the
+  // revista pipeline asserts it's present when it actually runs.
+  OPENAI_API_KEY: z.string().optional().default(''),
+  REVISTA_VISION_MODEL: z.string().default('gpt-4o'),
+  REVISTA_JUDGE_MODEL: z.string().default('gpt-4o-mini'),
+  REVISTA_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
+  // Minimum judge confidence to queue a match for human review. Low on purpose:
+  // the human is the real filter — we'd rather a person dismiss a dud in a
+  // second than silently drop a real match.
+  REVISTA_MATCH_THRESHOLD: z.coerce.number().min(0).max(1).default(0.3),
+  // Bounded concurrency for vision/judge calls (keeps us under OpenAI rate limits).
+  REVISTA_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  // Supabase Storage bucket the rendered page images are uploaded to.
+  REVISTA_STORAGE_BUCKET: z.string().default('revista-pages'),
+  // Toggle the daily magazine check inside the orchestrator run.
+  REVISTA_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+
   // Observability
   SENTRY_DSN: z.string().optional().default(''),
 

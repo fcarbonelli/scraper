@@ -1,0 +1,103 @@
+{
+  "data": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "magazine_id": "f1a2b3c4-d5e6-4789-9abc-def012345678",
+      "supermarket_id": "makro",
+      "page_number": 12,
+      "page_image_url": "https://project.supabase.co/storage/v1/object/public/revista-pages/f1a2b3c4-d5e6-4789-9abc-def012345678/page-012.png",
+      "extracted": {
+        "name": "Lavandina Ayudín 1L",
+        "brand": "Ayudín",
+        "ean": "7793253006709",
+        "price": 1299.0,
+        "promo_price": null,
+        "promo_text": null,
+        "quantity": "1L"
+      },
+      "proposed_match": {
+        "product_id": "50bb31b8-1111-4aaa-8bbb-000000000001",
+        "name": "Lavandina Original Ayudin 1l",
+        "brand": "AYUDIN",
+        "ean": "7793253006709",
+        "quantity": "1 Litro"
+      },
+      "confidence": 1.0,
+      "method": "ean",
+      "reason": "EAN idéntico",
+      "candidates": [
+        { "product_id": "50bb31b8-1111-4aaa-8bbb-000000000001", "name": "Lavandina Original Ayudin 1l", "brand": "AYUDIN" }
+      ],
+      "status": "pending",
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "magazine_id": "f1a2b3c4-d5e6-4789-9abc-def012345678",
+      "supermarket_id": "makro",
+      "page_number": 16,
+      "page_image_url": "https://project.supabase.co/storage/v1/object/public/revista-pages/f1a2b3c4-d5e6-4789-9abc-def012345678/page-016.png",
+      "extracted": {
+        "name": "Lavandina en Gel Ayudín 900ml",
+        "brand": "Ayudín",
+        "ean": null,
+        "price": 1899.0,
+        "promo_price": 1499.0,
+        "promo_text": "2do al 50%",
+        "quantity": "900ml"
+      },
+      "proposed_match": {
+        "product_id": "50bb31b8-2222-4aaa-8bbb-000000000002",
+        "name": "Lavandina en Gel Original Ayudin 1l",
+        "brand": "AYUDIN",
+        "ean": "7793253009999",
+        "quantity": "1 Litro"
+      },
+      "confidence": 0.82,
+      "method": "llm",
+      "reason": "Misma marca y tipo (lavandina en gel original); difiere el tamaño (900ml vs 1L).",
+      "candidates": [
+        { "product_id": "50bb31b8-2222-4aaa-8bbb-000000000002", "name": "Lavandina en Gel Original Ayudin 1l", "brand": "AYUDIN" },
+        { "product_id": "50bb31b8-3333-4aaa-8bbb-000000000003", "name": "Lavandina en Gel Perfumada Ayudin 1l", "brand": "AYUDIN" }
+      ],
+      "status": "pending",
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "magazine_id": "f1a2b3c4-d5e6-4789-9abc-def012345678",
+      "supermarket_id": "makro",
+      "page_number": 23,
+      "page_image_url": "https://project.supabase.co/storage/v1/object/public/revista-pages/f1a2b3c4-d5e6-4789-9abc-def012345678/page-023.png",
+      "extracted": {
+        "name": "Detergente Magistral 750ml",
+        "brand": "Magistral",
+        "ean": null,
+        "price": 2150.0,
+        "promo_price": null,
+        "promo_text": null,
+        "quantity": "750ml"
+      },
+      "proposed_match": {
+        "product_id": "50bb31b8-4444-4aaa-8bbb-000000000004",
+        "name": "Detergente Magistral Original 500ml",
+        "brand": "MAGISTRAL",
+        "ean": "7790063012345",
+        "quantity": "500 ml"
+      },
+      "confidence": 0.41,
+      "method": "llm",
+      "reason": "Misma marca y tipo; baja confianza por diferencia de tamaño y variedad no confirmada.",
+      "candidates": [
+        { "product_id": "50bb31b8-4444-4aaa-8bbb-000000000004", "name": "Detergente Magistral Original 500ml", "brand": "MAGISTRAL" }
+      ],
+      "status": "pending",
+      "reviewed_by": null,
+      "reviewed_at": null
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 3, "totalPages": 1 },
+  "meta": { "ts": "2026-06-29T09:10:02.553Z" }
+}

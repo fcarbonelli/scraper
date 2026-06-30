@@ -197,6 +197,52 @@ api_keys (
   created_at      timestamptz
   last_used_at    timestamptz
 )
+
+-- Revista (magazine) review layer — migration 006. For chains whose promos
+-- only exist in a weekly/bi-weekly PDF/flipbook (Makro, Vital, Rosental,
+-- Maxicomodín). Flagged via supermarkets.config = { source_type: 'revista',
+-- revista: { strategy, offersUrl, pubhtml5Url? } }. See docs/REVISTA_REVIEW.md
+-- and src/revistas/. An APPROVED item writes a normal price_snapshots row
+-- (tier_used='ai', status='ok') tied to the day's run, so it publishes through
+-- the existing gate — nothing magazine-specific in client_base.
+revista_magazines (
+  id               uuid PK
+  supermarket_id   text FK
+  label            text
+  source_strategy  text        -- 'html-pdf-links' | 'pubhtml5' | 'publuu'
+  source_url       text
+  content_hash     text        -- dedup key (cheap: URL + size); unchanged issue = no AI cost
+  file_size        bigint
+  page_count       int
+  status           text        -- 'processing' | 'in_review' | 'reviewed'
+  scrape_run_id    uuid FK
+  metadata         jsonb       -- full per-page extraction kept here for debug
+  detected_at      timestamptz
+  reviewed_at      timestamptz
+  UNIQUE (supermarket_id, content_hash)
+)
+
+-- The human review queue: one row per (AI-extracted product → proposed match).
+revista_review_items (
+  id                                uuid PK
+  magazine_id                       uuid FK
+  supermarket_id                    text FK
+  page_number                       int
+  page_image_url                    text         -- public Supabase Storage URL
+  extracted                         jsonb        -- { name, brand, ean, price, promo_price, promo_text, quantity }
+  proposed_product_id               uuid FK      -- nullable (manual / no proposal)
+  confidence                        numeric(4,3) -- 0..1 (1.0 for EAN matches)
+  method                            text         -- 'ean' | 'llm' | 'manual'
+  reason                            text
+  candidates                        jsonb
+  status                            text         -- 'pending' | 'approved' | 'rejected'
+  note                              text
+  reviewed_by                       text
+  reviewed_at                       timestamptz
+  resulting_supermarket_product_id  uuid FK      -- set on approve
+  resulting_snapshot_id             bigint       -- set on approve
+  created_at                        timestamptz
+)
 ```
 
 ---

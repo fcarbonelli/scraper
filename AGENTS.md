@@ -13,6 +13,7 @@ A Node/TypeScript backend service that scrapes 100+ products across 30+ supermar
 - `**examples/api/**` — JSON response fixtures matching the API envelope exactly. Used for frontend dev before deploy and as test data. Update any time a route's response shape changes.
 - `**DEPLOY.md**` — step-by-step deployment guide (AWS setup, server bootstrap, first deploy, GitHub Actions, troubleshooting). Read when working on infra; keep in sync when changing the deploy flow.
 - `**docs/ADDING_SUPERMARKETS.md**` — hands-on playbook for mapping a new supermarket: the VTEX factory, verification commands, the preview-vs-go-live distinction, and the gotchas (Cencosud WAF, `listPrice` sentinel). Read this before adding a store.
+- `**docs/REVISTA_REVIEW.md**` — design + frontend contract for the **magazine (revista) review** path (IMPLEMENTED): AI reads promo PDFs/flipbooks for chains that don't publish prices on the web (Makro, Vital, Rosental, Maxicomodín), matches them against the catalog, and an operator approves/rejects in a modal inside the Daily Review screen. Backend lives in `src/revistas/` (orchestrator runs the daily check; `/v1/revistas/*` serves the review UI). Read before touching the revista pipeline.
 - `**summary.md**` — original problem framing (read once for context, then ignore).
 
 ## Tech stack (locked in)
@@ -98,6 +99,15 @@ scraper/
     │   └── aggregate.ts               ← per-supermarket aggregation
     ├── ingest/
     │   └── index.ts                   ← detect supermarket + ensure rows + optional first scrape (used by scripts AND POST /v1/products)
+    ├── revistas/                      ← magazine (revista) pipeline — see docs/REVISTA_REVIEW.md
+    │   ├── sources.ts                 ← cheap discovery (dedup hash) + lazy download per strategy
+    │   ├── render.ts / image.ts       ← PDF→PNG (pdf-to-img) + image magic-byte sniffing
+    │   ├── extract.ts                 ← GPT-4 Vision page→products (structured outputs)
+    │   ├── match.ts                   ← EAN → embeddings → brand filter → LLM judge
+    │   ├── catalog.ts / storage.ts    ← load master catalog from DB / upload page images to Storage
+    │   ├── store.ts                   ← revista_magazines + revista_review_items persistence
+    │   ├── approve.ts                 ← approve/manual-add → supermarket_products + price_snapshots
+    │   └── pipeline.ts                ← runRevistaCheck(): the daily entry point (called by orchestrator)
     ├── orchestrator/
     │   ├── index.ts                   ← cron + finalizer interval
     │   ├── enqueue.ts                 ← create scrape_run, enqueue jobs
@@ -140,6 +150,7 @@ scraper/
 | `npm run test:telegram`           | Sends one of each severity to your bot                | Verify Telegram setup                                  |
 | `npm run scrape:url -- <url>`     | Full pipeline test for a single URL (bypasses queue)  | Verify a supermarket works end-to-end without Redis    |
 | `npm run scrape:bulk -- <file>`   | Bulk-import URLs from a text file (one per line)      | Add many products at once; idempotent, safe to re-run  |
+| `npm run revistas:run -- [--super=<id>] [--pages=1-8] [--force]` | Run the magazine (revista) pipeline manually | Test/backfill a magazine chain; needs `OPENAI_API_KEY` |
 | `npm run orchestrator:run-now`    | Run a one-shot daily scrape immediately (needs Redis) | Manual trigger, e.g., backfill                         |
 | `npm run apikey:create -- <name>` | Generate an API key, store hash, print plaintext once | Granting access to a new consumer (frontend, etc.)     |
 | `npm run typecheck`               | `tsc --noEmit`                                        | Always run before suggesting code is "done"            |

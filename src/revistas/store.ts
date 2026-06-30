@@ -1,0 +1,129 @@
+/**
+ * DB persistence for the revista layer (magazines + review queue). Replaces the
+ * PoC's local JSON files. All revista DB writes live here.
+ */
+
+import { db } from '../shared/db.js';
+import type { MatchResult } from './match.js';
+
+export interface MagazineRow {
+  id: string;
+  supermarket_id: string;
+  label: string;
+  source_strategy: string;
+  source_url: string | null;
+  content_hash: string;
+  file_size: number | null;
+  page_count: number;
+  status: 'processing' | 'in_review' | 'reviewed';
+  scrape_run_id: string | null;
+  detected_at: string;
+  reviewed_at: string | null;
+}
+
+/** Look up a magazine by its dedup hash (the "did it change?" check). */
+export async function findMagazineByHash(
+  supermarketId: string,
+  contentHash: string,
+): Promise<MagazineRow | null> {
+  const { data, error } = await db
+    .from('revista_magazines')
+    .select('*')
+    .eq('supermarket_id', supermarketId)
+    .eq('content_hash', contentHash)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as MagazineRow | null) ?? null;
+}
+
+export interface CreateMagazineArgs {
+  supermarketId: string;
+  label: string;
+  strategy: string;
+  sourceUrl: string;
+  contentHash: string;
+  fileSize: number;
+  pageCount: number;
+  scrapeRunId: string | null;
+}
+
+/** Insert a fresh magazine row in `processing` state and return its id. */
+export async function createMagazine(args: CreateMagazineArgs): Promise<string> {
+  const { data, error } = await db
+    .from('revista_magazines')
+    .insert({
+      supermarket_id: args.supermarketId,
+      label: args.label,
+      source_strategy: args.strategy,
+      source_url: args.sourceUrl,
+      content_hash: args.contentHash,
+      file_size: args.fileSize,
+      page_count: args.pageCount,
+      status: 'processing',
+      scrape_run_id: args.scrapeRunId,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data.id as string;
+}
+
+export async function setMagazineStatus(
+  magazineId: string,
+  status: MagazineRow['status'],
+): Promise<void> {
+  const patch: Record<string, unknown> = { status };
+  if (status === 'reviewed') patch.reviewed_at = new Date().toISOString();
+  const { error } = await db.from('revista_magazines').update(patch).eq('id', magazineId);
+  if (error) throw error;
+}
+
+/** Replace any existing review items for a magazine (idempotent reprocessing). */
+export async function clearReviewItems(magazineId: string): Promise<void> {
+  const { error } = await db.from('revista_review_items').delete().eq('magazine_id', magazineId);
+  if (error) throw error;
+}
+
+export interface ReviewItemInput {
+  result: MatchResult;
+  pageImageUrl: string | null;
+}
+
+/** Bulk-insert the review queue for a magazine. */
+export async function insertReviewItems(
+  magazineId: string,
+  supermarketId: string,
+  items: ReviewItemInput[],
+): Promise<void> {
+  if (items.length === 0) return;
+  const rows = items.map(({ result, pageImageUrl }) => ({
+    magazine_id: magazineId,
+    supermarket_id: supermarketId,
+    page_number: result.page,
+    page_image_url: pageImageUrl,
+    extracted: {
+      name: result.item.name,
+      brand: result.item.brand,
+      ean: result.item.ean,
+      price: result.item.price,
+      promo_price: result.item.promo_price,
+      promo_text: result.item.promo_text,
+      quantity: result.item.quantity,
+    },
+    proposed_product_id: result.matched?.id ?? null,
+    confidence: Math.round(result.confidence * 1000) / 1000,
+    method: result.method === 'none' ? 'manual' : result.method,
+    reason: result.reason,
+    candidates: result.candidates.map((c) => ({
+      id: c.id,
+      name: c.name,
+      brand: c.brand ?? null,
+      quantity: c.quantity ?? null,
+      ean: c.ean ?? null,
+    })),
+    status: 'pending' as const,
+  }));
+
+  const { error } = await db.from('revista_review_items').insert(rows);
+  if (error) throw error;
+}

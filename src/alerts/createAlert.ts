@@ -22,7 +22,8 @@ export type AlertType =
   | 'product_not_found'
   | 'price_missing'
   | 'price_anomaly'
-  | 'stock_change';
+  | 'stock_change'
+  | 'revista_review';
 
 export interface CreateAlertArgs {
   severity: Severity;

@@ -24,22 +24,46 @@ import { initSentry, captureError } from '../shared/sentry.js';
 import { closeAllQueues } from '../shared/queue.js';
 import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
+import { runRevistaCheck } from '../revistas/pipeline.js';
 
 initSentry('orchestrator');
 
 const FINALIZER_INTERVAL_MS = 60 * 1000;
 
+/**
+ * Enqueue the daily scrape and return the run id so the magazine check can
+ * attach its approved snapshots to the same run (published together).
+ */
 async function runScrapeWithErrorHandling(
   supermarketId?: string,
-): Promise<void> {
+): Promise<string | null> {
   try {
     const result = await runDailyScrape(
       supermarketId ? { supermarketId } : {},
     );
     logger.info({ result }, 'daily scrape enqueued');
+    return result.scrapeRunId;
   } catch (err) {
     logger.error({ err }, 'daily scrape failed');
     captureError(err, { phase: 'daily-scrape' });
+    return null;
+  }
+}
+
+/**
+ * Magazine (revista) check: detect new promo PDFs/flipbooks, read them with
+ * vision AI, and build the human review queue. Cheap no-op on days nothing
+ * changed. Isolated from the main scrape so a failure here never affects it.
+ */
+async function runRevistaCheckWithErrorHandling(
+  scrapeRunId: string | null,
+): Promise<void> {
+  try {
+    const summaries = await runRevistaCheck({ scrapeRunId });
+    if (summaries.length > 0) logger.info({ summaries }, 'revista check complete');
+  } catch (err) {
+    logger.error({ err }, 'revista check failed');
+    captureError(err, { phase: 'revista-check' });
   }
 }
 
@@ -87,7 +111,8 @@ async function main(): Promise<void> {
         ? `--run-now: triggering scrape for supermarket="${onlySupermarket}" only`
         : '--run-now: triggering immediate daily scrape',
     );
-    await runScrapeWithErrorHandling(onlySupermarket);
+    const runId = await runScrapeWithErrorHandling(onlySupermarket);
+    await runRevistaCheckWithErrorHandling(runId);
     await runFinalizerWithErrorHandling();
     process.exit(0);
   }
@@ -106,9 +131,17 @@ async function main(): Promise<void> {
   // 1. Daily scrape cron.
   // Wrapped in an arrow so node-cron doesn't accidentally pass its
   // TaskContext arg as our optional `supermarketId` (TS2345 in CI).
-  cron.schedule(env.SCRAPE_CRON, () => void runScrapeWithErrorHandling(), {
-    timezone: env.TZ,
-  });
+  // After enqueuing, kick off the magazine check in the background (it can take
+  // minutes for a changed issue) attached to the same run — we don't block the
+  // cron callback on it.
+  cron.schedule(
+    env.SCRAPE_CRON,
+    () =>
+      void runScrapeWithErrorHandling().then((runId) =>
+        runRevistaCheckWithErrorHandling(runId),
+      ),
+    { timezone: env.TZ },
+  );
 
   // 2. Finalizer interval — also run once at startup to catch any stuck runs
   // from a previous process that died mid-run.

@@ -1337,6 +1337,72 @@ The full updated alert (same shape as list items above). `resolved_at` is set au
 
 ---
 
+## Revistas (magazine review)
+
+Operator-facing review for chains whose promos only exist in a weekly/bi-weekly
+**magazine** (a PDF or online flipbook). The daily run detects a new issue, reads
+it with vision AI, matches products against the catalog, and queues them for human
+approval. Approving an item writes a `supermarket_products` mapping + a
+`price_snapshots` row (`tier_used: "ai"`) tied to the day's run — so it publishes
+through the normal gate. Nothing reaches the client until a person approves it.
+
+> **Full spec (UI flow, modal, types, edge cases):**
+> [`docs/REVISTA_REVIEW.md`](./docs/REVISTA_REVIEW.md). Fixtures:
+> `examples/api/revistas-pending.json`, `revista-items.json`, `revista-approve.json`.
+
+### `GET /v1/revistas/pending`
+
+Magazines awaiting review (drives the modal/badge in the Daily Review screen).
+Returns an array of magazine headers, each with a `counts` breakdown
+(`total`/`pending`/`approved`/`rejected`). See `examples/api/revistas-pending.json`.
+
+### `GET /v1/revistas/:magazineId`
+
+A single magazine header + counts (same item shape as `pending`).
+
+### `GET /v1/revistas/:magazineId/items`
+
+The review queue, paginated. Each item carries the `page_image_url` (public
+Supabase Storage URL), the AI's `extracted` fields, the `proposed_match` (or
+`null`), a `confidence` (0–1), `method` (`ean` | `llm` | `manual`), and the
+judge `reason`. See `examples/api/revista-items.json`.
+
+| Param | Type | Description |
+|---|---|---|
+| `page`, `limit` | int | Pagination |
+| `status` | `pending` \| `approved` \| `rejected` | Filter |
+| `page_number` | int | Only items read from a given magazine page |
+
+### `POST /v1/revistas/items/:itemId/approve`
+
+Approve a queued item → mapping + snapshot. Body (all optional; omit to accept
+the AI's values): `product_id` (override the match — catalog product), `price`,
+`promo_price`, `promo_text`, `note`, `reviewed_by`. See
+`examples/api/revista-approve.json`.
+
+Errors: `400 INVALID_REQUEST` (no proposed match and no `product_id`, or no
+price), `404 NOT_FOUND`, `409 CONFLICT` (already reviewed).
+
+### `POST /v1/revistas/items/:itemId/reject`
+
+Discard an item. Body: `{ "note"?, "reviewed_by"? }`. Errors: `404`, `409`.
+
+### `POST /v1/revistas/:magazineId/items`
+
+Manually add a product the AI missed. Body: `page_number` (int, required),
+`product_id` (existing catalog product, required), `price` (required),
+`promo_price?`, `promo_text?`, `note?`, `reviewed_by?`. Creates an `approved`,
+`method: "manual"` item + mapping + snapshot. Response shape = `approve`.
+
+### `POST /v1/revistas/:magazineId/finalize`
+
+Mark the magazine reviewed (drops it from `pending`, resolves the
+`revista_review` alert). Body: `{ "force"?: boolean }` — `force: true` finalizes
+with items still `pending`. Returns `{ magazine_id, status, approved, rejected, pending }`.
+Errors: `409 CONFLICT` when items are still pending and `force` is not set.
+
+---
+
 ## Quickstart
 
 ### cURL
