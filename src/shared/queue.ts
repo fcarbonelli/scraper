@@ -50,6 +50,22 @@ export interface ScrapeJobData {
 export type ScrapeJobName = 'scrape';
 
 /**
+ * Discovery job payload. One of three scopes (see docs/PRODUCT_MANAGEMENT.md):
+ *   - ean:                search this EAN at every chain with searchByEan
+ *   - supermarket:        search all catalog EANs at one chain
+ *   - ean_at_supermarket: one EAN at one chain
+ */
+export type DiscoveryJobData =
+  | { scope: 'ean'; ean: string }
+  | { scope: 'supermarket'; supermarketId: string }
+  | { scope: 'ean_at_supermarket'; ean: string; supermarketId: string };
+
+export type DiscoveryJobName = 'discover';
+
+/** Single shared queue for discovery jobs (not per-supermarket). */
+export const DISCOVERY_QUEUE_NAME = 'discovery';
+
+/**
  * Naming convention: one queue per supermarket. This is intentional —
  * BullMQ rate-limits and concurrency are per-queue, so isolating per-site
  * gives us per-site control naturally.
@@ -101,8 +117,35 @@ export function defaultJobOptions(): JobsOptions {
   };
 }
 
+/**
+ * Discovery queue singleton. Unlike scrape queues (one per supermarket), there
+ * is a single discovery queue — jobs fan out to many chains internally and are
+ * rate-limited inside the processor, not by BullMQ.
+ */
+let discoveryQueue: Queue<DiscoveryJobData, unknown, DiscoveryJobName> | null = null;
+
+export function getDiscoveryQueue(
+  connection?: ConnectionOptions,
+): Queue<DiscoveryJobData, unknown, DiscoveryJobName> {
+  if (discoveryQueue) return discoveryQueue;
+  discoveryQueue = new Queue<DiscoveryJobData, unknown, DiscoveryJobName>(DISCOVERY_QUEUE_NAME, {
+    connection: connection ?? createRedisConnection(),
+    defaultJobOptions: {
+      // Discovery is idempotent and observable via the results — keep a
+      // window of finished jobs so the status endpoint can read them.
+      removeOnComplete: { age: 60 * 60 * 24, count: 500 },
+      removeOnFail: { age: 60 * 60 * 24 * 7 },
+    },
+  });
+  return discoveryQueue;
+}
+
 /** Cleanly close all queue connections (used on graceful shutdown). */
 export async function closeAllQueues(): Promise<void> {
   await Promise.all(Array.from(queues.values()).map((q) => q.close()));
   queues.clear();
+  if (discoveryQueue) {
+    await discoveryQueue.close();
+    discoveryQueue = null;
+  }
 }

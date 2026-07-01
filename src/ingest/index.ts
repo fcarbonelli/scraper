@@ -20,7 +20,7 @@ import { logger } from '../shared/logger.js';
 import { getAdapter } from '../adapters/registry.js';
 import type { ProductInfo, ScrapeContext } from '../adapters/types.js';
 import { ScrapeError } from '../shared/errors.js';
-import { lookupTaxonomy } from '../shared/taxonomy.js';
+import { lookupCatalog } from '../shared/catalog.js';
 import { processJob, type ProcessJobResult } from '../worker/processJob.js';
 
 export interface SupermarketConfig {
@@ -59,6 +59,14 @@ export interface IngestOptions {
    * avoiding an extra HTTP call that would otherwise hit the pagetype API.
    */
   preResolvedExternalId?: string;
+  /**
+   * Force the master-product EAN association, regardless of what the page
+   * exposes. Used when adding a URL from the coverage ("Cobertura") view for
+   * a known catalog EAN at a chain that doesn't publish EANs on its pages
+   * (e.g. Coto) — without this the created master row would lack the EAN and
+   * the product would still count as "missing" in coverage.
+   */
+  ean?: string;
 }
 
 export interface IngestResult {
@@ -159,7 +167,7 @@ export async function loadSupermarketConfig(
 export async function ensureSupermarketProduct(
   supermarketId: string,
   externalUrl: string,
-  preResolvedExternalId?: string,
+  opts: { preResolvedExternalId?: string; ean?: string } = {},
 ): Promise<EnsureResult> {
   const adapter = getAdapter(supermarketId);
   const canonical = adapter.canonicalizeUrl
@@ -168,7 +176,7 @@ export async function ensureSupermarketProduct(
 
   // Use pre-resolved ID when available (e.g. from a prior VTEX EAN search)
   // to skip the extra HTTP call to the pagetype endpoint.
-  const externalId = preResolvedExternalId ?? await resolveExternalIdForUrl(supermarketId, canonical);
+  const externalId = opts.preResolvedExternalId ?? await resolveExternalIdForUrl(supermarketId, canonical);
 
   const existing = await db
     .from('supermarket_products')
@@ -229,16 +237,20 @@ export async function ensureSupermarketProduct(
     info = {};
   }
 
-  // Auto-enrich from client's taxonomy reference when the EAN is known.
-  const taxonomy = info.ean ? lookupTaxonomy(info.ean) : undefined;
+  // A caller-forced EAN (e.g. adding from the coverage view) wins over
+  // whatever the page exposed — that's the whole point of the override.
+  const ean = opts.ean ?? info.ean;
+
+  // Auto-enrich from client's catalog reference when the EAN is known.
+  const taxonomy = ean ? await lookupCatalog(ean) : undefined;
 
   // Reuse master product by EAN if known; otherwise insert a new master row.
   let productId: string | undefined;
-  if (info.ean) {
+  if (ean) {
     const { data, error } = await db
       .from('products')
       .select('id')
-      .eq('ean', info.ean)
+      .eq('ean', ean)
       .maybeSingle();
     if (error) throw error;
     if (data) {
@@ -271,7 +283,7 @@ export async function ensureSupermarketProduct(
         variety: taxonomy?.variety || null,
         description_forms: taxonomy?.descriptionForms || null,
         unit: info.unit ?? null,
-        ean: info.ean ?? null,
+        ean: ean ?? null,
         metadata: {
           ...(info.imageUrl ? { imageUrl: info.imageUrl } : {}),
           ...(info.metadata ?? {}),
@@ -281,7 +293,7 @@ export async function ensureSupermarketProduct(
       .single();
     if (insert.error) throw insert.error;
     productId = insert.data.id as string;
-    logger.debug({ productId, name: info.name, ean: info.ean }, 'created master product');
+    logger.debug({ productId, name: info.name, ean }, 'created master product');
   }
 
   const smpInsert = await db
@@ -322,7 +334,10 @@ export async function ingestUrl(
   opts: IngestOptions = {},
 ): Promise<IngestResult> {
   const supermarketId = detectSupermarket(url);
-  const ensured = await ensureSupermarketProduct(supermarketId, url, opts.preResolvedExternalId);
+  const ensured = await ensureSupermarketProduct(supermarketId, url, {
+    preResolvedExternalId: opts.preResolvedExternalId,
+    ean: opts.ean,
+  });
 
   const skipScrape = opts.skipScrapeIfExists ?? true;
   const runInitialScrape = opts.runInitialScrape ?? true;

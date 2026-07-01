@@ -23,6 +23,7 @@ import {
   type ScrapeJobData,
 } from '../shared/queue.js';
 import { processJob } from './processJob.js';
+import { createDiscoveryWorker } from './discoveryWorker.js';
 
 initSentry('worker');
 
@@ -167,6 +168,10 @@ async function main(): Promise<void> {
     logger.info({ count: workers.size }, 'workers started');
   }
 
+  // Single discovery worker, independent of the per-supermarket scrape workers.
+  // Consumes the `discovery` queue fed by POST /v1/data/discover.
+  const discoveryWorker = createDiscoveryWorker();
+
   // Poll for supermarkets activated/deactivated after startup so adding a chain
   // doesn't require restarting this process.
   const reloadHandle = setInterval(() => void reconcileWorkers(), RELOAD_INTERVAL_MS);
@@ -174,7 +179,10 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down workers');
     clearInterval(reloadHandle);
-    await Promise.all(Array.from(workers.values()).map((w) => w.close()));
+    await Promise.all([
+      ...Array.from(workers.values()).map((w) => w.close()),
+      discoveryWorker.close(),
+    ]);
     process.exit(0);
   };
 

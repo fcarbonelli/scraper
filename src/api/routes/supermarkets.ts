@@ -55,6 +55,8 @@ supermarketsRouter.get('/:id', async (req: Request, res: Response) => {
 const ListProductsQuery = PaginationQuery.extend({
   search: z.string().trim().min(1).max(200).optional(),
   in_stock: z.enum(['true', 'false']).optional(),
+  /** active (default) = scraped; paused = is_active false; all = both. */
+  status: z.enum(['active', 'paused', 'all']).default('active'),
 });
 
 supermarketsRouter.get('/:id/products', async (req: Request, res: Response) => {
@@ -80,9 +82,12 @@ supermarketsRouter.get('/:id/products', async (req: Request, res: Response) => {
       { count: 'exact' },
     )
     .eq('supermarket_id', req.params.id)
-    .eq('is_active', true)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
+
+  // Default to active only; callers can request paused-only or all.
+  if (q.status === 'active') mappingQuery = mappingQuery.eq('is_active', true);
+  else if (q.status === 'paused') mappingQuery = mappingQuery.eq('is_active', false);
 
   // Note: ilike on the joined table requires Supabase's foreign-table syntax.
   // We do the filter post-fetch for v1 to keep the query simple.
@@ -115,6 +120,7 @@ supermarketsRouter.get('/:id/products', async (req: Request, res: Response) => {
         supermarket_product_id: m.id,
         external_id: m.external_id,
         external_url: m.external_url,
+        is_active: m.is_active,
         product,
         latest_snapshot: snapRes.data ?? null,
       };

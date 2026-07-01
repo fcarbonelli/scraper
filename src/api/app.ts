@@ -24,6 +24,7 @@ import { snapshotsRouter } from './routes/snapshots.js';
 import { runsRouter } from './routes/runs.js';
 import { alertsRouter } from './routes/alerts.js';
 import { dataRouter } from './routes/data.js';
+import { catalogRouter } from './routes/catalog.js';
 import { revistasRouter } from './routes/revistas.js';
 import { telegramRouter } from './routes/telegram.js';
 
@@ -63,6 +64,7 @@ export function buildApp(): Express {
   app.use('/v1/runs', runsRouter);
   app.use('/v1/alerts', alertsRouter);
   app.use('/v1/data', dataRouter);
+  app.use('/v1/catalog', catalogRouter);
   app.use('/v1/revistas', revistasRouter);
 
   // 404 + error handlers (must be last).

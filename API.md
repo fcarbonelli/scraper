@@ -598,6 +598,7 @@ The endpoint is **idempotent**: re-posting an already-imported URL returns `alre
 |---|---|---|---|
 | `url` | string | yes | Full product URL on a supported supermarket |
 | `scrape_immediately` | boolean | no | If `true`, also take a price snapshot synchronously. Default `false` |
+| `ean` | string | no | Force the master-product EAN binding (8–14 digits). Use when adding a URL from the coverage view so the product ties to the right catalog EAN even when the page hides it (e.g. Coto). See `docs/PRODUCT_MANAGEMENT_API.md` |
 
 #### Response — 201 Created (or 200 if already existed)
 
@@ -873,6 +874,7 @@ Products mapped to this supermarket, with their latest snapshot.
 | `page`, `limit` | int | Pagination |
 | `search` | string | Substring of product name |
 | `in_stock` | `"true"` \| `"false"` | Filter by latest stock status |
+| `status` | `"active"` \| `"paused"` \| `"all"` | Filter by mapping state. Default `"active"`. Use `"paused"` for the resume list |
 
 #### Response — 200 (paginated)
 
@@ -883,6 +885,7 @@ Products mapped to this supermarket, with their latest snapshot.
       "supermarket_product_id": "8e9bcc71-...",
       "external_id": "00591050-00591050-200",
       "external_url": "https://...",
+      "is_active": true,
       "product": {
         "id": "50bb31b8-...",
         "name": "Lavandina Original Ayudin 2l",
@@ -905,6 +908,59 @@ Products mapped to this supermarket, with their latest snapshot.
   "meta": { "ts": "..." }
 }
 ```
+
+---
+
+## Supermarket products (mappings)
+
+Manage a single product-at-a-supermarket. Full shapes + UI workflows:
+**`docs/PRODUCT_MANAGEMENT_API.md`**.
+
+### `PATCH /v1/supermarket-products/:id`
+
+Pause or resume scraping. Body `{ "is_active": false }` stops the daily run from
+scraping this mapping (reversible; price history kept). Send `true` to resume.
+Returns the updated mapping.
+
+### `DELETE /v1/supermarket-products/:id`
+
+Hard-remove this one mapping + its price history (FK cascade). The master product
+and other chains are untouched. Prefer pause unless the row is genuinely wrong.
+Returns `{ id, deleted: true, removed: { price_snapshots } }`.
+
+> To remove a product from **every** supermarket, use `DELETE /v1/products/:id`.
+
+---
+
+## Catalog
+
+Runtime-editable supplement to the built-in EAN catalog. Full shapes:
+**`docs/PRODUCT_MANAGEMENT_API.md`**.
+
+- `GET /v1/catalog/eans` — list runtime-added EANs.
+- `POST /v1/catalog/eans` — add a new official EAN (`{ ean, descriptionForms, ... , auto_discover? }`). With `auto_discover: true`, returns a `discovery` job handle.
+- `DELETE /v1/catalog/eans/:ean` — remove a runtime-added EAN (built-in EANs are immutable).
+
+---
+
+## Discovery
+
+Async EAN discovery across supermarket sites. Full shapes + polling workflow:
+**`docs/PRODUCT_MANAGEMENT_API.md`**.
+
+### `POST /v1/data/discover`
+
+Enqueue a discovery job. Body is one of `{ ean }` (all searchable chains),
+`{ supermarket }` (all catalog EANs at one chain), or `{ ean, supermarket }`.
+Returns `{ jobId, scope, targets, status: "queued" }` (201).
+
+### `GET /v1/data/discover/:jobId`
+
+Poll a job: `{ jobId, scope, status, progress, results, failedReason }` where
+`status ∈ queued|running|completed|failed`.
+
+> `GET /v1/data/coverage` (detail mode) now also returns a `paused` count and a
+> per-product `active` flag. See `docs/COVERAGE_API_GUIDE.md`.
 
 ---
 

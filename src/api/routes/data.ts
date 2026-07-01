@@ -9,11 +9,14 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '../../shared/db.js';
+import { logger } from '../../shared/logger.js';
 import { success } from '../lib/envelope.js';
-import { parseQuery } from '../lib/parseQuery.js';
+import { parseQuery, parseBody } from '../lib/parseQuery.js';
 import { ApiError } from '../lib/apiError.js';
-import { TAXONOMY_BY_EAN } from '../../shared/taxonomy.js';
+import { getCatalogEans } from '../../shared/catalog.js';
 import { getAdapterCapabilities } from '../../adapters/registry.js';
+import { adaptersWithSearch, type DiscoverOutcome } from '../../discovery/index.js';
+import { getDiscoveryQueue, type DiscoveryJobData } from '../../shared/queue.js';
 import {
   fetchAllClientBase,
   toCsv,
@@ -171,20 +174,22 @@ const CoverageQuery = z.object({
 
 dataRouter.get('/coverage', async (req: Request, res: Response) => {
   const q = parseQuery(req, CoverageQuery);
-  const taxonomyEans = Array.from(TAXONOMY_BY_EAN.keys());
+  const catalog = await getCatalogEans();
+  const taxonomyEans = Array.from(catalog.keys());
   const totalEans = taxonomyEans.length;
 
-  // Fetch all active supermarket_products with their product EAN.
-  // Supabase doesn't support raw SQL joins on views, so we use the
-  // foreign-table select syntax to get the EAN from products.
+  // Fetch ALL supermarket_products (active AND paused) with their product EAN.
+  // A paused mapping (is_active=false) still means "we have a URL for this" —
+  // it must count as covered (just paused), not silently fall back to missing.
   const { data: mappings, error: mappingsErr } = await db
     .from('supermarket_products')
-    .select('supermarket_id, external_url, products:product_id ( ean )')
-    .eq('is_active', true);
+    .select('supermarket_id, external_url, is_active, products:product_id ( ean )');
   if (mappingsErr) throw mappingsErr;
 
-  // Build a map: supermarketId -> Set<ean> and supermarketId -> Map<ean, url>
+  // Build per-chain sets. `coveredByChain` = any mapping (active or paused);
+  // `activeByChain` = at least one active mapping. paused = covered && !active.
   const coveredByChain = new Map<string, Set<string>>();
+  const activeByChain = new Map<string, Set<string>>();
   const urlByChainEan = new Map<string, Map<string, string | null>>();
 
   for (const row of mappings ?? []) {
@@ -194,10 +199,14 @@ dataRouter.get('/coverage', async (req: Request, res: Response) => {
 
     if (!coveredByChain.has(row.supermarket_id)) {
       coveredByChain.set(row.supermarket_id, new Set());
+      activeByChain.set(row.supermarket_id, new Set());
       urlByChainEan.set(row.supermarket_id, new Map());
     }
     coveredByChain.get(row.supermarket_id)!.add(ean);
-    urlByChainEan.get(row.supermarket_id)!.set(ean, row.external_url ?? null);
+    if (row.is_active) activeByChain.get(row.supermarket_id)!.add(ean);
+    // Prefer an active mapping's URL; keep the first URL otherwise.
+    const urlMap = urlByChainEan.get(row.supermarket_id)!;
+    if (row.is_active || !urlMap.has(ean)) urlMap.set(ean, row.external_url ?? null);
   }
 
   // Parse requested supermarket(s)
@@ -219,13 +228,17 @@ dataRouter.get('/coverage', async (req: Request, res: Response) => {
 
     const caps = getAdapterCapabilities(smId);
     const coveredSet = coveredByChain.get(smId) ?? new Set<string>();
+    const activeSet = activeByChain.get(smId) ?? new Set<string>();
     const urlMap = urlByChainEan.get(smId) ?? new Map<string, string | null>();
 
     const products: CoverageProduct[] = [];
+    let pausedCount = 0;
     for (const ean of taxonomyEans) {
-      const tax = TAXONOMY_BY_EAN.get(ean)!;
+      const tax = catalog.get(ean)!;
       const isCovered = coveredSet.has(ean);
+      const isActive = activeSet.has(ean);
       const status = isCovered ? 'covered' as const : 'missing' as const;
+      if (isCovered && !isActive) pausedCount++;
 
       if (q.status && q.status !== status) continue;
       if (q.category && tax.category !== q.category) continue;
@@ -237,6 +250,7 @@ dataRouter.get('/coverage', async (req: Request, res: Response) => {
         subcategory: tax.subcategory,
         brand: tax.brand,
         status,
+        active: isCovered ? isActive : null,
         url: isCovered ? (urlMap.get(ean) ?? null) : null,
       });
     }
@@ -256,6 +270,7 @@ dataRouter.get('/coverage', async (req: Request, res: Response) => {
       totalEans,
       covered: coveredCount,
       missing: missingCount,
+      paused: pausedCount,
       coveragePct: Math.round((coveredCount / totalEans) * 1000) / 10,
       products,
     }));
@@ -273,10 +288,14 @@ dataRouter.get('/coverage', async (req: Request, res: Response) => {
     .filter((sm) => !requestedIds || requestedIds.includes(sm.id))
     .map((sm) => {
       const coveredSet = coveredByChain.get(sm.id) ?? new Set<string>();
-      // Only count EANs that are in the taxonomy (ignore non-catalog products)
+      const activeSet = activeByChain.get(sm.id) ?? new Set<string>();
+      // Only count EANs that are in the catalog (ignore non-catalog products)
       let coveredCount = 0;
+      let pausedCount = 0;
       for (const ean of taxonomyEans) {
-        if (coveredSet.has(ean)) coveredCount++;
+        if (!coveredSet.has(ean)) continue;
+        coveredCount++;
+        if (!activeSet.has(ean)) pausedCount++;
       }
       const caps = getAdapterCapabilities(sm.id);
 
@@ -289,6 +308,7 @@ dataRouter.get('/coverage', async (req: Request, res: Response) => {
         ...caps,
         covered: coveredCount,
         missing: totalEans - coveredCount,
+        paused: pausedCount,
         coveragePct: Math.round((coveredCount / totalEans) * 1000) / 10,
       };
     });
@@ -303,5 +323,93 @@ interface CoverageProduct {
   subcategory: string;
   brand: string;
   status: 'covered' | 'missing';
+  /** true=active, false=paused, null=missing (no mapping). */
+  active: boolean | null;
   url: string | null;
 }
+
+// =============================================================================
+// POST /v1/data/discover
+//
+// Enqueue an async discovery job. Discovery searches live supermarket sites
+// (slow, rate-limited) so it can't run inside the request. Returns a jobId to
+// poll via GET /v1/data/discover/:jobId. Three scopes:
+//   { ean }                    → search this EAN at every chain with search
+//   { supermarket }            → search all catalog EANs at one chain
+//   { ean, supermarket }       → one EAN at one chain
+// =============================================================================
+
+const DiscoverBody = z
+  .object({
+    ean: z.string().trim().regex(/^\d{8,14}$/).optional(),
+    supermarket: z.string().trim().min(1).max(100).optional(),
+  })
+  .refine((b) => b.ean || b.supermarket, {
+    message: 'provide at least one of: ean, supermarket',
+  });
+
+dataRouter.post('/discover', async (req: Request, res: Response) => {
+  const body = parseBody(req, DiscoverBody);
+
+  let job: DiscoveryJobData;
+  let targets: string[];
+  if (body.ean && body.supermarket) {
+    job = { scope: 'ean_at_supermarket', ean: body.ean, supermarketId: body.supermarket };
+    targets = [body.supermarket];
+  } else if (body.ean) {
+    job = { scope: 'ean', ean: body.ean };
+    targets = adaptersWithSearch();
+  } else {
+    // supermarket-only
+    job = { scope: 'supermarket', supermarketId: body.supermarket! };
+    targets = [body.supermarket!];
+  }
+
+  const enqueued = await getDiscoveryQueue().add('discover', job);
+  logger.info({ jobId: enqueued.id, scope: job.scope }, 'discovery job enqueued');
+
+  res.status(201).json(
+    success({
+      jobId: enqueued.id,
+      scope: job.scope,
+      targets,
+      status: 'queued',
+    }),
+  );
+});
+
+// =============================================================================
+// GET /v1/data/discover/:jobId — poll discovery progress + results
+// =============================================================================
+
+dataRouter.get('/discover/:jobId', async (req: Request, res: Response) => {
+  const jobId = typeof req.params.jobId === 'string' ? req.params.jobId : '';
+  if (!jobId) throw ApiError.badRequest('Missing path parameter: jobId');
+
+  const job = await getDiscoveryQueue().getJob(jobId);
+  if (!job) throw ApiError.notFound('Discovery job');
+
+  // Map BullMQ states to a simple lifecycle for the UI.
+  const state = await job.getState();
+  const status =
+    state === 'completed' ? 'completed'
+    : state === 'failed' ? 'failed'
+    : state === 'active' ? 'running'
+    : 'queued';
+
+  const progress = (typeof job.progress === 'object' ? job.progress : null) as
+    | Record<string, number>
+    | null;
+  const results = (job.returnvalue as DiscoverOutcome[] | undefined) ?? [];
+
+  res.json(
+    success({
+      jobId: job.id,
+      scope: (job.data as DiscoveryJobData).scope,
+      status,
+      progress,
+      results,
+      failedReason: job.failedReason ?? null,
+    }),
+  );
+});

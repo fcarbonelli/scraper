@@ -98,7 +98,9 @@ scraper/
     │   ├── createAlert.ts             ← DB insert + optional Telegram
     │   └── aggregate.ts               ← per-supermarket aggregation
     ├── ingest/
-    │   └── index.ts                   ← detect supermarket + ensure rows + optional first scrape (used by scripts AND POST /v1/products)
+    │   └── index.ts                   ← detect supermarket + ensure rows + optional first scrape (used by scripts AND POST /v1/products); accepts a forced `ean`
+    ├── discovery/                     ← reusable EAN-discovery core (see docs/PRODUCT_MANAGEMENT.md)
+    │   └── index.ts                   ← discoverEanAtSupermarket / EanEverywhere / AllEansAtSupermarket (used by CLI + discovery worker)
     ├── revistas/                      ← magazine (revista) pipeline — see docs/REVISTA_REVIEW.md
     │   ├── sources.ts                 ← cheap discovery (dedup hash) + lazy download per strategy
     │   ├── render.ts / image.ts       ← PDF→PNG (pdf-to-img) + image magic-byte sniffing
@@ -113,7 +115,8 @@ scraper/
     │   ├── enqueue.ts                 ← create scrape_run, enqueue jobs
     │   └── finalize.ts                ← detect completion, generate alerts
     ├── worker/
-    │   ├── index.ts                   ← bootstraps a Worker per supermarket
+    │   ├── index.ts                   ← bootstraps a Worker per supermarket + one discovery worker
+    │   ├── discoveryWorker.ts         ← consumes the `discovery` queue → src/discovery core
     │   ├── processJob.ts              ← pure orchestrator (queue-agnostic)
     │   ├── classifyError.ts           ← raw error → ErrorType
     │   ├── retryPolicy.ts             ← per-error retry rules
@@ -133,8 +136,11 @@ scraper/
         │   └── requestLogger.ts       ← per-request structured logs
         └── routes/
             ├── health.ts              ← GET /v1/health (public)
-            ├── products.ts            ← list, detail, compare, history, POST (add new URL to scrape list)
-            ├── supermarkets.ts        ← list, detail, products
+            ├── products.ts            ← list, detail, compare, history, POST (add URL; optional `ean` binding), DELETE master
+            ├── supermarkets.ts        ← list, detail, products (?status=active|paused|all)
+            ├── supermarketProducts.ts ← PATCH pause/resume + DELETE one mapping + PATCH lifecycle
+            ├── catalog.ts             ← /v1/catalog/eans CRUD (runtime EAN additions)
+            ├── data.ts                ← pricing/export/coverage + /discover (async EAN discovery)
             ├── snapshots.ts           ← raw feed with filters
             ├── runs.ts                ← list, detail with breakdown
             └── alerts.ts              ← list, PATCH (ack/resolve)
@@ -341,6 +347,6 @@ Track the build phases (see `plan.md` for full breakdown):
 - **Phase 3** — Add a Playwright-based supermarket (deferred until next supermarket chosen)
 - **Phase 4** — Express API: all routes (`products`, `supermarkets`, `snapshots`, `runs`, `alerts`, `health`), X-API-Key auth (SHA-256 + cache), pagination, error envelope, CORS, request logging. End-to-end smoke tested. Carrefour adapter added (VTEX-based), Coto adapter refactored to expose `resolveExternalId`.
 - [~] **Phase 5** — Deploy: artifacts written (`scripts/setup-ec2.sh`, `Caddyfile`, `.github/workflows/deploy.yml`, `DEPLOY.md`). User performs AWS setup; first deploy & GitHub Actions wiring still pending.
-- **Phase 6** — Scale: more supermarkets, monitoring tuning
+- **Phase 6** — Scale: more supermarkets, monitoring tuning. **Product management** (see `docs/PRODUCT_MANAGEMENT.md`): per-mapping pause/delete, runtime-editable catalog (`catalog_extra_eans`, migration 007), async EAN discovery (`/v1/data/discover` on the `discovery` queue), pause-aware coverage.
 
 When completing a phase, mark it done here AND in `plan.md` (section 10).

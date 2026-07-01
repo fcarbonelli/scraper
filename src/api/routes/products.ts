@@ -117,6 +117,13 @@ productsRouter.get('/', async (req: Request, res: Response) => {
 const IngestBody = z.object({
   url: UrlSchema,
   scrape_immediately: z.boolean().optional(),
+  /**
+   * Force the master-product EAN binding. Used when adding a URL from the
+   * coverage ("Cobertura") view for a known catalog EAN — guarantees the
+   * ingested product ties to the right catalog product even when the page
+   * doesn't expose an EAN (e.g. Coto). See docs/PRODUCT_MANAGEMENT.md.
+   */
+  ean: z.string().trim().regex(/^\d{8,14}$/).optional(),
 });
 
 productsRouter.post('/', async (req: Request, res: Response) => {
@@ -128,6 +135,7 @@ productsRouter.post('/', async (req: Request, res: Response) => {
       // For new URLs, scrape is gated by runInitialScrape; for existing
       // ones we still skip to keep this endpoint cheap.
       skipScrapeIfExists: true,
+      ean: body.ean,
     });
   } catch (err) {
     // Anything thrown here means the URL is genuinely unprocessable —

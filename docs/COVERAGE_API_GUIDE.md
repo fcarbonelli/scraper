@@ -86,9 +86,14 @@ X-API-Key: <key>
 | `isActive` | Whether the supermarket is enabled for daily scraping |
 | `hasAdapter` | Whether a scraping adapter exists for this chain |
 | `hasSearch` | Whether automated EAN discovery is supported (for "Run Discovery" button) |
-| `covered` | Number of catalog EANs that have a mapping at this supermarket |
+| `covered` | Number of catalog EANs that have a mapping at this supermarket (active OR paused) |
 | `missing` | Number of catalog EANs NOT mapped at this supermarket |
+| `paused` | Of the covered EANs, how many have **only** paused mappings (not being scraped) |
 | `coveragePct` | Coverage percentage (0-100, one decimal) |
+
+> **Paused vs missing:** a *paused* mapping (`is_active=false`, set via
+> `PATCH /v1/supermarket-products/:id`) still counts as **covered** — we have the URL,
+> we've just stopped scraping it. It is never silently reported as `missing`.
 
 ---
 
@@ -159,6 +164,7 @@ X-API-Key: <key>
 | `subcategory` | Subcategory (e.g. `GEL`, `REG`, `DESINF`) |
 | `brand` | Brand name (e.g. `AYUDIN`, `CIF`) |
 | `status` | `"covered"` (product exists at this supermarket) or `"missing"` |
+| `active` | `true` if scraped, `false` if the mapping is paused, `null` if missing |
 | `url` | Product page URL if covered, `null` if missing |
 
 ---
@@ -249,8 +255,13 @@ The 211 products span these categories (useful for filter dropdowns):
 
 ---
 
-## Future: Automated Discovery Trigger
+## Automated Discovery Trigger (implemented)
 
-For supermarkets where `hasSearch: true`, a future `POST /v1/data/discover` endpoint could allow the frontend to trigger automated EAN discovery. This is currently done via CLI (`npm run discover -- carrefour`) but could be exposed as an API endpoint that enqueues a background job.
+For supermarkets where `hasSearch: true`, the frontend can trigger automated EAN
+discovery via **`POST /v1/data/discover`** (async job; poll `GET /v1/data/discover/:jobId`).
+Full request/response shapes and the end-to-end "add a new EAN" workflow are documented
+in **`docs/PRODUCT_MANAGEMENT_API.md`**.
 
-The coverage view would then show a "Run Discovery" button for eligible supermarkets, with the results reflected in the next coverage query.
+The coverage view can show a "Run Discovery" button for eligible supermarkets
+(`{ supermarket: "<id>" }`) or discover a single new EAN across every searchable chain
+(`{ ean: "<ean>" }`). Results are reflected in the next coverage query automatically.

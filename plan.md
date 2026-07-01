@@ -689,6 +689,18 @@ Decisions locked in:
 - Tune rate limits as you learn each site's behavior
 - Add Tier 3 (AI scraping) **only if** real failure data justifies it
 
+**Product-management features (implemented):** see `docs/PRODUCT_MANAGEMENT.md`.
+- Per-mapping pause/resume + hard delete (`PATCH`/`DELETE /v1/supermarket-products/:id`).
+  `is_active=false` skips the mapping in the daily enqueue.
+- Runtime-editable catalog: `catalog_extra_eans` table (migration `007`) supplements
+  the hardcoded `TAXONOMY_BY_EAN`; coverage/discovery read the union via
+  `src/shared/catalog.ts`. CRUD at `/v1/catalog/eans`.
+- Async EAN discovery: `POST /v1/data/discover` (scopes: one EAN across all searchable
+  chains / all EANs at one chain / one EAN at one chain) runs on the `discovery` BullMQ
+  queue; poll `GET /v1/data/discover/:jobId`. Core in `src/discovery/`, worker in
+  `src/worker/discoveryWorker.ts`.
+- Coverage is now pause-aware (`paused` count + per-product `active`).
+
 ---
 
 ## 11. Open decisions
