@@ -58,7 +58,9 @@ export type ScrapeJobName = 'scrape';
 export type DiscoveryJobData =
   | { scope: 'ean'; ean: string }
   | { scope: 'supermarket'; supermarketId: string }
-  | { scope: 'ean_at_supermarket'; ean: string; supermarketId: string };
+  | { scope: 'ean_at_supermarket'; ean: string; supermarketId: string }
+  /** Weekly coverage sweep: re-search MISSING EANs at every searchable chain. */
+  | { scope: 'sweep' };
 
 export type DiscoveryJobName = 'discover';
 

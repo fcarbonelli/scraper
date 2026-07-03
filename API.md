@@ -918,9 +918,17 @@ Manage a single product-at-a-supermarket. Full shapes + UI workflows:
 
 ### `PATCH /v1/supermarket-products/:id`
 
-Pause or resume scraping. Body `{ "is_active": false }` stops the daily run from
-scraping this mapping (reversible; price history kept). Send `true` to resume.
-Returns the updated mapping.
+Body may set `is_active` and/or `ean` (at least one required):
+- `{ "is_active": false }` — pause scraping (reversible; price history kept). `true` resumes.
+- `{ "ean": "7791234567890" }` — **bind an EAN**: re-points the mapping to the canonical master for that EAN, fills general columns from the catalog taxonomy, and drops the orphan blank master. Price history preserved. Response includes an `ean_binding` summary. Use to heal EAN-less products (blank `Categoria`/`Marca`/`EAN` in the export).
+
+### `GET /v1/products/missing-ean`
+
+Paginated list of master products with no EAN, each with its supermarket mappings
+(chain + URL) **and ranked EAN `suggestions` (candidate EAN + `score` + `confidence`)**
+for one-click confirm. Query `?min_confidence=high|medium|low` (default `low`) filters
+to rows whose top suggestion is at least that confident. The heal worklist for
+`PATCH … { ean }` above.
 
 ### `DELETE /v1/supermarket-products/:id`
 
@@ -951,7 +959,9 @@ Async EAN discovery across supermarket sites. Full shapes + polling workflow:
 ### `POST /v1/data/discover`
 
 Enqueue a discovery job. Body is one of `{ ean }` (all searchable chains),
-`{ supermarket }` (all catalog EANs at one chain), or `{ ean, supermarket }`.
+`{ supermarket }` (all catalog EANs at one chain), `{ ean, supermarket }`, or
+`{ sweep: true }` (re-search missing EANs at every searchable chain — the weekly
+coverage sweep, also run automatically via `SWEEP_CRON`).
 Returns `{ jobId, scope, targets, status: "queued" }` (201).
 
 ### `GET /v1/data/discover/:jobId`

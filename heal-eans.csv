@@ -1,0 +1,266 @@
+supermarket_product_id,supermarket,product_name,url,suggested_ean,score,confidence,confirm_ean
+fd6aa339-19be-44b3-82a5-0f101832d33d,comodin,Unknown product,https://www.comodinencasa.com.ar/lavandina-x-5-x-1-lt/p,7791905003663,1.00,llm:1.00,7791905003663
+af67d7e5-c635-4b9a-b2eb-9fb764cce04e,maxiconsumo,GUANTES VIRULANA GRANDE,https://www.maxiconsumo.com/sucursal_moreno/guantes-virulana-grande-11791.html,7794440045426,0.75,llm-none,
+1b32282f-b606-4825-aa42-9cb382872e94,maxiconsumo,GUANTES VIRULANA MEDIANO,https://www.maxiconsumo.com/sucursal_moreno/guantes-virulana-mediano-11790.html,7794440045426,0.75,llm-none,
+2fa6827d-e7b3-4518-aa50-cd2a2dac9bba,maxiconsumo,GUANTES MORTIMER VERDE M 1 UN,https://www.maxiconsumo.com/sucursal_moreno/guantes-mortimer-verde-m-1-un-29008.html,7793253007409,0.80,llm-none,
+3c753336-7f45-4a63-84ad-f9388772f62b,maxiconsumo,ROLLITOS VIRULANA 70 GR,https://www.maxiconsumo.com/sucursal_moreno/rollitos-virulana-70-gr-1403.html,7794440101702,0.60,llm-none,
+a1b13c59-856d-4a2a-a5bd-acd3b9555094,maxiconsumo,PANO MORTIMER AMARILLO,https://www.maxiconsumo.com/sucursal_moreno/pano-mortimer-amarillo-26269.html,7793253000516,0.75,llm-none,
+88957514-00c2-479f-9eef-c8e3532aea3b,maxiconsumo,ESPONJA DE FIBRA VIRULANA INOXIDABLE 16 GR,https://www.maxiconsumo.com/sucursal_moreno/esponja-de-fibra-virulana-inoxidable-16-gr-11197.html,7794440003341,0.50,llm-none,
+cd90123a-4e35-44b0-bdeb-db74cfb87763,maxiconsumo,ESPONJA MORTIMER BRONCE,https://www.maxiconsumo.com/sucursal_moreno/esponja-mortimer-bronce-11487.html,7793253038526,1.00,llm-none,
+206bb21f-f060-4978-b487-a32d933c76b8,maxiconsumo,Unknown product,https://www.maxiconsumo.com/sucursal_moreno/pano-mortimer-doble-cara-130x95-1037.html,7793253038526,0.50,llm-none,
+048f0af7-5b1c-44c4-8008-dbbe19e48d4d,maxiconsumo,REPELENTE AKTIOL VERDE AEROSOL 143 CC,https://www.maxiconsumo.com/sucursal_moreno/repelente-aktiol-verde-aerosol-143-cc-28387.html,7791905023784,0.86,llm:1.00,7791905023784
+6135229c-8fdb-4101-b528-d40d7ccd226f,maxiconsumo,"LIMPIADOR PROCENEX LAVANDA 1,8 LT",https://www.maxiconsumo.com/sucursal_moreno/limpiador-procenex-lavanda-1-8-lt-16396.html,7791130683852,0.80,llm-none,
+7d6aeca6-9686-43c0-8587-1883da7642ed,maxiconsumo,LAVANDINA AYUDIN GEL CITRUS 700 ML,https://www.maxiconsumo.com/sucursal_moreno/lavandina-ayudin-gel-citrus-700-ml-20506.html,7793253003791,0.86,llm:1.00,7793253003807
+d4f0c3ca-8819-4545-b5be-4f7764ac0b34,maxiconsumo,LAVANDINA AYUDIN TRIPLE PODER GLACIAR 4 LT,https://www.maxiconsumo.com/sucursal_moreno/lavandina-ayudin-triple-poder-glaciar-4-lt-21946.html,7793253003746,0.86,llm-none,
+ae63a200-599e-40f4-9d37-faf1347fdff5,maxiconsumo,LAVANDINA AYUDIN TRIPLE PODER GLACIAR 2 LT,https://www.maxiconsumo.com/sucursal_moreno/lavandina-ayudin-triple-poder-glaciar-2-lt-379.html,7793253003746,0.86,llm:1.00,7793253003753
+1045b8c2-4f05-417d-9fa1-c74154ba318d,maxiconsumo,INSECTICIDA SELTON MATA CUCARACHA 360 CC,https://www.maxiconsumo.com/sucursal_moreno/insecticida-selton-mata-cucaracha-360-cc-1959.html,7793253005726,0.86,llm:1.00,7793253005726
+e7bde447-1417-418e-87e6-b83ef2e6e0a5,maxiconsumo,Unknown product,https://www.maxiconsumo.com/sucursal_moreno/limpiador-ayudin-expert-gatillo-500-ml-27784.html,7793253005276,0.83,llm:1.00,7793253005276
+f6e62526-b98c-4563-9ed2-b099fd42e890,maxiconsumo,LIMPIADOR Mr MUSCULO ANTIGRASA 500 CC,https://www.maxiconsumo.com/sucursal_moreno/limpiador-mr-musculo-antigrasa-500-cc-1990.html,7790520998880,0.71,llm-none,
+5974bd66-6118-4cb5-b7a2-c84460349437,maxiconsumo,LIMPIADOR CIF ANTIGRASA EXPERT 500 ML,https://www.maxiconsumo.com/sucursal_moreno/limpiador-cif-antigrasa-expert-500-ml-931.html,7791290795587,0.86,llm-none,
+5d808ba2-3852-4bd0-a83e-352f289c41ff,maxiconsumo,LIMPIADOR PROCENEX BAÑO DOYPACK 420 ML,https://www.maxiconsumo.com/sucursal_moreno/limpiador-procenex-bano-doypack-420-ml-16619.html,7791130002752,0.71,llm-none,
+2c3915d6-31d3-4727-808e-e7e9b186f43e,mercadolibre,Aromatizador Textil saphirus Cony x Unidad de 250 Ml,https://www.mercadolibre.com.ar/p/MLA20040058,7798184680080,0.67,llm:1.00,7798184680080
+ab168e7c-0fd6-4210-85e1-fa52717c5a21,mercadolibre,Guantes Multiuso Grande 8 1/2 Virulana,https://www.mercadolibre.com.ar/p/MLA21020342,7794440045426,0.80,llm:1.00,7794440045426
+5f648acb-df02-4231-801e-f12010ac443a,mercadolibre,Guantes Multiuso Mediano 7 1/2 - Virulana,https://www.mercadolibre.com.ar/p/MLA19992015,7794440045426,0.80,llm:1.00,7794440045426
+b484f64e-d028-4b81-a9f7-e49612ee311a,mercadolibre,Guantes Multiuso Naranja Plissé Satinado Mapa L,https://www.mercadolibre.com.ar/p/MLA19048739,7794440994205,0.86,llm:1.00,7794440994205
+689f5058-96bf-4089-8663-f31dac593138,mercadolibre,Mapa Guante Plisse Satinado Talle M Naranja,https://www.mercadolibre.com.ar/p/MLA20753925,7794440994205,1.00,llm:1.00,7794440994205
+cf4a0953-6f0c-4198-91a3-be4cb5377761,mercadolibre,Rollitos Lana De Acero Brillo & Limpieza Virulana X10 Uni,https://www.mercadolibre.com.ar/p/MLA19957094,7794440101702,1.00,high,7794440101702
+fee89392-830e-4df9-bcf4-add9cf8b2c21,mercadolibre,Mortimer Lanas De Acero Para Cocina No Rayan Gris Oscuro,https://www.mercadolibre.com.ar/p/MLA66636204,7793253007249,0.46,llm:1.00,7793253007249
+c083095d-b624-43f9-b7e2-6e30b1777aa6,mercadolibre,12 Espirales Verdes Raid Mosquitos Doble Acción 5 en 1,https://www.mercadolibre.com.ar/p/MLA19957497,7790520010445,0.67,llm:1.00,7790520010445
+689420e6-f583-4a2d-b22c-2601b9209475,mercadolibre,Selton Espirales Repele Mosquitos,https://www.mercadolibre.com.ar/p/MLA60125030,7793253006822,0.80,high,7793253006822
+117ccf4b-85da-4b6f-abf3-1f50413efa0b,mercadolibre,Trenet Power Presicion Quitamanchas En Pote Prelavado 450 G,https://www.mercadolibre.com.ar/p/MLA60125036,7793253007096,0.67,llm:1.00,7793253007096
+b3f7a932-048b-4dbf-a157-b54f63265247,mercadolibre,Trenet Quitamanchas para Ropa en Polvo Power Presicion 850g,https://www.mercadolibre.com.ar/p/MLA60125034,7793253007065,0.50,llm:1.00,7793253007089
+72b8e6e7-cd7f-44c4-a745-a39091001d76,mercadolibre,Trenet Quitamanchas para Ropa Power Precision En Polvo Prelavado 450 G,https://www.mercadolibre.com.ar/p/MLA60125032,7793253007072,0.64,llm:1.00,7793253007072
+3f61db14-e66e-48b2-a0c0-6b0380f4d332,mercadolibre,Trenet Power Precision Quitamanchas En Polvo Prelavado 120 G,https://www.mercadolibre.com.ar/p/MLA60125026,7793253007065,0.78,llm:1.00,7793253007065
+0842b0ca-7b57-4497-aec9-c4fdd8b8de9d,mercadolibre,Pack X 12 Unid. Bolsa Bio 50x70 Cm Task Bolsas,https://www.mercadolibre.com.ar/p/MLA21951544,7794321550216,0.50,llm-none,
+c2560da6-9850-4092-a753-ca45d6fb5ecb,mercadolibre,Pack X 12 Unid. Bolsa Rollo Bio 45x60 Cm Task Bolsas,https://www.mercadolibre.com.ar/p/MLA30414221,7794321550209,0.55,llm-none,
+2e6b4adf-18b5-42c7-90b6-794fc8d4c5cb,mercadolibre,Bolsas Residuos Cierra Facil Negras 60x95 Asurin Limon X 40u,https://www.mercadolibre.com.ar/p/MLA66566036,7790117061836,0.60,llm-none,
+1bd49904-d835-406d-8c68-e51126916b29,mercadolibre,Bolsas Residuos Asurin Fuertes Negras Medianas 50x70 90 Unid,https://www.mercadolibre.com.ar/p/MLA66547674,7790117000200,0.50,llm-none,
+69677695-1949-4825-b1e2-89a94b31cb26,mercadolibre,Bolsas Residuo Asurin Rollo 50x65 Mediana Limon 20 Unid,https://www.mercadolibre.com.ar/p/MLA21777668,7790117061843,0.60,llm:1.00,7790117061843
+0f6f0e4f-3e8e-4540-a689-d890e7d5312d,mercadolibre,Asurin Bolsas Para Residuos Nro 3 45x60 Fuertes 30 Unidades,https://www.mercadolibre.com.ar/p/MLA19957472,7790117000071,0.60,llm:1.00,7790117000200
+67359cee-1b78-4c20-93b9-3b224a52a20e,mercadolibre,Bolsa Residuos Asurin Negra Con Cierra Fácil 45x55cm 20un,https://www.mercadolibre.com.ar/p/MLA23535879,7790117061836,0.50,llm-none,
+53704b10-5a92-4708-abd1-ab8ef898adc4,mercadolibre,Mortimer Bolsas de Consorcio Antigoteo 60x90cm X10 Unidades,https://www.mercadolibre.com.ar/p/MLA53585164,7793253007140,0.56,llm:1.00,7793253007140
+9b507fdf-a1f1-4938-8e92-358171548243,mercadolibre,Mortimer Bolsas de Residuos Mediana 50x65cm X45 Unidades,https://www.mercadolibre.com.ar/p/MLA53585177,7793253007133,0.78,high,7793253007133
+cae2a001-71a1-479c-8474-ea90c58480ce,mercadolibre,Mortimer Bolsas de Residuos Mediana 50x65cm X15 Unidades,https://www.mercadolibre.com.ar/p/MLA53585218,7793253007126,0.67,llm:1.00,7793253007126
+a5672bc0-e3fa-472d-a70b-1708b3c0e2fa,mercadolibre,Mortimer Bolsas De Residuos Chicas 45x55cm X45 Unidades,https://www.mercadolibre.com.ar/p/MLA53640206,7793253007133,0.67,llm-none,
+ba6f6d26-0a64-4c62-9342-55f28766c6a0,mercadolibre,Mortimer Bolsas de Residuos Chicas 45x55cm X15 Unidades,https://www.mercadolibre.com.ar/p/MLA53585459,7793253007102,0.56,llm:1.00,7793253007102
+ec12985f-11d6-4000-a96f-292619a78796,mercadolibre,Odex Lavandina X4l.comun,https://www.mercadolibre.com.ar/p/MLA20028789,7791905023210,0.80,high,7791905023210
+8f690d45-36f0-48e8-a011-b01b94ad76b8,mercadolibre,Vanish Quitamanchas Concentrado Repuesto 400ml,https://www.mercadolibre.com.ar/p/MLA24586204,7791130105835,0.83,high,7791130105835
+e83c255c-1a89-499e-944e-32ae85273eaa,mercadolibre,Cif Ballerina Paño,https://www.mercadolibre.com.ar/p/MLA16045976,7791290647176,1.00,high,7791290647176
+e2c3ce09-a824-460d-a509-03b059fc97b7,mercadolibre,Paño Twist Virulana X1 Bulto X 6 Amarillo,https://www.mercadolibre.com.ar/p/MLA66562369,7794440005109,0.71,high,7794440005109
+41677782-d8ea-4320-bfb2-ae67593f7375,mercadolibre,Paño de limpieza Mortimer Multiuso Multicolor,https://www.mercadolibre.com.ar/p/MLA16045964,7793253000516,0.57,llm-none,
+ab0bcab9-3835-4c84-abf2-bbdbd3468f46,mercadolibre,Paño de limpieza Mortimer Multiuso 3 u,https://www.mercadolibre.com.ar/p/MLA16045970,7793253000516,0.67,llm:1.00,7793253000516
+8be97c13-7b06-4979-b3b8-4aec9a817694,mercadolibre,Virulana Inoxy Esponja De Acero X 1 Un.,https://www.mercadolibre.com.ar/p/MLA19935836,7794440101702,0.57,llm-none,
+51457095-d26d-415c-b65a-6319da2f7af6,mercadolibre,Esponja De Acero Inoxidable Mortimer Limpieza Fuerte,https://www.mercadolibre.com.ar/p/MLA19957097,7793253386160,0.63,llm-none,
+b60bdb0b-22e4-464e-a7e2-36f27515db96,mercadolibre,Esponja Mortimer De Bronce 1 Un,https://www.mercadolibre.com.ar/p/MLA19935843,7793253385712,0.83,high,7793253385712
+99d7ae20-7375-4235-b706-281b2cb3a56e,mercadolibre,Esponja Mortimer Doble Cara 1 Un,https://www.mercadolibre.com.ar/p/MLA19941933,7793253038526,0.83,high,7793253038526
+970832b5-efe0-4a4d-8d0c-d8b097371d34,mercadolibre,Esponja Cocina Virulana Cuadraditos Plusactiva Cuidauñas,https://www.mercadolibre.com.ar/p/MLA19957100,7794440003303,0.57,llm-none,
+9e0b7e44-dafc-4629-8acd-95e111661b62,mercadolibre,Esponja De Cocina Virulana Lisa Multiuso Suave Resistente,https://www.mercadolibre.com.ar/p/MLA19941927,7794440003341,0.44,llm:1.00,7794440003341
+f3ee037b-5adb-44cb-baa8-790c4aa6c1d9,mercadolibre,Virulana Esponja Multiuso,https://www.mercadolibre.com.ar/p/MLA19941925,7794440003341,1.00,llm:1.00,7794440003341
+5068493d-b9dc-4f64-bfe2-55b0ee087b9d,mercadolibre,Esponja Mortimer Cuadriculada Antibacterial,https://www.mercadolibre.com.ar/p/MLA19973799,7793253038106,0.80,llm:1.00,7793253000363
+6fec3076-a752-4d3f-8eac-17c864e980e3,mercadolibre,Esponja Mortimer Cuadriculada Abrasiva,https://www.mercadolibre.com.ar/p/MLA19935845,7793253038106,0.80,llm:1.00,7793253000349
+99e30c32-d099-4e16-ba37-50e374057721,mercadolibre,Esponja Cuidadosa Con Fibra No Raya Mortimer X 1 Unidad,https://www.mercadolibre.com.ar/p/MLA19957098,7793253000370,0.44,llm:1.00,7793253000370
+7b2e8291-d24a-43d7-9dda-ed9ed1194a09,mercadolibre,Esponja Mortimer Poderosa,https://www.mercadolibre.com.ar/p/MLA19941929,7793253092276,1.00,high,7793253092276
+31583e9e-c4d0-4b0d-856f-049a33d6e288,mercadolibre,Esponja Cuadriculada Mortimer Limpieza Fuerte Resistente,https://www.mercadolibre.com.ar/p/MLA19957102,7793253038106,0.57,llm:1.00,7793253038106
+340e433c-90a6-414c-805f-9d46c4e64ab0,mercadolibre,Lysol Toallitas Desinfectantes Frescura Marina X 36 Un,https://www.mercadolibre.com.ar/p/MLA19840047,7891035000690,0.88,high,7891035000690
+94e7bd22-5721-4487-a79f-b71a154918bf,mercadolibre,Toallitas Desinfectantes Brisa De La Mañana 36 Unid Lysol,https://www.mercadolibre.com.ar/p/MLA19804938,7891035000683,0.90,high,7891035000683
+73fba8f9-62b9-4b55-b588-9f98c9ed205d,mercadolibre,Ayudin Toallitas Desinfectantes Flowpack Fresco X 36,https://www.mercadolibre.com.ar/p/MLA19763548,7793253005498,1.00,high,7793253005498
+1611466b-a855-44ab-a1b6-f58a59f15f1f,mercadolibre,Ayudin Toallitas Desinfectantes Doy Pack Fresco X 35 Un,https://www.mercadolibre.com.ar/p/MLA19814949,779325300548,0.89,llm:1.00,7793253003913
+eb278cc8-96d2-4dc6-88b8-87b81dcc6f39,mercadolibre,Ayudin Toallitas Desinfectantes Aroma Fresco Doypack X 65 Un,https://www.mercadolibre.com.ar/p/MLA19639825,779325300548,0.78,llm:1.00,779325300548
+88bbc6e1-e09d-478d-b3dd-e1f72b0466a8,mercadolibre,Toallitas Humedas Desinfectantes Multiuso X 65 Unidad Fresco,https://www.mercadolibre.com.ar/p/MLA19547083,7793253005481,0.63,llm:1.00,7793253005481
+881dd9d5-ffc8-417d-b7a8-2641733fb413,mercadolibre,Repelente Mosquitos OFF! Verde Aerosol Camping 170ml,https://www.mercadolibre.com.ar/p/MLA21894245,7790520025395,0.63,llm:1.00,7790520025395
+9b3b9a79-24cd-482a-9aa2-414ba6fc5b63,mercadolibre,Repelente Mosquitos Selton Extra Duracion 165ml 12 Horas,https://www.mercadolibre.com.ar/p/MLA45800574,7793253006808,0.56,llm-none,
+c430ab63-bfd1-46d4-bea7-19d3521293a3,mercadolibre,Aktiol Repelente Insectos 25% Deet 143ml 12h Protección,https://www.mercadolibre.com.ar/p/MLA51923911,7791905023784,0.33,llm:1.00,7791905023784
+4e102bb9-81f8-41b6-abff-5ae11b11c11e,mercadolibre,Aktiol repelente mosquitos fragancia a neutra 143ml por 1 unidad,https://www.mercadolibre.com.ar/p/MLA22374170,7791905023784,0.44,llm:1.00,7791905023784
+7f7686bd-cae0-493c-bca3-7be5e41cac54,mercadolibre,Perfume De Hombre Ford Mustang 100 Ml,https://www.mercadolibre.com.ar/p/MLA65784918,7790520031044,0.25,llm-none,
+00a93034-ee18-4c62-b559-1323a1dff4ab,mercadolibre,Repelente Mosquitos OFF! Naranja Aero Camping 170ml,https://www.mercadolibre.com.ar/p/MLA20026912,7790520025395,0.50,llm:1.00,7790520025395
+63166dbc-5067-4093-86f2-ef88d1522d27,mercadolibre,Repelente Mosquitos Selton Uso Cotidiano 165ml 6 Horas,https://www.mercadolibre.com.ar/p/MLA45799624,7793253006792,0.63,llm:1.00,7793253006792
+c0977e6d-fae2-4e91-8373-e3c248d885db,mercadolibre,Repuesto Perfumante De Telas Suave Brisa 250ml Algabo,https://www.mercadolibre.com.ar/p/MLA27790716,7791274198762,0.56,llm-none,
+46258860-273a-45e3-bb13-aa6a6b65d325,mercadolibre,Aromatizante De Telas Recarga Dulces Mimos 500 Ml Vais,https://www.mercadolibre.com.ar/p/MLA34248910,7791274200434,0.70,high,7791274200434
+82940ae8-f38f-4675-abb7-88a8fff3bc95,mercadolibre,Perfume De Tela Poett Repuesto Sedosa Primavera 250ml,https://www.mercadolibre.com.ar/p/MLA20994813,7793253099220,0.78,llm:1.00,7793253099220
+527cc175-5d75-49b9-8be0-09ac7e7e32d3,mercadolibre,Aromatizante De Telas Poett Fraganza Sedosa Primavera 250 Ml,https://www.mercadolibre.com.ar/p/MLA21680137,7793253098773,0.90,llm:1.00,7793253003272
+c7fbc806-ae63-4a3c-a00f-b09d02ef1cc0,mercadolibre,Aromatizante Poett Natural Blends spray floral 400 ml,https://www.mercadolibre.com.ar/p/MLA17456950,7793253170622,0.78,llm:1.00,7793253170622
+ee5f4d6f-851c-4c8c-8069-4d452cfb8d07,mercadolibre,Limpiador Desinfectante Multi Superfices Piso Mesada Azulejo,https://www.mercadolibre.com.ar/p/MLA28877146,7790520995162,0.38,llm:1.00,7790520995162
+739f066c-4c07-4488-b3b9-23507d01e6f6,mercadolibre,Solución Total Desinfectante Lavanda Botella 1800ml Lysoform,https://www.mercadolibre.com.ar/p/MLA46223579,7790520028419,0.75,llm:1.00,7790520995209
+9f548c9f-f336-476d-a11a-d4959ceb680a,mercadolibre,Limpiador Lysoform Solucion Total Desinfectante floral perfection en botella,https://www.mercadolibre.com.ar/p/MLA25824724,7790520995186,0.70,llm:1.00,7790520028457
+8c9278e8-6fce-4b66-b466-ffc5bce5bc4a,mercadolibre,Limpiador Líquido Desinfectante de Superficies Lysoform Solución Total Lavanda 900 Ml,https://www.mercadolibre.com.ar/p/MLA28382580,7790520995162,0.83,llm:1.00,7790520028419
+ec118d78-464a-4655-a7bc-d5184a8c28bb,mercadolibre,"Procenex Limpiador Desinfectante Original 1,8l",https://www.mercadolibre.com.ar/p/MLA19531465,7791130683845,1.00,high,7791130683845
+43372d7f-b3c7-4795-913b-2528f12ff32c,mercadolibre,Procenex Limpiador Desinfectante Original 900ml,https://www.mercadolibre.com.ar/p/MLA19546015,7791130683753,1.00,llm:1.00,7791130146029
+cecb186f-1b61-4783-a035-f3df583c240c,mercadolibre,Limpiador De Pisos Pino Luz Aroma Pino 4 L,https://www.mercadolibre.com.ar/p/MLA23725473,7793253000912,1.00,llm:1.00,7793253000929
+fbabb93d-56ef-4260-82c8-b98bad6d8fd3,mercadolibre,Limpiador De Pisos Pino Luz Aroma Pino 1800 Ml,https://www.mercadolibre.com.ar/p/MLA19935027,7793253000912,1.00,high,7793253000912
+5772c67e-df5a-4e1d-a0bf-ceb114e5fc3b,mercadolibre,Desodorante para piso Pino Luz 900ml Concentrado Desinfectante,https://www.mercadolibre.com.ar/p/MLA19934997,7793253000912,0.40,llm-none,
+ba08266b-f5f4-48b6-ac51-7b8ff9198158,mercadolibre,Limpiador Desinfectante Ayudin Lavanda X 4 L,https://www.mercadolibre.com.ar/p/MLA28567777,7793253004699,1.00,llm:1.00,7793253004712
+69ec0c96-1d5a-4212-87e0-d1399daf2616,mercadolibre,Limpiador Desinfectante Ayudin Frag Floral Elimina Virus Bac,https://www.mercadolibre.com.ar/p/MLA19736033,7793253004743,0.56,llm:1.00,779325300474
+bfa33b0a-211c-408f-bdbd-8e1e14df2680,mercadolibre,Ayudin Limpiador Desinfectante Liquido Marina X 1.8 Lt,https://www.mercadolibre.com.ar/p/MLA19850297,7793253004729,0.71,llm:1.00,7793253004736
+ae655652-e26f-479f-9ebe-6975adcdfe10,mercadolibre,Ayudin Limpiador Desinfectante Lavanda 1800 Ml,https://www.mercadolibre.com.ar/p/MLA21287328,7793253004699,0.86,llm:1.00,7793253004705
+b8ecc146-8970-4405-8e30-2b85da433b6c,mercadolibre,Ayudin Limpiador Desinfectante Liquido Floral X 900 Ml,https://www.mercadolibre.com.ar/p/MLA66546666,7793253004743,0.88,llm:1.00,7793253004743
+fdc8dbcf-d2d3-4513-8162-6d87c1be7839,mercadolibre,Limpiador De Piso Ayudin Desinfectante Marina X900ml,https://www.mercadolibre.com.ar/p/MLA66693070,7793253004729,0.63,llm:1.00,7793253004729
+ac03e02d-9953-41ce-82cf-940493e917a6,mercadolibre,Ayudin Limpiador Desinfectante Liquido Lavanda X 900 Ml,https://www.mercadolibre.com.ar/p/MLA19765141,7793253004699,0.88,llm:1.00,7793253004699
+f6dbd34a-5629-4e9c-8442-e08d0a959eca,mercadolibre,Limpiador Multisuperficies Glade Floral Perfection 1760 Ml - Floral,https://www.mercadolibre.com.ar/p/MLA61909997,7790520996466,1.00,high,7790520996466
+bd90e2e4-df10-4c6b-95bf-9d257766d5cf,mercadolibre,Limpiador Liquido Glade Lavanda Botella 1760 ml,https://www.mercadolibre.com.ar/p/MLA52996209,7790520996473,0.88,llm-none,
+1bf6a9e0-1c7a-4776-a425-3ae09409b051,mercadolibre,Limpiador de Pisos Glade Multisuperficies Floral Perfection de 875 mL,https://www.mercadolibre.com.ar/p/MLA66490821,7790520996466,0.64,llm-none,
+2b164c8b-2275-4f6d-912b-4e6ed1674e49,mercadolibre,Limpiador Multisuperficies Glade Lavanda 875ml,https://www.mercadolibre.com.ar/p/MLA66540993,7790520996428,0.83,llm:1.00,7790520996428
+e6802438-16f7-494d-97f9-c1dcae4bc549,mercadolibre,Limpiador Multiusos Procenex Marina 1.8l Líquido,https://www.mercadolibre.com.ar/p/MLA66693180,7791130683784,0.86,llm:1.00,7791130683784
+febc8c6b-3bf8-4cce-8a10-0794577006ad,mercadolibre,"Limpiador De Pisos Procenex Lavanda 1,8 l",https://www.mercadolibre.com.ar/p/MLA19546020,7791130683852,0.83,llm:1.00,7791130683760
+eb860132-520b-40ea-a33e-ab82db25e60c,mercadolibre,Procenex Limpiador Líquido De Pisos Marina 900ml,https://www.mercadolibre.com.ar/p/MLA19546007,7791130683661,0.88,llm:1.00,7791130683661
+d392b42c-5a76-4b7a-a471-0a360388bfc4,mercadolibre,Desodorante Piso Liq. Lavanda X900cc Procenex,https://www.mercadolibre.com.ar/p/MLA28175207,7791130683852,0.43,llm:1.00,7791130683524
+a24e0945-238e-458f-8fa4-f9964c415c7c,mercadolibre,Limpiador De Pisos Procenex Lavanda 5 L,https://www.mercadolibre.com.ar/p/MLA23210809,7791130683852,0.83,llm:1.00,7791130683852
+6009cd91-1496-4cd5-b652-f8168e283222,mercadolibre,Poett Desinfectante De Pisos Flores De Primavera 4l,https://www.mercadolibre.com.ar/p/MLA19935005,7793253003562,0.78,llm:1.00,7793253003562
+a96b651c-4a7a-4910-b7c8-f24950b6f807,mercadolibre,Limpia Pisos Poett Frescura De Lavanda Desifectante 4l,https://www.mercadolibre.com.ar/p/MLA21287326,7793253004231,0.56,llm-none,
+688f1aa0-d1dc-4244-8bea-6ea9cd786eee,mercadolibre,"Poett Limpiador Desinfectante De Pisos Fragancia Solo para Tí X1,8 Lts",https://www.mercadolibre.com.ar/p/MLA23654778,7793253003586,0.50,llm:1.00,7793253003586
+f937e7a8-2e4e-437d-8c93-75b8400d7cec,mercadolibre,Poett Desinfectante Flores De Primavera 1.8l Limpiador Piso,https://www.mercadolibre.com.ar/p/MLA19956560,7793253003548,0.67,llm:1.00,7793253003562
+78bf3180-10a0-415c-af24-cf42068a48d5,mercadolibre,Poett Frescura De Lavanda 1.8l Limpia Pisos,https://www.mercadolibre.com.ar/p/MLA19935036,7793253004231,0.63,llm-none,
+b5a55128-5776-4744-8b1a-4437e050e7f8,mercadolibre,Limpiador De Pisos Poett Aroma Solo Para Ti X 900 Ml,https://www.mercadolibre.com.ar/p/MLA20871240,7793253003579,0.73,high,7793253003579
+c816f546-5f0f-4d3e-9eb5-e87549562563,mercadolibre,Limpiador Pisos Poett Flores De Primavera X 900 Ml,https://www.mercadolibre.com.ar/p/MLA19935012,7793253003548,0.89,high,7793253003548
+b4b43730-00e8-47a1-9c29-e5475321733b,mercadolibre,Limpiador Pisos Desinfectante Frescura Lavanda 900ml,https://www.mercadolibre.com.ar/p/MLA19934978,7793253003500,0.57,llm:1.00,7793253003500
+7b182b59-e213-4e6f-9a9b-096d759c6d2d,mercadolibre,Jardin Limpiador Liquido Desinfectante Cremoso Floral X900,https://www.mercadolibre.com.ar/p/MLA50169238,7792389000315,0.63,llm-none,
+ffd11b35-58c8-4c3f-90e0-c6ac03e55871,mercadolibre,Detergente Lavavajillas Biodegradable Querubín Limon X4 Lt,https://www.mercadolibre.com.ar/p/MLA38157619,7791905002499,0.50,llm-none,
+9669c6ba-f783-440a-b34e-dd698d003872,mercadolibre,Lavandina Clásica Odex X 1 Lt,https://www.mercadolibre.com.ar/p/MLA20028786,7791905024057,0.60,llm:1.00,7791905024057
+8671ec25-6173-45f6-aa49-4ac64b8e8bbd,mercadolibre,Repuesto Lavanda 220 Ml Harpers Des.cont-automaticos,https://www.mercadolibre.com.ar/p/MLA21177016,7791905023197,0.56,llm-none,
+82fd371f-2020-48fc-ac33-6f1cc97cb42d,mercadolibre,Lavandina Liquida Básica Heroe X 2lt,https://www.mercadolibre.com.ar/p/MLA66138417,7798131250045,0.67,llm:1.00,7798131250045
+65f30e52-5806-4509-a297-3248f07f7c7c,mercadolibre,Lavandina Líquida Héroe Clásica Botella 1lt Multi Superficies,https://www.mercadolibre.com.ar/p/MLA25862454,7798131250397,0.44,llm-none,
+3d189734-9924-4f6d-bcd1-83e57766d297,mercadolibre,Lavandina Ayudín Clasica Original X 4 L,https://www.mercadolibre.com.ar/p/MLA45805464,7793253003791,0.80,llm-none,
+2ca3397a-9dbd-4aa4-8ba2-d85242ca0719,mercadolibre,Lavandina AyudínClásica 2 L,https://www.mercadolibre.com.ar/p/MLA45063616,7793253004774,0.67,llm:1.00,7793253004781
+902158d8-f908-40c9-a731-789e70495781,mercadolibre,Ayudín Lavandina X1l Multisuperficies,https://www.mercadolibre.com.ar/p/MLA36600713,7793253005238,0.60,llm-none,
+33c8e51c-c6d7-4e99-85ed-2969559eaa08,mercadolibre,Alimento Maintenance Criadores Adultos Perro Adulto Los Tamaños Carne/pollo 22+2 Kg Bonus,https://www.mercadolibre.com.ar/p/MLA57496849,,0.00,low,
+33556c78-e63f-4562-b2ca-6561ae6cada7,mercadolibre,Lavandina En Gel Original Odex 700cc,https://www.mercadolibre.com.ar/p/MLA21903204,7791905024248,0.86,high,7791905024248
+632b3742-c866-4bbf-8509-340f4d3d109f,mercadolibre,Cuchara Señuelo Con Offset Giratoria Red Fish 7gr 4075-7g-2 Color Gris,https://www.mercadolibre.com.ar/p/MLA48769535,7793253003418,0.07,llm-none,
+d125ab98-3023-4f1b-8ee1-e073d9fdd2f3,mercadolibre,Lavandina en gel Vim 700 mL,https://www.mercadolibre.com.ar/p/MLA45224916,7791290786400,1.00,llm-none,
+065feed6-83d1-45ad-b2d3-c3419f690391,mercadolibre,Lavandina Gel Aroma Citrico Desinfecta X1.5 Lts,https://www.mercadolibre.com.ar/p/MLA19958667,7793253003869,0.50,llm-none,
+4ce353dc-9b3e-4db4-8221-affd39d3f1fc,mercadolibre,Lavandina En Gel Ayudín 1.5 L,https://www.mercadolibre.com.ar/p/MLA20960397,7793253003791,1.00,llm-none,
+0201b285-b230-4ce2-a1a8-0f290c143277,mercadolibre,Lavandina En Gel Ayudín Cítrica 500 Ml,https://www.mercadolibre.com.ar/p/MLA40151838,7805025697289,1.00,llm-none,
+2f5c6885-be10-4558-9fd0-399c7da3bd82,mercadolibre,Lavandina En Gel Ayudín 500 mL,https://www.mercadolibre.com.ar/p/MLA37389158,7793253005856,1.00,llm:1.00,7793253005856
+4d37efdc-acd4-4614-ba4a-3496a96384a5,mercadolibre,Lavandina En Gel Cítrica Ayudin 700ml,https://www.mercadolibre.com.ar/p/MLA19958661,7793253003807,0.86,llm:1.00,7793253003807
+5bd5ad82-b523-4f96-aa46-d2754e09c3a8,mercadolibre,Ayudín Lavandina En Gel Lavanda 700ml,https://www.mercadolibre.com.ar/p/MLA21088672,7793253003838,0.86,llm:1.00,7793253005849
+8279cef5-d14a-4216-9c75-6e331938044b,mercadolibre,Lavandina En Gel Ayudín Original 700 Ml,https://www.mercadolibre.com.ar/p/MLA20028774,7793253003791,1.00,llm?:0.50,
+66adbe46-5c92-4d18-81a4-f0cb4d54c7ab,mercadolibre,Lavandina Ayudín triple poder pureza glaciar 4 l.,https://www.mercadolibre.com.ar/p/MLA19958668,7793253003746,1.00,llm-none,
+e819c618-4f90-48a1-9fac-bdba3e5c4c93,mercadolibre,Lavandina Ayudin Triple Accion Aroma Pureza Glaciar 2 Litros,https://www.mercadolibre.com.ar/p/MLA19958662,7793253003746,0.67,llm:1.00,7793253003753
+666cf85b-ee61-4577-93e9-10d611d47e6d,mercadolibre,Lavandina Ayudin Pureza Del Glaciar Triple Poder X 1 L,https://www.mercadolibre.com.ar/p/MLA20935813,7793253003746,0.88,llm:1.00,7793253003746
+8a064e87-cb0a-453f-b91c-860c44d15ad3,mercadolibre,Lavandina Ayudin Triple Poder Aromatiza Lavanda X4 L Triple,https://www.mercadolibre.com.ar/p/MLA20866943,7793253003722,0.78,llm:1.00,7793253003739
+c0c6a35f-9f3a-410b-9e56-cb5b56af6f0a,mercadolibre,Lavandina Ayudin Triple Poder Lavanda X 2 L,https://www.mercadolibre.com.ar/p/MLA19944934,7793253003722,1.00,llm:1.00,7793253003722
+42b44363-37b7-4ef5-9a05-52920a22b3de,mercadolibre,Lavandina Ayudin Lavanda Triple Poder 1l,https://www.mercadolibre.com.ar/p/MLA19981250,7793253003722,0.86,llm?:0.50,
+6e5548f8-2762-4069-8888-e1bf72c83abd,mercadolibre,Lavandina Aditivada Lavanda Odex X 2 Lt,https://www.mercadolibre.com.ar/p/MLA64124354,7791905024057,0.83,llm:1.00,7791905024064
+5c7e1d66-1a48-448a-b7a7-f10cb90938ca,mercadolibre,Lavandina Aditivada Odex Lavanda 1 Lt,https://www.mercadolibre.com.ar/p/MLA19944944,7791905024057,0.83,llm:1.00,7791905024057
+efc35a71-5cc8-4311-9ba8-214194d5ad9a,mercadolibre,Lavandina X.5 X 1 Lt,https://www.mercadolibre.com.ar/p/MLA57662202,7791905003663,1.00,llm:1.00,7791905003663
+b60cc986-b1dc-465b-a7b0-a26c3a648bf9,mercadolibre,Lavandina Concentrada Premium Querubin X 2 Lt,https://www.mercadolibre.com.ar/p/MLA57666906,7791905002512,0.83,llm:1.00,7791905002529
+c21a8c11-ef78-44a5-b45f-e7bddfebc727,mercadolibre,Lavandina QuerubínPremium 1 L,https://www.mercadolibre.com.ar/p/MLA47054556,7791905003663,0.67,llm:1.00,7791905003663
+cb47c1b6-7137-4205-98d5-2d40f434ef56,mercadolibre,Lavandina Ayudín Antisplash No Salpica 2l Limpieza,https://www.mercadolibre.com.ar/p/MLA19937845,7793253003784,0.63,llm:1.00,7793253003784
+c0e4f002-5f68-49a2-baaa-fbad720fb9ac,mercadolibre,Lavandina Ayudin Anti Splash 1lt,https://www.mercadolibre.com.ar/p/MLA20866944,7793253999988,1.00,high,7793253999988
+807d3b36-0ca5-422c-9f48-64f790ed88f3,mercadolibre,Limpiador Arco Iris Limpiador original en botella,https://www.mercadolibre.com.ar/p/MLA42743314,7793253174200,0.67,llm-none,
+37466feb-3171-40b7-9e52-9df6f28c488e,mercadolibre,Quitamanchas Trenet Líquido Pre Lavado Para Telas Botella 120 mL,https://www.mercadolibre.com.ar/p/MLA21799355,7793253401030,0.46,llm:1.00,7793253401030
+8566ca70-b529-4504-92fb-944599f4eb1e,mercadolibre,Quitamanchas Trenet doypack recarga 400ml,https://www.mercadolibre.com.ar/p/MLA19937643,7793253189204,0.67,llm-none,
+0ae99d6f-84c2-4417-a4fc-4df51c344a70,mercadolibre,Quitamanchas Trenet prelavado para telas gatillo 500ml,https://www.mercadolibre.com.ar/p/MLA21776716,7793253001162,0.50,llm:1.00,7793253001162
+0988be45-975f-4a8f-83e0-cc998411bfa5,mercadolibre,Vanish Quitamanchas Multiuso Doypack 650ml,https://www.mercadolibre.com.ar/p/MLA20956743,7791130001854,0.67,llm-none,
+f4dd6a0e-cb0a-4745-b216-7eacac39ff3a,mercadolibre,Vanish Quitamanchas Polvo Rosa - kg a $19990,https://www.mercadolibre.com.ar/p/MLA20923929,7702626214825,0.71,llm-none,
+eebad790-b7f6-4e84-ac9b-d2d66c99b0b8,mercadolibre,Vanish Oxi Action White Refill 450 Grs,https://www.mercadolibre.com.ar/p/MLA20956742,7702626204178,0.50,llm:1.00,7702626204178
+f940fdf9-68df-49ae-8fd3-b1d4b4d559b2,mercadolibre,Ultra Quitamanchas En Polvo Ayudín Ropa Color 450 Gr,https://www.mercadolibre.com.ar/p/MLA19944550,7793253002565,0.90,high,7793253002565
+052c99b0-46de-4e00-b405-c9a3f78fe103,mercadolibre,Ultra Quitamanchas Ropa En Polvo Ayudín Ropa Blanca 450 Gr,https://www.mercadolibre.com.ar/p/MLA21032763,7793253002565,0.82,high,7793253002565
+cde09934-9682-46c1-bafb-cb0226608a18,mercadolibre,Vanish Quitamanchas Pre Lavado Poder 02 Rosa Repuesto 400ml,https://www.mercadolibre.com.ar/p/MLA19937634,7791130001748,0.50,llm:1.00,7791130001748
+f1f5945e-1f27-4afd-a408-a0502013a904,mercadolibre,Quitamanchas Ayudin Colores Vivos Sin Lavandina X 700 Ml,https://www.mercadolibre.com.ar/p/MLA23491526,779325300341,0.78,llm:1.00,779325300341
+d327bde3-4d57-4f1c-b062-cd2c5ede8e6f,mercadolibre,Quitamanchas Ayudín Colores Vivos 650 Ml Ropa,https://www.mercadolibre.com.ar/p/MLA19944546,7793253003241,0.88,llm:1.00,7793253003241
+d14334e0-d13a-45a4-a52b-1ec04b8f8753,mercadolibre,Quitamanchas Ayudín Colores Vivos Sin Lavandina 400 Ml,https://www.mercadolibre.com.ar/p/MLA19958476,7793253003234,0.78,llm:1.00,7793253003234
+b33b510f-a901-4417-a2ab-ffd5320085ac,mercadolibre,Lavandina Querubín Ropa Blanca 1 Litro (6065),https://www.mercadolibre.com.ar/p/MLA20028791,7791905003663,0.71,high,7791905003663
+de963ce8-32a9-4381-a8c7-ae84e58a666d,mercadolibre,Ayudín Quitamanchas Blancos Intensos Floral 2 L,https://www.mercadolibre.com.ar/p/MLA19944554,7793253004774,1.00,llm-none,
+f1a2620a-742d-4ea2-97ab-4e6418cfed0f,mercadolibre,Quitamanchas Ayudín Blancos Intensos Con Lavandina X 1 L,https://www.mercadolibre.com.ar/p/MLA23534767,7793253004774,0.86,llm-none,
+d373e5f8-d3aa-4ac6-8ca4-d2ed03409b80,mercadolibre,Ayudín Ropa Blancos Supremos 700ml Quitamanchas,https://www.mercadolibre.com.ar/p/MLA21096503,7793253002589,0.71,llm-none,
+49607a77-8762-4beb-8f78-cc0160d43750,mercadolibre,Quitamanchas Ropa Ayudín Blanco Supremo 650 Ml,https://www.mercadolibre.com.ar/p/MLA19979693,7793253002862,1.00,high,7793253002862
+49f702f7-d4bf-4a59-b27e-717e47023961,mercadolibre,Quitamanchas Ayudin Blanco Supremo X 400 Ml,https://www.mercadolibre.com.ar/p/MLA19958470,7793253003258,0.86,llm:1.00,7793253003258
+e8b4df2f-9c17-4d35-87d5-9babf67d4ac1,mercadolibre,Aromatizante Glade Lavanda Toque Repuesto 9gr,https://www.mercadolibre.com.ar/p/MLA20731561,7790520996145,1.00,high,7790520996145
+2504dc5f-effe-4d55-9068-441bc1c1f0b6,mercadolibre,Aromatizante De Ambiente Poett Intense Lavanda 9 Gr Repuesto,https://www.mercadolibre.com.ar/p/MLA17456938,7793253041014,1.00,high,7793253041014
+f2c535c2-63fa-498e-a9bf-2f9225c824f9,mercadolibre,Insecticida Raid mata moscas y mosquitos sin olor en aerosol 380ml,https://www.mercadolibre.com.ar/p/MLA22031438,7790520028662,1.00,high,7790520028662
+443aabf5-4bd1-431c-8c22-d8b5149f4ff9,mercadolibre,Selton Insecticida Sin Olor 360Cc,https://www.mercadolibre.com.ar/p/MLA25165765,7793253003302,0.83,high,7793253003302
+849bb917-049e-46f0-b4f1-3623fcc22a57,mercadolibre,Raid Insecticida Mata en 10 Segundos Moscas Mosquitos Zancudos,https://www.mercadolibre.com.ar/p/MLA28456630,7790520028679,0.70,llm-none,
+dd7ee689-99a9-4aee-bf6e-18a65819a10a,mercadolibre,Insecticida Mmm 360 Cc Fuyi Insecticidas,https://www.mercadolibre.com.ar/p/MLA29513785,7790520025869,0.71,high,7790520025869
+3d698155-7dc8-44c9-8692-3fc013a5493d,mercadolibre,Mata Moscas y Mosquitos Selton Acción Instantánea 360 cc,https://www.mercadolibre.com.ar/p/MLA20026779,7793253005153,1.00,llm:1.00,7793253005153
+a0380ce3-434b-4f66-b09d-9e2b97eabd75,mercadolibre,Insecticida Raid Cucarachas Aero Insectos 360ml,https://www.mercadolibre.com.ar/p/MLA25003929,7790520997654,0.71,high,7790520997654
+ca7cc6b2-54e4-46a8-93a5-b4cadb949f2f,mercadolibre,Mata Cucarachas Selton Acción Prolongada 360cc,https://www.mercadolibre.com.ar/p/MLA29579981,7793253005726,0.86,high,7793253005726
+d2755a7e-bc59-4576-b7c3-c6cc9de7320c,mercadolibre,Raid Casa Y Jardin 360cc,https://www.mercadolibre.com.ar/p/MLA28527581,7790520028679,0.80,high,7790520028679
+705fd38f-3fd0-4e27-8f9d-6b9fbe45d5a0,mercadolibre,Insecticida Casa Jardin 360 Cc Selton Insecticidas,https://www.mercadolibre.com.ar/p/MLA20027237,7793253005146,0.88,llm:1.00,7793253005146
+2ac70fb7-84c2-46f7-8062-4698503aec14,mercadolibre,Desinfectante Ayudin Expert Multisuperficies Gatillo 500 Ml,https://www.mercadolibre.com.ar/p/MLA19850303,7793253005221,0.88,high,7793253005221
+f1494cb1-4879-46ff-880d-99e1f1b04504,mercadolibre,Limpia Desinfectante C/ Cloro Multisuperficie Ayudin X450ml,https://www.mercadolibre.com.ar/p/MLA19546274,7793253005054,0.43,llm-none,
+be23947b-f295-4397-9fff-8b402610c10d,mercadolibre,Procenex Cocina Repuesto 420ml Limpiador Antigrasa,https://www.mercadolibre.com.ar/p/MLA19546304,7791130002752,0.86,llm:1.00,7791130002752
+bb505270-4851-488f-8c89-b12f683de865,mercadolibre,Limpiador Cocina Antigrasa MrMusculo Repuesto 450ml,https://www.mercadolibre.com.ar/p/MLA20011348,7790520998880,0.86,high,7790520998880
+71e37c35-74c9-454f-a9fa-478c02a15e2d,mercadolibre,Limpiador Cif Bioactive Antigrasa Gatillo X 500 Ml,https://www.mercadolibre.com.ar/p/MLA19531473,7791290795594,0.63,llm:1.00,7791290795594
+590cded2-43c8-4d65-b290-001db2bde99f,mercadolibre,Limpiador Liquido Expert Antigrasa Doypack 900ml Limon Cif,https://www.mercadolibre.com.ar/p/MLA35505091,7791290795655,0.67,llm?:0.50,
+4cae89c2-3908-478b-b5ad-4467c7e28c91,mercadolibre,Limpiador Cif Expert Antigrasa 450 Ml Doypack,https://www.mercadolibre.com.ar/p/MLA35196297,7791290795587,1.00,llm:1.00,7791290795587
+da388d0f-6e7a-4811-b7b6-08cf97d16069,mercadolibre,Limpiador Ayudin Cocina Desengraseante Repuesto,https://www.mercadolibre.com.ar/p/MLA19546428,7793253005306,0.67,llm:1.00,7793253005306
+64e37380-16e3-4887-96b0-500ac25db449,mercadolibre,Ayudín Cocina Naranja Doy Pack 900 ml,https://www.mercadolibre.com.ar/p/MLA19736061,7793253400163,0.63,llm:1.00,7793253400163
+df0ea8bd-7f62-49ba-affa-0f660a1bdfb8,mercadolibre,Limpiador Ayudin Cocina Gatillo 500ml Desengraseante,https://www.mercadolibre.com.ar/p/MLA19546333,7793253005306,0.71,llm:1.00,7793253005306
+db6df128-2091-4530-8db0-ba18e0e2e49b,mercadolibre,Limpiador Procenex Baño original en recarga,https://www.mercadolibre.com.ar/p/MLA16134491,7791130002776,0.57,llm-none,
+99a24331-11c5-4ae9-a8c3-64706759a56f,mercadolibre,Harpic Limpiador Baños Sarro Manchas Dificiles Doypack 420ml,https://www.mercadolibre.com.ar/p/MLA19814723,7791130963299,0.67,llm:1.00,7791130963299
+07811029-b902-493a-a3af-fbd2d576d831,mercadolibre,Limpiador Baño Cif Bio Active Gatillo X 500 Ml Formula,https://www.mercadolibre.com.ar/p/MLA66540393,7791290795594,0.60,llm:1.00,7791290795594
+a38bfa38-9aaf-4bf6-9f6e-f16d77816202,mercadolibre,Limpiador Liquido Para Baño Expert Cif 900ml,https://www.mercadolibre.com.ar/p/MLA45392798,7791290795655,0.88,llm:1.00,7791290795655
+dabd8d7c-5080-4059-b865-83b49771c6ac,mercadolibre,Limpiador para baño CIF EXPERT Doypack 450 ml,https://www.mercadolibre.com.ar/p/MLA16134489,7791290795600,1.00,high,7791290795600
+61ba95f7-10f9-4d6e-98f7-75c71659799e,mercadolibre,Antihongos Ayudin Removedor Activo Doypack X 450 Ml,https://www.mercadolibre.com.ar/p/MLA19592115,7793253005467,0.88,llm-none,
+6900e764-86c0-4b05-925d-93f62009aa22,mercadolibre,Ayudin Antihongos Removedor Activo Gatillo X 500 Ml,https://www.mercadolibre.com.ar/p/MLA19588668,7793253005474,1.00,llm:1.00,7790132000025
+2b9ba535-bd4c-4f18-b642-b2d745f010c2,mercadolibre,Ayudin Baño Limpieza Activa Original Doypack X 900 Ml,https://www.mercadolibre.com.ar/p/MLA19901184,7793253005290,0.78,llm:1.00,7793253179274
+814778b9-9609-4fd9-8281-65642f308f2d,mercadolibre,Limpiador Liquido Baño Quita Sarro Repuesto Ayudin 450ml,https://www.mercadolibre.com.ar/p/MLA19588667,7793253005276,0.44,llm:1.00,7793253005283
+820c51b5-0355-4f26-a1a8-2102e4498bcc,mercadolibre,Ayudín Baño Limpieza Activa Gatillo 500 Ml,https://www.mercadolibre.com.ar/p/MLA66693252,7793253005276,1.00,llm:1.00,7793253179052
+c72020a1-649b-485d-b7d9-c91278f4b065,mercadolibre,Destapa Cañerias Concentrado Merclin 500ml,https://www.mercadolibre.com.ar/p/MLA19991303,7798125150139,0.67,llm:1.00,7798125150139
+e8063190-1da9-4367-b729-d964960a505b,mercadolibre,Destapa Cañería Concentrado Merclin × 1 Litro,https://www.mercadolibre.com.ar/p/MLA19991304,7798125150238,0.50,llm:1.00,7798125150238
+60e014ee-dc82-444b-a873-367ddd81e8e9,mercadolibre,Destapacañerias Plomero Líquido,https://www.mercadolibre.com.ar/p/MLA20903633,7790132009158,0.75,high,7790132009158
+a7e55d02-a4f3-4d98-b76f-b2ce946565c0,mercadolibre,Destapacañerias Ayudín,https://www.mercadolibre.com.ar/p/MLA19991302,7790132072206,1.00,high,7790132072206
+4d48f19f-6a9a-4fa9-89a7-efaceeed1d0d,mercadolibre,Pato Canasta Solida Marina Full 27.5g,https://www.mercadolibre.com.ar/p/MLA52774760,7790520028952,0.75,high,7790520028952
+7cc42c3a-fff4-4d33-a67d-2d1a8ca7f788,mercadolibre,Canasta Sólida para Inodoro VIM Citrus 4 en 1 35 g,https://www.mercadolibre.com.ar/p/MLA65923331,7790520028938,0.44,llm-none,
+eb826c74-a988-4ad8-a15f-cac53c1f0bba,mercadolibre,Glade Canasta Solida Lavanda P/ Inodoros Aparato + Rep X 6 U,https://www.mercadolibre.com.ar/p/MLA36767007,7790520028938,0.75,high,7790520028938
+4bb1f6fc-acf8-4606-b728-099fa529b358,mercadolibre,"Canasta Inodoros Poett Pastilla Desinfectante X 27,5gr",https://www.mercadolibre.com.ar/p/MLA64288851,7793253002527,0.50,llm:1.00,7793253002527
+c08c98af-7f33-486e-86ce-b23e700fd3ac,mercadolibre,Canasta Inodoro Ayudin Dura 30 Días Limpia Elimina Olores,https://www.mercadolibre.com.ar/p/MLA21089953,779325330008,0.40,llm-none,
+5d67e1aa-7250-4f73-81ce-a054816f0d81,mercadolibre,Aromatizante Ambiente Glade Flores Tropicales Y Coco,https://www.mercadolibre.com.ar/p/MLA41873029,7790520028792,0.71,llm:1.00,7790520998200
+4e0410fd-0eb1-4322-9f0f-a16751213d94,mercadolibre,Aromatizante de ambientes Glade campos de lavanda en aerosol 380 cc.,https://www.mercadolibre.com.ar/p/MLA62888656,7790520028730,1.00,high,7790520028730
+d8985a95-4f4a-420d-b164-92c19a9d230f,mercadolibre,Poett Desodorante Ambiente Suavidad De Bebé En Aerosol 360ml,https://www.mercadolibre.com.ar/p/MLA25544585,7793253004255,0.90,high,7793253004255
+682e5726-da44-4986-8147-bc9ea40c0911,mercadolibre,Desodorante Ambiental Poett Lavanda 360ml,https://www.mercadolibre.com.ar/p/MLA21688560,7793253004231,0.67,llm:1.00,7793253004231
+7cac17ba-952c-4a76-b184-d4eb0c941d58,mercadolibre,Aerosol Desinfectante De Ambientes Lavanda 360ml Cif,https://www.mercadolibre.com.ar/p/MLA36457381,7791290795785,0.75,llm:1.00,7791290795785
+92496449-80f6-4618-97b1-a921d040cdb3,mercadolibre,Aerosol Desinfectante De Ambientes Original 360ml Cif,https://www.mercadolibre.com.ar/p/MLA36604918,7790520014177,0.75,llm:1.00,7790520014177
+bd972b94-c865-4b97-86b7-49147ac4a533,mercadolibre,Desinfectante Eliminador De Olores Lavanda 315ml Lysoform,https://www.mercadolibre.com.ar/p/MLA45803099,7790520995308,0.63,llm:1.00,7790520031044
+996f85dd-c305-481d-b23f-2d1e071766b4,mercadolibre,Desinfectante Elimina Olores Lysoform Bebé Aerosol 360ml,https://www.mercadolibre.com.ar/p/MLA45508842,7790520995308,1.00,llm:1.00,7790520014191
+6af2a2e3-2871-4cca-a030-438957934ff8,mercadolibre,Desinfectante Elimina Olores Lysoform Aerosol 360ml,https://www.mercadolibre.com.ar/p/MLA21641618,7790520995308,1.00,llm:0.90,7790520995308
+157a5a2a-4bde-4127-8ba4-65635510b5d7,mercadolibre,Desinfectante Ayudin Expert Frescura Matinal X 332 Ml,https://www.mercadolibre.com.ar/p/MLA26305562,7793253005061,1.00,high,7793253005061
+ce0763d5-d85f-4eb1-bd76-73db548013b5,mercadolibre,Desinfectante Ayudin Expert Original X 332 Ml,https://www.mercadolibre.com.ar/p/MLA26305576,7793253005054,0.86,llm:1.00,7793253005054
+de98ee3d-3c0e-48f0-8dd9-564e2ddc1e78,lacoopeencasa,LAVANDINA AYUDÍN ORIGINAL 2000cm3,https://www.lacoopeencasa.coop/producto/lavandina-ayudin-original-2000cm3/313682,7793253003791,0.80,llm-none,
+9c8cc1dd-4a74-4982-9892-f49cd4ce7404,lacoopeencasa,LAVANDINA AYUDÍN LAVANDA TRIPLE PODER 2000cm3,https://www.lacoopeencasa.coop/producto/lavandina-ayudin-lavanda-triple-poder-2000cm3/282764,7793253003722,0.86,llm:1.00,7793253003722
+d3e34f82-7bd8-4a0b-b82c-e1612b261511,lacoopeencasa,AGUA LAVANDINA ADITIVA QUERUBÍN ROPA BLANCA 1000cm3,https://www.lacoopeencasa.coop/producto/agua-lavandina-aditiva-querubin-ropa-blanca-1000cm3/311862,7791905003663,0.63,llm-none,
+c794f863-7ee9-41a6-94d1-4706c60996ea,maxiconsumo,QUITAMANCHA TRENET HYPERACTIVE BOLILLA 120 CC,https://www.maxiconsumo.com/sucursal_moreno/quitamancha-trenet-hyperactive-bolilla-120-cc-14048.html,7793253401030,0.57,llm-none,
+30803800-e8c5-4b52-b667-d36c0a594aa0,maxiconsumo,LIMPIADOR POETT SUAVIDAD 1.8 LT,https://www.maxiconsumo.com/sucursal_moreno/limpiador-poett-suavidad-1-8-lt-12822.html,7793253004255,0.60,llm-none,
+71c85eca-c6db-4ef5-adc4-551445d68cc8,maxiconsumo,"LIMPIADOR POETT LAVANDA 1,8 LT",https://www.maxiconsumo.com/sucursal_moreno/limpiador-poett-lavanda-1-8-lt-6747.html,7793253003500,0.80,llm:1.00,7793253003517
+6f2be12b-e36f-4f92-8a80-08059dfb5132,el-abastecedor,Unknown product,https://www.abastecedor.com.ar/poett-aromatiz-int-rep-lavanda--1/p,7793253004231,0.40,llm-none,
+ee28666a-3da7-4cbb-b8d0-971494a8411b,el-abastecedor,Unknown product,https://www.abastecedor.com.ar/mortimer-espplatacero-inox-1/p,7793253038106,0.33,llm-none,
+e5e97d1f-f744-4fee-94d8-3d29a014c38e,el-abastecedor,Unknown product,https://www.abastecedor.com.ar/asurin-bolsa-residuo-60x95-c-facil-10u-1/p,7790117060679,0.67,llm:0.90,7790117061850
+510754ab-dc84-4708-bc86-ec0c34ce4002,el-abastecedor,Unknown product,https://www.abastecedor.com.ar/mortimer-bolsa-normal-45x55x45u-1/p,7793253007102,0.75,llm-none,
+828adc8c-6e70-47cb-a720-e8760b6f0c8e,la-genovesa,Unknown product,https://www.lagenovesadigital.com.ar/DetalleProducto?ArticuloID=66704173&Tipo=4&PromID=0&PresID=1,,0.00,low,
+0e383bc4-b214-456b-9b40-ed1d05fbc5fa,la-genovesa,Unknown product,https://www.lagenovesadigital.com.ar/DetalleProducto?ArticuloID=2946&Tipo=4&PromID=0&PresID=1,,0.00,low,
+0acd224b-336d-4586-a908-7dac13c1e662,la-genovesa,Unknown product,https://www.lagenovesadigital.com.ar/DetalleProducto?ArticuloID=66690996&Tipo=4&PromID=0&PresID=1,,0.00,low,
+5b499d27-7ffa-48d1-8e5c-a03c83f7d404,la-genovesa,Unknown product,https://www.lagenovesadigital.com.ar/DetalleProducto?ArticuloID=66691887&Tipo=4&PromID=0&PresID=1,,0.00,low,
+d6b4bca7-9151-4d12-9d9c-477919345ac0,la-genovesa,Unknown product,https://www.lagenovesadigital.com.ar/DetalleProducto?ArticuloID=66689298&Tipo=4&PromID=0&PresID=1,,0.00,low,
+6ae3037e-e60f-4b76-b7d4-8e48ad1212b2,mami,Unknown product,https://www.supermami.com.ar/super/producto/bolsa-consorcio-cf-flexi-aroma-limon-60x95-x10un/_/A-3020264-3020264-s,7790117061850,0.33,llm:0.90,7790117061850
+548bba62-91db-4560-9cc8-b6fa751db9df,mami,Unknown product,https://www.supermami.com.ar/super/producto/bolsa-para-resiudos-asurin-mediana-aroma-limon-x-30un/_/A-3020261-3020261-s,7790117061843,0.44,llm-none,
+a041a5ef-f7a3-48bd-9168-76c3b74442b8,lacoopeencasa,GUANTES MAPA PLISSE SATINADO TAMAÑO L 1uni,https://www.lacoopeencasa.coop/producto/guantes-mapa-plisse-satinado-tamano-l-1uni/284698,7794440994205,0.71,llm-none,
+b55e2dd5-3f40-4018-a646-4ab592b74ddb,lacoopeencasa,GUANTES MAPA PLISSE SATINADO TAMAÑO M 1uni,https://www.lacoopeencasa.coop/producto/guantes-mapa-plisse-satinado-tamano-m-1uni/284699,7794440994205,0.71,llm-none,
+02f7c194-7b54-4e10-a2b1-b62665ee9d6a,lacoopeencasa,BOLSAS DE RESIDUOS TASK ROLLO 50X70CM 20uni,https://www.lacoopeencasa.coop/producto/bolsas-de-residuos-task-rollo-50x70cm-20uni/256890,7794321550209,0.50,llm-none,
+bb079611-a106-496d-b4b2-98cf2ebe4935,lacoopeencasa,BOLSAS DE RESIDUOS TASK ROLLO 45X60CM 20uni,https://www.lacoopeencasa.coop/producto/bolsas-de-residuos-task-rollo-45x60cm-20uni/256888,7794321550209,0.50,llm-none,
+a386c96f-1d88-4b2f-844c-7d70e2eb09d4,lacoopeencasa,ESPONJA VIRULANA INOXY ACERO INOXIDABLE 1uni,https://www.lacoopeencasa.coop/producto/esponja-virulana-inoxy-acero-inoxidable-1uni/134066,7794440003341,0.43,llm-none,
+fa0b3e39-6b28-4cd5-83dd-6025deb7f4db,lacoopeencasa,ESPONJA METALICA MORTIMER PLATEADA 1uni,https://www.lacoopeencasa.coop/producto/esponja-metalica-mortimer-plateada-1uni/437475,7793253386160,0.67,llm-none,
+a978e7af-1d67-40da-a993-971ae58c7eab,lacoopeencasa,ESPONJA MORTIMER DE BRONCE DOBLE CARA 1uni,https://www.lacoopeencasa.coop/producto/esponja-mortimer-de-bronce-doble-cara-1uni/166060,7793253038526,0.75,llm-none,
+47f1854d-db53-4c83-9672-f2eda7071088,lacoopeencasa,TOALLITAS DESINFECTANTES AYUDÍN AROMA FRESCO FLOWPACK 216cm3,https://www.lacoopeencasa.coop/producto/toallitas-desinfectantes-ayudin-aroma-fresco-flowpack-216cm3/287307,7793253005498,0.75,llm-none,
+8dcd11b8-4bf1-43a5-b111-0e3b36397dc9,lacoopeencasa,TOALLITAS DESINFECTANTES AYUDÍN AROMA FRESCO 390cm3,https://www.lacoopeencasa.coop/producto/toallitas-desinfectantes-ayudin-aroma-fresco-390cm3/292485,7793253005481,0.71,llm:1.00,7793253005481
+378a9b4f-77cc-448e-ac29-d936998d3b85,lacoopeencasa,REPELENTE CONTRA MOSQUITOS OFF! FAMILY AEROSOL 170cm3,https://www.lacoopeencasa.coop/producto/repelente-contra-mosquitos-off-family-aerosol-170cm3/292530,7790520025395,0.75,llm-none,
+7e7b2a4d-cc66-4298-a9b5-a3c8287f7119,lacoopeencasa,LIMPIADOR DE PISO GLADE FLORAL PERFECTION 1760cm3,https://www.lacoopeencasa.coop/producto/limpiador-de-piso-glade-floral-perfection-1760cm3/315830,7790520996381,0.63,llm:1.00,7790520996466
+5130336e-1e8e-4450-b9d9-f174c9c442b5,lacoopeencasa,LIMPIADOR DE PISO GLADE CAMPOS DE LAVANDA 1760cm3,https://www.lacoopeencasa.coop/producto/limpiador-de-piso-glade-campos-de-lavanda-1760cm3/315831,7790520996428,0.78,llm-none,
+8df40322-c94d-40df-8c7f-1925a2a1a06a,lacoopeencasa,LIMPIADOR DE PISO PROCENEX LAVANDA 1800cm3,https://www.lacoopeencasa.coop/producto/limpiador-de-piso-procenex-lavanda-1800cm3/244488,7791130002776,0.57,llm-none,
+6e119e51-8e04-4f57-80c0-4379e9bdb6c8,lacoopeencasa,LIMPIADOR DE PISO POETT FRESCURA DE LAVANDA 4000cm3,https://www.lacoopeencasa.coop/producto/limpiador-de-piso-poett-frescura-de-lavanda-4000cm3/281708,7793253003500,0.78,llm-none,
+9afe830f-9792-445f-b8e7-4d27929492c9,lacoopeencasa,AROMATIZANTE DE AMBIENTE HARPER´S LAVANDA 220cm3,https://www.lacoopeencasa.coop/producto/aromatizante-de-ambiente-harper-s-lavanda-220cm3/311889,7793253041014,0.57,llm-none,
+bcd64f82-abf5-43ad-833d-75886651f6bc,lacoopeencasa,LAVANDINA AYUDÍN ORIGINAL 4000cm3,https://www.lacoopeencasa.coop/producto/lavandina-ayudin-original-4000cm3/313681,7793253003791,0.80,llm-none,
+d0120cf5-3a4f-4456-a755-ee15d9fe0cf6,lacoopeencasa,LAVANDINA AYUDÍN ORIGINAL 1000cm3,https://www.lacoopeencasa.coop/producto/lavandina-ayudin-original-1000cm3/139874,7793253003791,0.80,llm-none,
+178ec67c-cc89-49d5-aeb0-40a30c9e7ec2,lacoopeencasa,LAVANDINA AYUDÍN GLACIAR TRIPLE PODER 2000cm3,https://www.lacoopeencasa.coop/producto/lavandina-ayudin-glaciar-triple-poder-2000cm3/282765,7793253003746,0.86,llm:1.00,7793253003753
+007320c0-3ee2-4179-9de1-1fde8036471e,lacoopeencasa,LAVANDINA AYUDÍN GLACIAR TRIPLE PODER 1000cm3,https://www.lacoopeencasa.coop/producto/lavandina-ayudin-glaciar-triple-poder-1000cm3/282763,7793253003746,0.86,llm:1.00,7793253003746
+1763bb52-3965-4529-9af7-edeaa8bd8bcd,lacoopeencasa,LAVANDINA AYUDÍN LAVANDA TRIPLE PODER 1000cm3,https://www.lacoopeencasa.coop/producto/lavandina-ayudin-lavanda-triple-poder-1000cm3/282762,7793253003722,0.86,llm:1.00,7793253003722
+45298258-f1f4-46db-901e-4316fce0c5f2,lacoopeencasa,QUITAMANCHAS TRENET HYPERACTIVE BOLILLA 120cm3,https://www.lacoopeencasa.coop/producto/quitamanchas-trenet-hyperactive-bolilla-120cm3/225820,7793253401030,0.67,llm-none,
+96175d32-7409-4a25-a5ab-ff70fa387788,lacoopeencasa,QUITAMANCHAS AYUDÍN ROPA COLORES VIVOS 700cm3,https://www.lacoopeencasa.coop/producto/quitamanchas-ayudin-ropa-colores-vivos-700cm3/282062,7793253003234,0.71,llm:1.00,7793253003418
+e46cf291-432d-4654-8a99-84e5a2844a21,lacoopeencasa,QUITAMANCHAS AYUDÍN ROPA BLANCOS INTENSOS 2000cm3,https://www.lacoopeencasa.coop/producto/quitamanchas-ayudin-ropa-blancos-intensos-2000cm3/284919,7793253004774,0.71,llm-none,
+6e24bd2f-b482-4407-aa20-7e979147a69d,lacoopeencasa,QUITAMANCHAS AYUDÍN ROPA BLANCOS INTENSOS 1000cm3,https://www.lacoopeencasa.coop/producto/quitamanchas-ayudin-ropa-blancos-intensos-1000cm3/284918,7793253004774,0.71,llm-none,
+4041ebc1-1761-48aa-8971-5f887b9e6082,lacoopeencasa,QUITAMANCHAS AYUDÍN ROPA BLANCOS SUPREMOS DOYPACK 650cm3,https://www.lacoopeencasa.coop/producto/quitamanchas-ayudin-ropa-blancos-supremos-doypack-650cm3/279711,7793253002589,0.63,llm:1.00,7793253003258
+5457708a-6d56-4dbf-8240-22bca635b060,lacoopeencasa,QUITAMANCHAS AYUDÍN ROPA BLANCOS SUPREMOS 400cm3,https://www.lacoopeencasa.coop/producto/quitamanchas-ayudin-ropa-blancos-supremos-400cm3/279931,7793253002589,0.71,llm-none,
+d618bc63-3175-403d-bfd3-92427313bc4e,lacoopeencasa,DESODORANTE ATOMIZADOR GLADE TOQUE LAVANDA REPUESTO 9cm3,https://www.lacoopeencasa.coop/producto/desodorante-atomizador-glade-toque-lavanda-repuesto-9cm3/286459,7790520996145,0.63,llm-none,
+f40f31fc-3c1c-4e25-bcae-ee1c1a65c659,lacoopeencasa,CANASTA SÓLIDA PARA INODORO VIM CITRUS PODER 4 EN 1 35grs,https://www.lacoopeencasa.coop/producto/canasta-solida-para-inodoro-vim-citrus-poder-4-en-1-35grs/311176,7790520028938,0.40,llm-none,
+c0966348-f3b6-429c-bd83-7c2d42466dd5,maxiconsumo,DESINFECTANTE LYSOFORM ORIGINAL 285 CC,https://maxiconsumo.com/sucursal_moreno/limpieza/desinfectante-lysoform-original-285-cc-25245.html,7790520995285,0.67,llm-none,
+e5eaa46a-2653-4128-88a6-308741b04ade,maxiconsumo,LAVANDINA AYUDIN ROPA BLANCO 2 LT,https://maxiconsumo.com/sucursal_moreno/limpieza/lavandina-ayudin-ropa-blanco-2-lt-6132.html,7793253002862,0.67,llm-none,
+7dd5b456-2903-4b08-bd98-a236b0b027fa,maxiconsumo,LAVANDINA AYUDIN ROPA BLANCO 1 LT,https://maxiconsumo.com/sucursal_moreno/limpieza/lavandina-ayudin-ropa-blanco-1-lt-3126.html,7793253002862,0.67,llm-none,
+f01abac4-1e93-44ec-aa40-73cf2e101a06,lacoopeencasa,LIMPIADOR CIF EXPERT ANTIGRASA GATILLO 500cm3,https://www.lacoopeencasa.coop/producto/limpiador-de-cocina-cif-expert-antigrasa-gatillo-500cm3/309881,7791290795594,0.71,llm-none,

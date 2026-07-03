@@ -74,6 +74,7 @@ scraper/
 │   ├── setup-db.ts                    ← seed supermarket rows
 │   ├── scrape-url.ts                  ← full pipeline test for any URL
 │   ├── import-urls.ts                 ← bulk-import URLs from a text file
+│   ├── heal-eans.ts                   ← one-time backfill of catalog EANs onto EAN-less products
 │   └── setup-ec2.sh                   ← one-shot bootstrap for a fresh Ubuntu EC2 (Phase 5)
 └── src/
     ├── adapters/
@@ -98,8 +99,9 @@ scraper/
     │   ├── createAlert.ts             ← DB insert + optional Telegram
     │   └── aggregate.ts               ← per-supermarket aggregation
     ├── ingest/
-    │   └── index.ts                   ← detect supermarket + ensure rows + optional first scrape (used by scripts AND POST /v1/products); accepts a forced `ean`
-    ├── discovery/                     ← reusable EAN-discovery core (see docs/PRODUCT_MANAGEMENT.md)
+    │   ├── index.ts                   ← detect supermarket + ensure rows + optional first scrape (used by scripts AND POST /v1/products); accepts a forced `ean`
+    │   └── bindEan.ts                 ← bind an EAN-less mapping to the canonical master (merge + enrich; heals blank export columns)
+    ├── discovery/                     ← reusable EAN-discovery core + missing-EAN sweep helpers + eanMatch.ts (heal suggestions) + eanJudge.ts (LLM adjudication) (see docs/PRODUCT_MANAGEMENT.md)
     │   └── index.ts                   ← discoverEanAtSupermarket / EanEverywhere / AllEansAtSupermarket (used by CLI + discovery worker)
     ├── revistas/                      ← magazine (revista) pipeline — see docs/REVISTA_REVIEW.md
     │   ├── sources.ts                 ← cheap discovery (dedup hash) + lazy download per strategy
@@ -156,6 +158,7 @@ scraper/
 | `npm run test:telegram`           | Sends one of each severity to your bot                | Verify Telegram setup                                  |
 | `npm run scrape:url -- <url>`     | Full pipeline test for a single URL (bypasses queue)  | Verify a supermarket works end-to-end without Redis    |
 | `npm run scrape:bulk -- <file>`   | Bulk-import URLs from a text file (one per line)      | Add many products at once; idempotent, safe to re-run  |
+| `npx tsx --env-file=.env scripts/heal-eans.ts [--judge] [--auto] [--apply=<csv>]` | Backfill catalog EANs onto EAN-less products (fixes blank export columns); `--judge` adds an LLM adjudication pass | One-time backlog cleanup: report → (judge) → confirm CSV → apply. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
 | `npm run revistas:run -- [--super=<id>] [--pages=1-8] [--force]` | Run the magazine (revista) pipeline manually | Test/backfill a magazine chain; needs `OPENAI_API_KEY` |
 | `npm run orchestrator:run-now`    | Run a one-shot daily scrape immediately (needs Redis) | Manual trigger, e.g., backfill                         |
 | `npm run apikey:create -- <name>` | Generate an API key, store hash, print plaintext once | Granting access to a new consumer (frontend, etc.)     |
@@ -347,6 +350,6 @@ Track the build phases (see `plan.md` for full breakdown):
 - **Phase 3** — Add a Playwright-based supermarket (deferred until next supermarket chosen)
 - **Phase 4** — Express API: all routes (`products`, `supermarkets`, `snapshots`, `runs`, `alerts`, `health`), X-API-Key auth (SHA-256 + cache), pagination, error envelope, CORS, request logging. End-to-end smoke tested. Carrefour adapter added (VTEX-based), Coto adapter refactored to expose `resolveExternalId`.
 - [~] **Phase 5** — Deploy: artifacts written (`scripts/setup-ec2.sh`, `Caddyfile`, `.github/workflows/deploy.yml`, `DEPLOY.md`). User performs AWS setup; first deploy & GitHub Actions wiring still pending.
-- **Phase 6** — Scale: more supermarkets, monitoring tuning. **Product management** (see `docs/PRODUCT_MANAGEMENT.md`): per-mapping pause/delete, runtime-editable catalog (`catalog_extra_eans`, migration 007), async EAN discovery (`/v1/data/discover` on the `discovery` queue), pause-aware coverage.
+- **Phase 6** — Scale: more supermarkets, monitoring tuning. **Product management** (see `docs/PRODUCT_MANAGEMENT.md`): per-mapping pause/delete, runtime-editable catalog (`catalog_extra_eans`, migration 007), async EAN discovery (`/v1/data/discover` on the `discovery` queue), pause-aware coverage, weekly coverage **sweep** (`SWEEP_CRON`, re-searches missing EANs + Telegram summary), and **EAN healing** (`PATCH /v1/supermarket-products/:id { ean }` + `GET /v1/products/missing-ean` → `src/ingest/bindEan.ts`) to fix blank export columns.
 
 When completing a phase, mark it done here AND in `plan.md` (section 10).

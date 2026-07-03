@@ -21,7 +21,7 @@ import cron from 'node-cron';
 import { env } from '../shared/env.js';
 import { logger } from '../shared/logger.js';
 import { initSentry, captureError } from '../shared/sentry.js';
-import { closeAllQueues } from '../shared/queue.js';
+import { closeAllQueues, getDiscoveryQueue } from '../shared/queue.js';
 import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
@@ -83,6 +83,21 @@ function parseSupermarketArg(argv: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Enqueue the weekly coverage sweep (one job on the `discovery` queue). The
+ * discovery worker fans it out across every active + searchable chain,
+ * re-searching only the MISSING EANs and Telegram-summarizing what it added.
+ */
+async function enqueueCoverageSweep(): Promise<void> {
+  try {
+    const job = await getDiscoveryQueue().add('discover', { scope: 'sweep' });
+    logger.info({ jobId: job.id }, 'weekly coverage sweep enqueued');
+  } catch (err) {
+    logger.error({ err }, 'failed to enqueue coverage sweep');
+    captureError(err, { phase: 'coverage-sweep' });
+  }
+}
+
 async function runFinalizerWithErrorHandling(): Promise<void> {
   try {
     const finalized = await finalizePendingRuns();
@@ -117,15 +132,26 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Validate the cron expression before scheduling
+  // Manual one-shot sweep (handy for testing the weekly job on demand).
+  if (process.argv.includes('--sweep-now')) {
+    logger.info('--sweep-now: enqueuing coverage sweep');
+    await enqueueCoverageSweep();
+    process.exit(0);
+  }
+
+  // Validate the cron expressions before scheduling
   if (!cron.validate(env.SCRAPE_CRON)) {
     logger.fatal({ cron: env.SCRAPE_CRON }, 'invalid SCRAPE_CRON expression');
     process.exit(1);
   }
+  if (!cron.validate(env.SWEEP_CRON)) {
+    logger.fatal({ cron: env.SWEEP_CRON }, 'invalid SWEEP_CRON expression');
+    process.exit(1);
+  }
 
   logger.info(
-    { cron: env.SCRAPE_CRON, tz: env.TZ },
-    'orchestrator: scheduling daily scrape',
+    { cron: env.SCRAPE_CRON, sweepCron: env.SWEEP_CRON, tz: env.TZ },
+    'orchestrator: scheduling daily scrape + weekly sweep',
   );
 
   // 1. Daily scrape cron.
@@ -142,6 +168,11 @@ async function main(): Promise<void> {
       ),
     { timezone: env.TZ },
   );
+
+  // 1b. Weekly coverage sweep cron.
+  cron.schedule(env.SWEEP_CRON, () => void enqueueCoverageSweep(), {
+    timezone: env.TZ,
+  });
 
   // 2. Finalizer interval — also run once at startup to catch any stuck runs
   // from a previous process that died mid-run.

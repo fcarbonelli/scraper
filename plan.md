@@ -696,10 +696,18 @@ Decisions locked in:
   the hardcoded `TAXONOMY_BY_EAN`; coverage/discovery read the union via
   `src/shared/catalog.ts`. CRUD at `/v1/catalog/eans`.
 - Async EAN discovery: `POST /v1/data/discover` (scopes: one EAN across all searchable
-  chains / all EANs at one chain / one EAN at one chain) runs on the `discovery` BullMQ
-  queue; poll `GET /v1/data/discover/:jobId`. Core in `src/discovery/`, worker in
-  `src/worker/discoveryWorker.ts`.
+  chains / all EANs at one chain / one EAN at one chain / weekly `sweep`) runs on the
+  `discovery` BullMQ queue; poll `GET /v1/data/discover/:jobId`. Core in `src/discovery/`,
+  worker in `src/worker/discoveryWorker.ts`.
+- Weekly coverage sweep: `SWEEP_CRON` (default Sunday 02:00) enqueues a `sweep` job that
+  re-searches only the MISSING (EAN × searchable chain) pairs — products that came back
+  in stock — auto-ingests them (EAN-bound), and Telegram-summarizes what it added. Paused
+  products are never resurrected.
 - Coverage is now pause-aware (`paused` count + per-product `active`).
+- EAN healing: `PATCH /v1/supermarket-products/:id { ean }` binds an EAN-less mapping to
+  the canonical master (merging + enriching from the catalog; price history preserved via
+  `src/ingest/bindEan.ts`). Worklist at `GET /v1/products/missing-ean`. Fixes blank
+  general columns in the client_base export.
 
 ---
 

@@ -343,9 +343,11 @@ const DiscoverBody = z
   .object({
     ean: z.string().trim().regex(/^\d{8,14}$/).optional(),
     supermarket: z.string().trim().min(1).max(100).optional(),
+    /** Coverage sweep: re-search MISSING EANs at every searchable chain. */
+    sweep: z.boolean().optional(),
   })
-  .refine((b) => b.ean || b.supermarket, {
-    message: 'provide at least one of: ean, supermarket',
+  .refine((b) => b.ean || b.supermarket || b.sweep, {
+    message: 'provide at least one of: ean, supermarket, sweep',
   });
 
 dataRouter.post('/discover', async (req: Request, res: Response) => {
@@ -353,7 +355,11 @@ dataRouter.post('/discover', async (req: Request, res: Response) => {
 
   let job: DiscoveryJobData;
   let targets: string[];
-  if (body.ean && body.supermarket) {
+  if (body.sweep) {
+    job = { scope: 'sweep' };
+    // Actual active-chain filtering happens at run time; report the searchable universe.
+    targets = adaptersWithSearch();
+  } else if (body.ean && body.supermarket) {
     job = { scope: 'ean_at_supermarket', ean: body.ean, supermarketId: body.supermarket };
     targets = [body.supermarket];
   } else if (body.ean) {

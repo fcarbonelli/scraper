@@ -160,6 +160,30 @@ politeness delays), calls the discovery core, and reports progress via
 `job.updateProgress({ total, done, found, ingested, notFound, errors })`. The final
 `returnvalue` holds the per-target results array.
 
+### Weekly coverage sweep
+
+Products go missing at a chain when they're temporarily out of stock / delisted;
+we may never have found them manually. A **weekly sweep** re-searches only the
+**missing** `(EAN × searchable chain)` pairs so returning products get picked up
+automatically.
+
+- **Scope `sweep`** on the discovery queue. The worker (`runSweep` in
+  `src/worker/discoveryWorker.ts`) loads active supermarkets, intersects with
+  `adaptersWithSearch()`, and for each computes `missingEansForSupermarket()`
+  (catalog − covered, where **covered includes paused** so a paused product is
+  never resurrected). It searches only those, auto-ingesting matches (EAN-bound,
+  so no orphan masters), then sends a **Telegram summary** of what it added.
+- **Cron**: `env.SWEEP_CRON` (default `0 2 * * 0` — Sunday 02:00 BA time),
+  scheduled in `src/orchestrator/index.ts`. It just enqueues one `sweep` job.
+- **Manual triggers**: `POST /v1/data/discover { "sweep": true }`, or
+  `node dist/orchestrator/index.js --sweep-now`.
+- **No not-found cache** (by decision): every missing pair is re-searched each
+  week. Cost shrinks as coverage grows; add a `last_searched` table later only if
+  it becomes a problem.
+
+Cost: ≤ `catalogSize × searchableChains` searches, minus covered — the missing
+subset only, at ~1.5s politeness. Runs as one job (discovery worker), off-peak.
+
 ### Discovery endpoints (`/v1/data/discover`)
 
 - **`POST /v1/data/discover`** — body one of `{ ean }`, `{ supermarket }`, or
@@ -181,6 +205,61 @@ No new table for job state — BullMQ job progress + returnvalue is enough. (A
 3. Chains where the EAN wasn't found (or `hasSearch:false`) stay **missing** in the
    **Cobertura** detail view — the operator's shopping list. They paste a URL there
    via the existing add flow (see the EAN-binding note below).
+
+### Healing existing EAN-less products (backfill + merge)
+
+Products ingested from EAN-less sites *before* the `ean` binding existed sit as
+orphan masters (`ean = NULL`, no taxonomy) and export with blank general columns.
+`src/ingest/bindEan.ts` `bindMappingToEan(smpId, ean)` heals them:
+
+1. Find (or promote-in-place / create) the **canonical** master for the EAN.
+2. Re-point the mapping's `product_id` to it. **Snapshots key on the mapping**, so
+   the price series is preserved with no snapshot migration.
+3. Enrich the canonical master's general columns from the catalog taxonomy.
+4. Delete the old master if it has no remaining mappings.
+
+Exposed at **`PATCH /v1/supermarket-products/:id { ean }`**. The heal worklist is
+**`GET /v1/products/missing-ean`** (masters with `ean IS NULL` + their mappings).
+
+**Suggestion engine** (`src/discovery/eanMatch.ts`): ranks candidate EANs for an
+orphan by name/brand token overlap against (a) the catalog taxonomy and (b) the
+scraped names of sibling products that already carry each EAN — the sibling names
+are the strongest signal. Each suggestion gets a `score` (0..1) and a `confidence`
+(`high` = score ≥ 0.7 with a clear margin; `medium` ≥ 0.45; else `low`). Cached
+5 min. Shared by the CLI **and** `GET /v1/products/missing-ean` (which returns
+`suggestions[]` per row + a `?min_confidence=` filter) so a frontend can offer
+one-click confirm. Swappable for the embeddings/LLM matcher in `src/revistas/match.ts`
+behind the same interface if token overlap proves too weak.
+
+Two matcher refinements matter: **placeholder names** ("Unknown product" — legacy
+failed-parse rows) are excluded from the index (they'd otherwise make every no-name
+orphan match at 1.0), and when an orphan's name is a placeholder the **URL slug** is
+used as the signal instead (e.g. `.../lavandina-odex-comun-4-lt` is matchable even
+with no name). Opaque URLs with no slug (MercadoLibre `/p/MLA…`) stay unmatchable —
+those need a re-scrape to recover the EAN, not fuzzy matching.
+
+**LLM judge** (`src/discovery/eanJudge.ts`): for the ambiguous medium/low band, an
+LLM (reuses `REVISTA_JUDGE_MODEL` + `OPENAI_API_KEY`) adjudicates each orphan against
+its top candidates — confirming the clear ones and rejecting wrong size/variant
+matches. Batched; degrades gracefully to `llm-none` if the key is missing.
+
+**One-time backlog cleanup** (`scripts/heal-eans.ts`). Because PowerShell swallows the
+`--` in `npm run heal:eans -- <flags>`, invoke it directly:
+`npx tsx --env-file=.env scripts/heal-eans.ts <flags>` (the `npm run heal:eans` alias
+still works for the no-flag report, and `npm run … -- <flags>` works on bash/CI).
+
+- Report + CSV (high rows pre-filled in `confirm_ean`): no flags.
+- `--judge` — LLM-adjudicate the not-high band; pre-fills high + LLM-confirmed rows.
+- `--apply=<csv>` — bind a curated CSV via `bindMappingToEan`.
+- `--auto` — bind high-confidence with no CSV; `--judge --auto` binds high + LLM-confirmed.
+- Tuning: `--auto-confidence=medium`, `--auto --min-score=N`, `--judge-threshold=0.7`, `--limit=N`.
+
+We can't fully automate blind because we never stored which catalog EAN each pasted
+URL was for — hence confidence + judge + a confirm step for the genuinely ambiguous tail.
+Because the master is one-per-EAN and shared across chains, once the EAN is set
+*every* chain's rows inherit the same taxonomy — no cross-supermarket copying is
+needed. (Discovery-ingested products are already EAN-bound; the daily scrape never
+creates orphans.)
 
 ### Manual-add EAN binding (gotcha)
 

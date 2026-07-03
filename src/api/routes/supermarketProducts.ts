@@ -22,6 +22,7 @@ import { ApiError } from '../lib/apiError.js';
 import { success } from '../lib/envelope.js';
 import { parseBody } from '../lib/parseQuery.js';
 import { LIFECYCLE_STATUSES } from '../../orchestrator/publish.js';
+import { bindMappingToEan } from '../../ingest/bindEan.js';
 
 export const supermarketProductsRouter = Router();
 
@@ -34,18 +35,31 @@ function requireId(req: Request): string {
 }
 
 // =============================================================================
-// PATCH /v1/supermarket-products/:id  — pause / resume
+// PATCH /v1/supermarket-products/:id  — pause / resume and/or bind an EAN
 //
-// Flip `is_active`. When false, the next daily run skips this mapping. The
-// worker also reconciles active supermarkets every ~60s; product-level pausing
-// takes effect on the next enqueue (no redeploy).
+// Body may set `is_active` (pause/resume) and/or `ean` (bind this mapping to a
+// catalog EAN). At least one is required.
+//
+//   - `is_active=false` → the next daily run skips this mapping.
+//   - `ean` → re-points the mapping to the canonical master for that EAN,
+//     enriches general columns from the catalog taxonomy, and drops the
+//     now-orphan blank master. Price history is preserved (snapshots key on the
+//     mapping). Use this to heal EAN-less products so the export stops showing
+//     blank Categoria/Marca/EAN cells. See docs/PRODUCT_MANAGEMENT.md.
 // =============================================================================
 
-const PauseBody = z.object({ is_active: z.boolean() });
+const PatchBody = z
+  .object({
+    is_active: z.boolean().optional(),
+    ean: z.string().trim().regex(/^\d{8,14}$/).optional(),
+  })
+  .refine((b) => b.is_active !== undefined || b.ean !== undefined, {
+    message: 'provide at least one of: is_active, ean',
+  });
 
 supermarketProductsRouter.patch('/:id', async (req: Request, res: Response) => {
   const id = requireId(req);
-  const body = parseBody(req, PauseBody);
+  const body = parseBody(req, PatchBody);
 
   const existing = await db
     .from('supermarket_products')
@@ -55,16 +69,29 @@ supermarketProductsRouter.patch('/:id', async (req: Request, res: Response) => {
   if (existing.error) throw existing.error;
   if (!existing.data) throw ApiError.notFound('Supermarket product');
 
+  // Bind the EAN first (may re-point product_id + merge masters).
+  let bind: Awaited<ReturnType<typeof bindMappingToEan>> | undefined;
+  if (body.ean !== undefined) {
+    bind = await bindMappingToEan(id, body.ean);
+  }
+
+  if (body.is_active !== undefined) {
+    const upd = await db
+      .from('supermarket_products')
+      .update({ is_active: body.is_active })
+      .eq('id', id);
+    if (upd.error) throw upd.error;
+    logger.info({ smpId: id, isActive: body.is_active }, 'supermarket_product active flag changed');
+  }
+
   const { data, error } = await db
     .from('supermarket_products')
-    .update({ is_active: body.is_active })
-    .eq('id', id)
     .select('id, supermarket_id, product_id, external_id, external_url, is_active')
+    .eq('id', id)
     .single();
   if (error) throw error;
 
-  logger.info({ smpId: id, isActive: body.is_active }, 'supermarket_product active flag changed');
-  res.json(success(data));
+  res.json(success({ ...data, ...(bind ? { ean_binding: bind } : {}) }));
 });
 
 // =============================================================================

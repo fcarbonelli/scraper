@@ -30,6 +30,9 @@ const EnvSchema = z.object({
 
   // Scraping
   SCRAPE_CRON: z.string().default('0 6 * * *'),
+  // Weekly coverage sweep: re-search MISSING catalog EANs at every searchable
+  // chain to pick up products that came back in stock. Default: Sunday 02:00.
+  SWEEP_CRON: z.string().default('0 2 * * 0'),
   DEFAULT_RATE_LIMIT_MS: z.coerce.number().int().nonnegative().default(500),
   DEFAULT_CONCURRENCY: z.coerce.number().int().positive().default(3),
 

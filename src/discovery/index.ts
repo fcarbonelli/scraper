@@ -17,6 +17,7 @@
 import { getAdapter, listAdapters } from '../adapters/registry.js';
 import { getCatalogEans } from '../shared/catalog.js';
 import { ingestUrl } from '../ingest/index.js';
+import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 
 /** Outcome of discovering one EAN at one supermarket. */
@@ -121,6 +122,58 @@ export function adaptersWithSearch(): string[] {
   return listAdapters()
     .filter((a) => typeof a.searchByEan === 'function')
     .map((a) => a.id);
+}
+
+/**
+ * EANs already covered at a supermarket — i.e. any mapping exists (active OR
+ * paused). Paused counts as covered so a weekly sweep never resurrects a product
+ * an operator intentionally paused.
+ */
+export async function coveredEansForSupermarket(
+  supermarketId: string,
+): Promise<Set<string>> {
+  const { data, error } = await db
+    .from('supermarket_products')
+    .select('products:product_id ( ean )')
+    .eq('supermarket_id', supermarketId);
+  if (error) throw error;
+  const set = new Set<string>();
+  for (const row of data ?? []) {
+    const product = Array.isArray(row.products) ? row.products[0] : row.products;
+    const ean = product?.ean;
+    if (ean) set.add(ean);
+  }
+  return set;
+}
+
+/** Catalog EANs NOT yet covered at a supermarket (the sweep's worklist). */
+export async function missingEansForSupermarket(
+  supermarketId: string,
+): Promise<string[]> {
+  const catalog = await getCatalogEans();
+  const covered = await coveredEansForSupermarket(supermarketId);
+  return Array.from(catalog.keys()).filter((ean) => !covered.has(ean));
+}
+
+/**
+ * Re-search only the MISSING catalog EANs at one chain (products that came back
+ * in stock / catalog since we last looked). Used by the weekly coverage sweep.
+ */
+export async function discoverMissingEans(
+  supermarketId: string,
+  delayMs = 1500,
+  onProgress?: (o: DiscoverOutcome) => void,
+): Promise<DiscoverOutcome[]> {
+  const missing = await missingEansForSupermarket(supermarketId);
+  const outcomes: DiscoverOutcome[] = [];
+  for (const ean of missing) {
+    const outcome = await discoverEanAtSupermarket(ean, supermarketId);
+    outcomes.push(outcome);
+    onProgress?.(outcome);
+    const gap = outcome.result === 'not_found' ? Math.min(delayMs, 300) : delayMs;
+    if (gap > 0) await sleep(gap);
+  }
+  return outcomes;
 }
 
 /** Ingest a found URL, retrying with backoff on rate-limit (429) errors. */

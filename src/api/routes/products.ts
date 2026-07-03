@@ -18,6 +18,7 @@ import { logger } from '../../shared/logger.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
+import { buildEanIndex, suggestEansFromIndex } from '../../discovery/eanMatch.js';
 
 export const productsRouter = Router();
 
@@ -210,6 +211,68 @@ productsRouter.post('/bulk-import', async (req: Request, res: Response) => {
       failures,
     }),
   );
+});
+
+// =============================================================================
+// GET /v1/products/missing-ean
+//
+// Master products with NO EAN — i.e. EAN-less-site products that were ingested
+// without being bound to a catalog EAN. These export with blank general columns
+// (Categoria, Marca, EAN, …) and never dedupe with the "real" master. Each row
+// includes its supermarket mappings (chain + URL) AND ranked `suggestions`
+// (candidate EANs + confidence) so a frontend can offer one-click "confirm this
+// match". Bind via PATCH /v1/supermarket-products/:id { ean }.
+// See docs/PRODUCT_MANAGEMENT.md.
+//
+// Query: `?min_confidence=high|medium|low` (default low) filters to rows whose
+// TOP suggestion is at least that confident — handy for a "review high-confidence
+// matches" queue. Registered BEFORE `/:id` so "missing-ean" isn't captured as id.
+// =============================================================================
+
+const MissingEanQuery = z.object({
+  min_confidence: z.enum(['high', 'medium', 'low']).default('low'),
+});
+const CONFIDENCE_RANK: Record<string, number> = { low: 0, medium: 1, high: 2 };
+
+productsRouter.get('/missing-ean', async (req: Request, res: Response) => {
+  const q = parseQuery(req, MissingEanQuery);
+  const page = req.pagination?.page ?? 1;
+  const limit = req.pagination?.limit ?? 50;
+  const offset = req.pagination?.offset ?? (page - 1) * limit;
+
+  const { data, error, count } = await db
+    .from('products')
+    .select(
+      `id, name, brand, category,
+       mappings:supermarket_products ( id, supermarket_id, external_url, is_active )`,
+      { count: 'exact' },
+    )
+    .is('ean', null)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (error) throw error;
+
+  // Attach ranked EAN suggestions (cached index; scores this page only).
+  const index = await buildEanIndex();
+  const threshold = CONFIDENCE_RANK[q.min_confidence] ?? 0;
+  const enriched = (data ?? [])
+    .map((p) => {
+      const mappings = (p.mappings ?? []) as Array<{ external_url?: string }>;
+      return {
+        ...p,
+        suggestions: suggestEansFromIndex(index, {
+          name: (p.name as string) ?? '',
+          brand: (p.brand as string) ?? null,
+          url: mappings[0]?.external_url ?? null,
+        }),
+      };
+    })
+    .filter((p) => {
+      const top = p.suggestions[0];
+      return top ? (CONFIDENCE_RANK[top.confidence] ?? 0) >= threshold : threshold === 0;
+    });
+
+  res.json(paginated(enriched, count ?? 0, page, limit));
 });
 
 // =============================================================================

@@ -19,10 +19,13 @@ import {
   type DiscoveryJobData,
 } from '../shared/queue.js';
 import { getCatalogEans } from '../shared/catalog.js';
+import { db } from '../shared/db.js';
+import { notifyAlert } from '../alerts/notify.js';
 import {
   discoverEanAtSupermarket,
   discoverEanEverywhere,
   discoverAllEansAtSupermarket,
+  missingEansForSupermarket,
   adaptersWithSearch,
   type DiscoverOutcome,
 } from '../discovery/index.js';
@@ -58,6 +61,11 @@ function tally(progress: DiscoveryProgress, o: DiscoverOutcome): void {
 async function runJob(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
   const data = job.data;
   const log = logger.child({ discoveryJobId: job.id, scope: data.scope });
+
+  // Weekly coverage sweep — re-search missing EANs across every searchable chain.
+  if (data.scope === 'sweep') {
+    return runSweep(job);
+  }
 
   // A single EAN at a single chain — trivial, no fan-out.
   if (data.scope === 'ean_at_supermarket') {
@@ -99,6 +107,87 @@ async function runJob(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
   const outcomes = await discoverAllEansAtSupermarket(data.supermarketId, 1500, cb);
   log.info({ progress }, 'discovery job complete');
   return outcomes;
+}
+
+/**
+ * Weekly coverage sweep: for every active + searchable supermarket, re-search
+ * the catalog EANs that aren't mapped there yet (products that were out of
+ * stock / absent last time may have returned). Auto-ingests any found, then
+ * sends a Telegram summary of what was added.
+ */
+async function runSweep(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
+  const log = logger.child({ discoveryJobId: job.id, scope: 'sweep' });
+
+  // Active supermarkets (DB) that also have EAN search (adapter).
+  const { data: activeRows, error } = await db
+    .from('supermarkets')
+    .select('id')
+    .eq('is_active', true);
+  if (error) throw error;
+  const searchable = new Set(adaptersWithSearch());
+  const chains = (activeRows ?? [])
+    .map((r) => r.id as string)
+    .filter((id) => searchable.has(id));
+
+  // Plan up front so progress has an exact denominator and we don't double-query.
+  const plan: Array<{ id: string; missing: string[] }> = [];
+  for (const id of chains) {
+    plan.push({ id, missing: await missingEansForSupermarket(id) });
+  }
+  const total = plan.reduce((n, p) => n + p.missing.length, 0);
+  const progress = emptyProgress(total);
+  await job.updateProgress(progress);
+  log.info({ chains: chains.length, total }, 'coverage sweep starting');
+
+  const outcomes: DiscoverOutcome[] = [];
+  const addedByChain: Record<string, number> = {};
+  for (const { id, missing } of plan) {
+    for (const ean of missing) {
+      const outcome = await discoverEanAtSupermarket(ean, id);
+      outcomes.push(outcome);
+      tally(progress, outcome);
+      await job.updateProgress(progress);
+      if (outcome.result === 'ingested') {
+        addedByChain[id] = (addedByChain[id] ?? 0) + 1;
+      }
+      // Be polite: short pause on misses, longer after a hit.
+      await sleep(outcome.result === 'not_found' ? 300 : 1500);
+    }
+  }
+
+  await sendSweepSummary(progress, addedByChain);
+  log.info({ progress, addedByChain }, 'coverage sweep complete');
+  return outcomes;
+}
+
+/** Telegram summary of a sweep — only the "new products added" story. */
+async function sendSweepSummary(
+  progress: DiscoveryProgress,
+  addedByChain: Record<string, number>,
+): Promise<void> {
+  const chainsWithAdds = Object.keys(addedByChain).length;
+  const lines = Object.entries(addedByChain)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, n]) => `• ${id}: +${n}`);
+
+  await notifyAlert({
+    severity: 'info',
+    title:
+      progress.ingested > 0
+        ? `Weekly sweep: added ${progress.ingested} product(s) across ${chainsWithAdds} chain(s)`
+        : 'Weekly sweep: no new products found',
+    body: lines.length > 0 ? lines.join('\n') : undefined,
+    context: {
+      searched: progress.total,
+      found: progress.found,
+      ingested: progress.ingested,
+      errors: progress.errors,
+    },
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Build and start the discovery worker. */

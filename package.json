@@ -33,6 +33,8 @@
     "discover": "tsx --env-file=.env scripts/discover-products.ts",
     "discover:search": "tsx --env-file=.env scripts/discover-products.ts --search-only",
     "rediscover": "tsx --env-file=.env scripts/rediscover-products.ts",
+    "heal:eans": "tsx --env-file=.env scripts/heal-eans.ts",
+    "heal:ml": "tsx --env-file=.env scripts/heal-ml.ts",
     "scrape:url": "tsx --env-file=.env scripts/scrape-url.ts",
     "scrape:bulk": "tsx --env-file=.env scripts/import-urls.ts",
     "revistas:run": "tsx --env-file=.env scripts/scrape-revistas.ts",
