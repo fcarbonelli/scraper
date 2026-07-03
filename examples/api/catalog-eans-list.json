@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "ean": "7793253005054",
+      "descriptionForms": "AERO DESINF AYUDIN 332 OR",
+      "category": "AERO",
+      "subcategory": "DESINF",
+      "brand": "AYUDIN",
+      "manufacturer": "GRUPO AYUDIN",
+      "format": "332",
+      "variety": "OR",
+      "builtin": true,
+      "created_at": null
+    },
+    {
+      "ean": "7791234567890",
+      "descriptionForms": "LAVANDINA NUEVA 1L",
+      "category": "LAVANDINAS",
+      "subcategory": "REG",
+      "brand": "AYUDIN",
+      "manufacturer": "GRUPO AYUDIN",
+      "format": "1000",
+      "variety": "REG",
+      "builtin": false,
+      "created_at": "2026-07-01T12:00:00.000Z"
+    }
+  ],
+  "meta": { "ts": "2026-07-03T18:30:00.000Z", "total": 213, "builtin": 211, "extra": 2 }
+}

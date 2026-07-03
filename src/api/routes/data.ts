@@ -385,6 +385,80 @@ dataRouter.post('/discover', async (req: Request, res: Response) => {
 });
 
 // =============================================================================
+// GET /v1/data/discover — list recent/active discovery jobs
+//
+//   ?status=active|all   active = queued+running (default); all = also finished
+//   ?limit=20            max jobs, newest first (cap 100)
+//
+// Light summary form (no results[] — fetch GET /discover/:jobId for that) so the
+// UI can re-attach to a running discovery after a reload and show recent jobs.
+// =============================================================================
+
+const DiscoverListQuery = z.object({
+  status: z.enum(['active', 'all']).default('active'),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+/** Normalize a BullMQ discovery job to the summary shape the UI expects. */
+async function summarizeDiscoveryJob(
+  job: Awaited<ReturnType<ReturnType<typeof getDiscoveryQueue>['getJob']>>,
+): Promise<Record<string, unknown>> {
+  if (!job) throw new Error('unreachable: null job');
+  const data = job.data as DiscoveryJobData;
+  const state = await job.getState();
+  const status =
+    state === 'completed' ? 'completed'
+    : state === 'failed' ? 'failed'
+    : state === 'active' ? 'running'
+    : 'queued';
+
+  const p = (typeof job.progress === 'object' && job.progress ? job.progress : null) as
+    | Record<string, number>
+    | null;
+  const progress = {
+    total: p?.total ?? 0,
+    done: p?.done ?? 0,
+    found: p?.found ?? 0,
+    ingested: p?.ingested ?? 0,
+    notFound: p?.notFound ?? 0,
+    errors: p?.errors ?? 0,
+  };
+
+  return {
+    jobId: job.id,
+    scope: data.scope,
+    ean: 'ean' in data ? data.ean : null,
+    supermarketId: 'supermarketId' in data ? data.supermarketId : null,
+    status,
+    // `targets` = units of work for this job (chains for ean/sweep, EANs for a
+    // whole-chain scope). progress.total carries exactly that once it starts.
+    targets: progress.total,
+    progress,
+    createdAt: new Date(job.timestamp).toISOString(),
+    finishedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+  };
+}
+
+dataRouter.get('/discover', async (req: Request, res: Response) => {
+  const q = parseQuery(req, DiscoverListQuery);
+  const queue = getDiscoveryQueue();
+
+  const types =
+    q.status === 'all'
+      ? (['active', 'waiting', 'delayed', 'completed', 'failed'] as const)
+      : (['active', 'waiting', 'delayed'] as const);
+
+  // Fetch a generous window, sort newest-first by enqueue time, then trim to
+  // `limit` before resolving each job's state (bounds the getState() calls).
+  const jobs = await queue.getJobs([...types], 0, 200);
+  jobs.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
+  const trimmed = jobs.filter((j): j is NonNullable<typeof j> => Boolean(j)).slice(0, q.limit);
+
+  const data = await Promise.all(trimmed.map((job) => summarizeDiscoveryJob(job)));
+  res.json(success(data));
+});
+
+// =============================================================================
 // GET /v1/data/discover/:jobId — poll discovery progress + results
 // =============================================================================
 

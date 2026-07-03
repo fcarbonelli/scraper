@@ -945,7 +945,7 @@ Returns `{ id, deleted: true, removed: { price_snapshots } }`.
 Runtime-editable supplement to the built-in EAN catalog. Full shapes:
 **`docs/PRODUCT_MANAGEMENT_API.md`**.
 
-- `GET /v1/catalog/eans` — list runtime-added EANs.
+- `GET /v1/catalog/eans?source=all|extra|builtin&search=&category=` — list the catalog. `source=extra` (default) keeps the original raw-rows contract; `builtin`/`all` return the normalized union view (each entry tagged `builtin` + `created_at`, plus `{ total, builtin, extra }` counts in `meta`). Powers the EAN picker / Catálogo browse.
 - `POST /v1/catalog/eans` — add a new official EAN (`{ ean, descriptionForms, ... , auto_discover? }`). With `auto_discover: true`, returns a `discovery` job handle.
 - `DELETE /v1/catalog/eans/:ean` — remove a runtime-added EAN (built-in EANs are immutable).
 
@@ -963,6 +963,13 @@ Enqueue a discovery job. Body is one of `{ ean }` (all searchable chains),
 `{ sweep: true }` (re-search missing EANs at every searchable chain — the weekly
 coverage sweep, also run automatically via `SWEEP_CRON`).
 Returns `{ jobId, scope, targets, status: "queued" }` (201).
+
+### `GET /v1/data/discover`
+
+List recent/active discovery jobs (`?status=active|all&limit=20`, newest first) so
+the UI can re-attach after a reload. Each item is the summary form
+`{ jobId, scope, ean, supermarketId, status, targets, progress, createdAt, finishedAt }`
+(no `results[]` — fetch the per-job endpoint for that).
 
 ### `GET /v1/data/discover/:jobId`
 

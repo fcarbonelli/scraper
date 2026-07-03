@@ -11,6 +11,8 @@
 
 export interface ResponseMeta {
   ts: string;          // ISO timestamp; useful for client cache busting
+  // Routes may attach extra summary fields (counts, etc.) alongside `ts`.
+  [key: string]: unknown;
 }
 
 export interface SuccessEnvelope<T> {
@@ -39,8 +41,11 @@ export interface ErrorEnvelope {
   };
 }
 
-export function success<T>(data: T): SuccessEnvelope<T> {
-  return { data, meta: { ts: new Date().toISOString() } };
+export function success<T>(
+  data: T,
+  extraMeta: Record<string, unknown> = {},
+): SuccessEnvelope<T> {
+  return { data, meta: { ts: new Date().toISOString(), ...extraMeta } };
 }
 
 export function paginated<T>(

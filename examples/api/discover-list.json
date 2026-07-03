@@ -1,0 +1,27 @@
+{
+  "data": [
+    {
+      "jobId": "disc_8f2a1c",
+      "scope": "ean",
+      "ean": "7791234567890",
+      "supermarketId": null,
+      "status": "running",
+      "targets": 18,
+      "progress": { "total": 18, "done": 11, "found": 6, "ingested": 6, "notFound": 5, "errors": 0 },
+      "createdAt": "2026-07-03T18:05:00.000Z",
+      "finishedAt": null
+    },
+    {
+      "jobId": "disc_7a1b90",
+      "scope": "supermarket",
+      "ean": null,
+      "supermarketId": "carrefour",
+      "status": "completed",
+      "targets": 211,
+      "progress": { "total": 211, "done": 211, "found": 40, "ingested": 40, "notFound": 171, "errors": 0 },
+      "createdAt": "2026-07-03T17:40:00.000Z",
+      "finishedAt": "2026-07-03T17:52:00.000Z"
+    }
+  ],
+  "meta": { "ts": "2026-07-03T18:30:00.000Z" }
+}

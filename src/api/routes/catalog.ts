@@ -16,10 +16,11 @@ import { db } from '../../shared/db.js';
 import { logger } from '../../shared/logger.js';
 import { ApiError } from '../lib/apiError.js';
 import { success } from '../lib/envelope.js';
-import { parseBody } from '../lib/parseQuery.js';
-import { invalidateCatalogCache, isBuiltInEan } from '../../shared/catalog.js';
+import { parseBody, parseQuery } from '../lib/parseQuery.js';
+import { getCatalogEans, invalidateCatalogCache, isBuiltInEan } from '../../shared/catalog.js';
 import { getDiscoveryQueue } from '../../shared/queue.js';
 import { adaptersWithSearch } from '../../discovery/index.js';
+import type { TaxonomyEntry } from '../../shared/taxonomy.js';
 
 export const catalogRouter = Router();
 
@@ -31,15 +32,88 @@ const EanSchema = z
 
 // =============================================================================
 // GET /v1/catalog/eans
+//
+//   ?source=extra|builtin|all   which slice of the catalog (default extra)
+//   ?search=<str>               case-insensitive over ean + descriptionForms + brand
+//   ?category=<str>             exact category filter
+//
+// source=extra preserves the original contract: raw catalog_extra_eans rows.
+// source=builtin|all return the normalized union view (with a `builtin` flag,
+// `created_at`, and { total, builtin, extra } counts in meta) so the frontend
+// can render an EAN picker / catalog browser over all 211 built-ins + extras.
 // =============================================================================
 
-catalogRouter.get('/eans', async (_req: Request, res: Response) => {
-  const { data, error } = await db
-    .from('catalog_extra_eans')
-    .select('ean, description_forms, category, subcategory, brand, manufacturer, format, variety, created_by, created_at')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  res.json(success(data ?? []));
+const ListEansQuery = z.object({
+  source: z.enum(['extra', 'builtin', 'all']).default('extra'),
+  search: z.string().trim().min(1).optional(),
+  category: z.string().trim().min(1).optional(),
+});
+
+/** Case-insensitive substring match over ean + descriptionForms + brand. */
+function matchesSearch(
+  needle: string,
+  ean: string,
+  descriptionForms: string | null,
+  brand: string | null,
+): boolean {
+  const hay = `${ean} ${descriptionForms ?? ''} ${brand ?? ''}`.toLowerCase();
+  return hay.includes(needle);
+}
+
+catalogRouter.get('/eans', async (req: Request, res: Response) => {
+  const q = parseQuery(req, ListEansQuery);
+  const search = q.search?.toLowerCase();
+
+  // --- source=extra: original contract (raw DB rows) ------------------------
+  if (q.source === 'extra') {
+    let query = db
+      .from('catalog_extra_eans')
+      .select('ean, description_forms, category, subcategory, brand, manufacturer, format, variety, created_by, created_at')
+      .order('created_at', { ascending: false });
+    if (q.category) query = query.eq('category', q.category);
+    const { data, error } = await query;
+    if (error) throw error;
+    let rows = data ?? [];
+    if (search) {
+      rows = rows.filter((r) => matchesSearch(search, r.ean, r.description_forms, r.brand));
+    }
+    res.json(success(rows));
+    return;
+  }
+
+  // --- source=builtin|all: normalized union view ----------------------------
+  // Pull created_at for extras (the union map doesn't carry it).
+  const extrasRes = await db.from('catalog_extra_eans').select('ean, created_at');
+  if (extrasRes.error) throw extrasRes.error;
+  const extraCreatedAt = new Map<string, string | null>();
+  for (const r of extrasRes.data ?? []) extraCreatedAt.set(r.ean, (r.created_at as string) ?? null);
+
+  const catalog = await getCatalogEans();
+
+  type CatalogEntry = TaxonomyEntry & { builtin: boolean; created_at: string | null };
+  let entries: CatalogEntry[] = [];
+  for (const [ean, tax] of catalog) {
+    const builtin = isBuiltInEan(ean);
+    if (q.source === 'builtin' && !builtin) continue;
+    if (q.category && tax.category !== q.category) continue;
+    if (search && !matchesSearch(search, ean, tax.descriptionForms, tax.brand)) continue;
+    entries.push({
+      ...tax,
+      builtin,
+      created_at: builtin ? null : (extraCreatedAt.get(ean) ?? null),
+    });
+  }
+
+  entries.sort((a, b) => a.descriptionForms.localeCompare(b.descriptionForms));
+
+  const builtinCount = entries.reduce((n, e) => (e.builtin ? n + 1 : n), 0);
+  res.json(
+    success(entries, {
+      total: entries.length,
+      builtin: builtinCount,
+      extra: entries.length - builtinCount,
+    }),
+  );
 });
 
 // =============================================================================

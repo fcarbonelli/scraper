@@ -23,9 +23,9 @@ Same as every `/v1` endpoint: pass the API key in the `X-API-Key` header.
 |---|---|---|
 | Per-supermarket product list with pause/resume + delete | `GET /v1/supermarkets/:id/products?status=`, `PATCH`/`DELETE /v1/supermarket-products/:id` | Stop scraping products no longer sold / bad URLs |
 | Add product URL (**must send `ean` when adding from a coverage "missing" cell**) | `POST /v1/products` | Prevents new EAN-less orphans (see Part 3) |
-| Catalog EAN management (add/list/remove official EANs) | `GET/POST/DELETE /v1/catalog/eans` | Extend the catalog at runtime |
+| Catalog EAN management + browse/picker | `GET /v1/catalog/eans?source=all\|extra\|builtin`, `POST/DELETE /v1/catalog/eans` | Extend the catalog at runtime; list the full 211 + extras for a searchable EAN picker |
 | Cobertura (coverage) grid with `covered / paused / missing` | `GET /v1/data/coverage` | See gaps; drive discovery + manual adds |
-| Discovery trigger + progress | `POST /v1/data/discover`, `GET /v1/data/discover/:jobId` | Auto-find a new EAN across chains |
+| Discovery trigger + progress + recent list | `POST /v1/data/discover`, `GET /v1/data/discover` (list), `GET /v1/data/discover/:jobId` | Auto-find a new EAN across chains; re-attach after reload |
 | **Missing-EAN heal screen** | `GET /v1/products/missing-ean`, `PATCH /v1/supermarket-products/:id { ean }` | Fix blank export columns on EAN-less products |
 
 > **The existing backlog is healed once from the backend CLI** (`npm run heal:eans`,
@@ -166,9 +166,56 @@ kicks off discovery immediately and returns its `jobId`.
 `discovery` is present only when `auto_discover: true`. Errors:
 - `400` if the EAN isn't 13 digits, or is already part of the built-in catalog.
 
-## `GET /v1/catalog/eans` — list runtime-added EANs
+## `GET /v1/catalog/eans` — list the catalog (picker + browse)
 
-Returns the extra EANs added via the API (the built-in 211 are not listed here).
+```
+GET /v1/catalog/eans?source=all|extra|builtin&search=<str>&category=<str>
+```
+
+Query params (all optional):
+
+| Param | Default | Meaning |
+|-------|---------|---------|
+| `source` | `extra` | `extra` = runtime-added rows only (**original contract, unchanged**); `builtin` = the hardcoded 211; `all` = the union |
+| `search` | — | case-insensitive substring over `ean` + `descriptionForms` + `brand` |
+| `category` | — | exact category filter |
+
+**`source=extra` (default)** preserves the original response exactly: raw
+`catalog_extra_eans` rows (`description_forms` snake_case, `created_by`, `created_at`),
+newest first, no `meta` counts. Existing consumers are unaffected.
+
+**`source=builtin` / `source=all`** return the normalized union view — one entry per
+EAN, sorted by `descriptionForms`, each tagged `builtin` and `created_at` (null for
+built-ins). No pagination (~211 rows; the whole filtered array is returned).
+
+**Response (`source=all`):**
+```json
+{
+  "data": [
+    {
+      "ean": "7793253005054",
+      "descriptionForms": "AERO DESINF AYUDIN 332 OR",
+      "category": "AERO", "subcategory": "DESINF",
+      "brand": "AYUDIN", "manufacturer": "GRUPO AYUDIN",
+      "format": "332", "variety": "OR",
+      "builtin": true, "created_at": null
+    },
+    {
+      "ean": "7791234567890",
+      "descriptionForms": "LAVANDINA NUEVA 1L",
+      "category": "LAVANDINAS", "subcategory": "REG",
+      "brand": "AYUDIN", "manufacturer": "GRUPO AYUDIN",
+      "format": "1000", "variety": "REG",
+      "builtin": false, "created_at": "2026-07-01T12:00:00Z"
+    }
+  ],
+  "meta": { "ts": "2026-07-03T...", "total": 213, "builtin": 211, "extra": 2 }
+}
+```
+
+`builtin: true` rows are immutable (a `DELETE` on one returns `400`); `builtin: false`
+rows are deletable. Use `source=all` to seed the Missing-EAN heal screen's manual EAN
+field and the Catálogo browse view.
 
 ## `DELETE /v1/catalog/eans/:ean` — remove an extra EAN
 
@@ -211,6 +258,49 @@ Discovery searches supermarket sites live, so it runs as a background job. You g
 
 `targets` is the list of supermarkets that will actually be searched (only those with
 `hasSearch: true` — see the `hasSearch` flag on `GET /v1/data/coverage`).
+
+## `GET /v1/data/discover` — list recent/active jobs
+
+Lets the UI re-attach to a running discovery after a page reload (the `jobId` is
+otherwise lost) and show a small "recent discoveries" list.
+
+```
+GET /v1/data/discover?status=active|all&limit=20
+```
+
+| Param | Default | Meaning |
+|-------|---------|---------|
+| `status` | `active` | `active` = queued + running only; `all` = also recently completed/failed |
+| `limit` | `20` | max jobs, newest first (cap `100`) |
+
+**Response (200):**
+```json
+{
+  "data": [
+    {
+      "jobId": "disc_8f2...",
+      "scope": "ean", "ean": "7791234567890", "supermarketId": null,
+      "status": "running", "targets": 18,
+      "progress": { "total": 18, "done": 11, "found": 6, "ingested": 6, "notFound": 5, "errors": 0 },
+      "createdAt": "2026-07-03T18:05:00Z", "finishedAt": null
+    },
+    {
+      "jobId": "disc_7a1...",
+      "scope": "supermarket", "ean": null, "supermarketId": "carrefour",
+      "status": "completed", "targets": 211,
+      "progress": { "total": 211, "done": 211, "found": 40, "ingested": 40, "notFound": 171, "errors": 0 },
+      "createdAt": "2026-07-03T17:40:00Z", "finishedAt": "2026-07-03T17:52:00Z"
+    }
+  ],
+  "meta": { "ts": "2026-07-03T..." }
+}
+```
+
+Each item is the **summary** form (no `results[]` — open one via
+`GET /v1/data/discover/:jobId` for the per-target detail). `targets` = units of
+work (chains for `ean`/`sweep`, EANs for a whole-chain scope); it mirrors
+`progress.total` and is `0` until the job starts. `sweep`-scope jobs appear here
+too — label unknown scopes generically.
 
 ## `GET /v1/data/discover/:jobId` — poll progress
 
