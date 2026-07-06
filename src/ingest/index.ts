@@ -21,7 +21,14 @@ import { getAdapter } from '../adapters/registry.js';
 import type { ProductInfo, ScrapeContext } from '../adapters/types.js';
 import { ScrapeError } from '../shared/errors.js';
 import { lookupCatalog } from '../shared/catalog.js';
+import { MARCA_TO_FABRICANTE } from '../shared/taxonomy.js';
 import { processJob, type ProcessJobResult } from '../worker/processJob.js';
+
+/** Derive the parent manufacturer from a brand name (client's brand→maker map). */
+function deriveFabricante(brand: string | null | undefined): string | undefined {
+  if (!brand) return undefined;
+  return MARCA_TO_FABRICANTE[brand.trim().toUpperCase()];
+}
 
 export interface SupermarketConfig {
   id: string;
@@ -277,7 +284,9 @@ export async function ensureSupermarketProduct(
         name: info.name ?? 'Unknown product',
         category: taxonomy?.category ?? info.category ?? null,
         subcategory: taxonomy?.subcategory ?? null,
-        manufacturer: taxonomy?.manufacturer ?? null,
+        // Non-catalog EANs have no standardized Fabricante — derive it from the
+        // scraped brand so the export isn't blank where we can infer it.
+        manufacturer: taxonomy?.manufacturer ?? deriveFabricante(info.brand) ?? null,
         brand: taxonomy?.brand ?? info.brand ?? null,
         format: taxonomy?.format || null,
         variety: taxonomy?.variety || null,
