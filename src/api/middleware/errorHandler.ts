@@ -44,6 +44,37 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
 
+  // Body-parser / http-errors style client errors: malformed JSON, payload too
+  // large, unsupported charset, etc. express.json() throws these with a numeric
+  // `status` and `expose: true`. Without this branch they fall through to the
+  // generic 500 below — masking a client mistake (e.g. mangled body) as a
+  // server fault, which is exactly the opaque 500 we hit debugging ingest.
+  const httpErr = err as {
+    status?: number;
+    statusCode?: number;
+    type?: string;
+    expose?: boolean;
+  };
+  const bodyStatus = httpErr.status ?? httpErr.statusCode;
+  if (
+    typeof bodyStatus === 'number' &&
+    bodyStatus >= 400 &&
+    bodyStatus < 500 &&
+    httpErr.expose === true
+  ) {
+    const { code, message } = classifyBodyError(httpErr.type, bodyStatus);
+    logger.info(
+      { path: req.path, method: req.method, code, statusCode: bodyStatus, type: httpErr.type },
+      'api client error (body parser)',
+    );
+    if (isClientPricing) {
+      res.status(bodyStatus).json(clientPricingError(message));
+      return;
+    }
+    res.status(bodyStatus).json(failure(code, message));
+    return;
+  }
+
   // Unexpected error — log everything, send generic 500.
   logger.error(
     { err, path: req.path, method: req.method },
@@ -62,6 +93,31 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     failure('INTERNAL', 'Internal server error'),
   );
 };
+
+/**
+ * Map an express.json / body-parser error to a stable envelope code + a safe,
+ * client-facing message (never leak the raw parser text). Falls back sensibly
+ * for any 4xx body-parser type we don't special-case.
+ */
+function classifyBodyError(
+  type: string | undefined,
+  status: number,
+): { code: string; message: string } {
+  switch (type) {
+    case 'entity.parse.failed':
+      return { code: 'INVALID_REQUEST', message: 'Request body is not valid JSON' };
+    case 'entity.too.large':
+      return { code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds the size limit' };
+    case 'charset.unsupported':
+    case 'encoding.unsupported':
+      return { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Unsupported request encoding' };
+    default:
+      return {
+        code: status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST',
+        message: 'Malformed request',
+      };
+  }
+}
 
 /** 404 catch-all for unmatched routes. Mount AFTER all real routes. */
 export const notFoundHandler: import('express').RequestHandler = (req, _res, next) => {
