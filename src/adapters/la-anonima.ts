@@ -33,6 +33,13 @@
  * is purely additive: the first attempt keeps today's IP-default behaviour, so
  * products that already work are untouched; the sweep only RECOVERS failures.
  *
+ * WAF note (2026-07): La Anónima's WAF began returning a hard 403 to the EC2
+ * datacenter IP for every product (works fine from residential IPs). So the
+ * adapter now egresses through the AR residential proxy when `AR_PROXY_URL` is
+ * configured (see src/shared/proxy.ts; 'la-anonima' is in the proxied
+ * allowlist). Availability is cookie-scoped, not IP-scoped, so the proxy's exit
+ * region doesn't change what we see — it only supplies a non-blocked IP.
+ *
  * Stale-id healing: La Anónima periodically REPLACES a product's `art_<id>`
  * while the EAN stays constant. The old PDP then 302s to the homepage from EVERY
  * sucursal, so once the full sweep still home-redirects we report
@@ -40,7 +47,9 @@
  * the new article and re-maps the row in place.
  */
 
+import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
+import { getProxyDispatcher } from '../shared/proxy.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -206,9 +215,13 @@ async function fetchLaAnonimaHtml(
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  let res: Response;
+  // La Anónima's WAF 403s the EC2 datacenter IP, so egress through the AR proxy
+  // when one is configured (undefined otherwise — direct connection).
+  const dispatcher = getProxyDispatcher('la-anonima');
+
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await fetch(url, {
+    res = await undiciFetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -218,6 +231,7 @@ async function fetchLaAnonimaHtml(
       },
       redirect: 'follow',
       signal: controller.signal,
+      ...(dispatcher ? { dispatcher } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {

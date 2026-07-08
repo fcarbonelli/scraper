@@ -1,11 +1,12 @@
 /**
  * Optional Argentine egress proxy.
  *
- * A couple of regional sites (Super Mami, Maxiconsumo) sit behind a CDN edge
- * that silently drops non-Argentine / datacenter IPs, so requests from the
- * cloud worker hang until they time out. When `AR_PROXY_URL` is set, those (and
- * ONLY those) adapters route their HTTP requests through it via an undici
- * ProxyAgent; every other supermarket keeps going direct.
+ * A few regional sites sit behind a CDN/WAF edge that penalizes non-Argentine /
+ * datacenter IPs: Super Mami and Maxiconsumo silently drop the connection (the
+ * cloud worker hangs until timeout), and La Anónima started returning a hard 403
+ * (WAF block) to the EC2 IP. When `AR_PROXY_URL` is set, those (and ONLY those)
+ * adapters route their HTTP requests through it via an undici ProxyAgent; every
+ * other supermarket keeps going direct.
  *
  * Environment:
  *   AR_PROXY_URL           Full proxy endpoint, e.g.
@@ -24,7 +25,7 @@ import { ProxyAgent, type Dispatcher } from 'undici';
 
 const PROXY_URL = process.env.AR_PROXY_URL?.trim();
 
-const DEFAULT_PROXIED = ['mami', 'maxiconsumo', 'mercadolibre'];
+const DEFAULT_PROXIED = ['mami', 'maxiconsumo', 'mercadolibre', 'la-anonima'];
 
 /** Supermarket ids whose traffic should egress through the AR proxy. */
 const proxiedIds = new Set(
