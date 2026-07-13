@@ -36,6 +36,8 @@ interface MagazineRow {
   supermarket_id: string;
   label: string;
   scrape_run_id: string | null;
+  source_strategy: string;
+  source_url: string;
   page_count: number;
   status: string;
   detected_at: string;
@@ -72,6 +74,8 @@ function magazineResponse(m: MagazineRow, supermarketName: string, counts: Count
     supermarket_name: supermarketName,
     label: m.label,
     scrape_run_id: m.scrape_run_id,
+    source_strategy: m.source_strategy,
+    source_url: m.source_url,
     page_count: m.page_count,
     status: m.status,
     counts,
@@ -79,7 +83,8 @@ function magazineResponse(m: MagazineRow, supermarketName: string, counts: Count
   };
 }
 
-const MAGAZINE_COLS = 'id, supermarket_id, label, scrape_run_id, page_count, status, detected_at';
+const MAGAZINE_COLS =
+  'id, supermarket_id, label, scrape_run_id, source_strategy, source_url, page_count, status, detected_at';
 
 async function loadMagazine(id: string): Promise<MagazineRow> {
   const { data, error } = await db
@@ -96,6 +101,47 @@ async function supermarketName(id: string): Promise<string> {
   const { data } = await db.from('supermarkets').select('name').eq('id', id).maybeSingle();
   return (data?.name as string) ?? id;
 }
+
+// =============================================================================
+// GET /v1/revistas
+//
+// List ALL magazines (any status) — powers the debug/analyze view. Unlike
+// /pending (which is only `in_review`), this shows `processing` (crashed /
+// still running) and `reviewed` too, so an operator can see everything the
+// pipeline has ever detected. Optional ?status filter.
+// =============================================================================
+const ListQuery = z.object({
+  status: z.enum(['processing', 'in_review', 'reviewed']).optional(),
+  supermarket_id: z.string().trim().min(1).optional(),
+});
+
+revistasRouter.get('/', async (req: Request, res: Response) => {
+  const q = parseQuery(req, ListQuery);
+  let query = db
+    .from('revista_magazines')
+    .select(MAGAZINE_COLS)
+    .order('detected_at', { ascending: false });
+  if (q.status) query = query.eq('status', q.status);
+  if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const magazines = (data ?? []) as MagazineRow[];
+
+  const smIds = [...new Set(magazines.map((m) => m.supermarket_id))];
+  const names = new Map<string, string>();
+  if (smIds.length > 0) {
+    const { data: sms } = await db.from('supermarkets').select('id, name').in('id', smIds);
+    for (const s of sms ?? []) names.set(s.id as string, s.name as string);
+  }
+
+  const out = await Promise.all(
+    magazines.map(async (m) =>
+      magazineResponse(m, names.get(m.supermarket_id) ?? m.supermarket_id, await countsFor(m.id)),
+    ),
+  );
+  res.json(success(out));
+});
 
 // =============================================================================
 // GET /v1/revistas/pending
@@ -132,6 +178,54 @@ revistasRouter.get('/:magazineId', async (req: Request, res: Response) => {
   const magazineId = req.params.magazineId as string;
   const m = await loadMagazine(magazineId);
   res.json(success(magazineResponse(m, await supermarketName(m.supermarket_id), await countsFor(m.id))));
+});
+
+// =============================================================================
+// GET /v1/revistas/:magazineId/analysis
+//
+// Debug/analyze payload: the full-magazine page images + EVERYTHING the AI read
+// per page (matched or not) with the match reason. This is what lets an operator
+// (a) see the actual PDF pages and (b) understand why items did/didn't match —
+// the answer to "why is `matched` 0?". Data comes from revista_magazines.metadata,
+// populated by the pipeline.
+// =============================================================================
+interface MagazineMetadata {
+  matched?: number;
+  total?: number;
+  page_images?: Array<{ page: number; url: string }>;
+  analysis?: Array<{
+    page: number;
+    extracted: Record<string, unknown>;
+    matched: boolean;
+    method: string;
+    confidence: number;
+    reason: string;
+    matched_product_id: string | null;
+    top_candidates: Array<{ id: string; name: string | null; brand: string | null }>;
+  }>;
+}
+
+revistasRouter.get('/:magazineId/analysis', async (req: Request, res: Response) => {
+  const magazineId = req.params.magazineId as string;
+  const { data, error } = await db
+    .from('revista_magazines')
+    .select(`${MAGAZINE_COLS}, metadata`)
+    .eq('id', magazineId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw ApiError.notFound('Magazine');
+
+  const m = data as MagazineRow;
+  const meta = (data.metadata ?? {}) as MagazineMetadata;
+  res.json(
+    success({
+      magazine: magazineResponse(m, await supermarketName(m.supermarket_id), await countsFor(m.id)),
+      page_images: meta.page_images ?? [],
+      extracted_total: meta.total ?? 0,
+      matched_total: meta.matched ?? 0,
+      analysis: meta.analysis ?? [],
+    }),
+  );
 });
 
 // =============================================================================

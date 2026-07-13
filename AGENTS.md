@@ -160,6 +160,7 @@ scraper/
 | `npm run scrape:bulk -- <file>`   | Bulk-import URLs from a text file (one per line)      | Add many products at once; idempotent, safe to re-run  |
 | `npx tsx --env-file=.env scripts/heal-eans.ts [--judge] [--auto] [--apply=<csv>]` | Backfill catalog EANs onto EAN-less products (fixes blank export columns); `--judge` adds an LLM adjudication pass | One-time backlog cleanup: report → (judge) → confirm CSV → apply. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
 | `npm run revistas:run -- [--super=<id>] [--pages=1-8] [--force]` | Run the magazine (revista) pipeline manually | Test/backfill a magazine chain; needs `OPENAI_API_KEY` |
+| `npm run revistas:doctor` | Diagnose the revista pipeline (config, live discovery, DB state, catalog stats) — **no AI cost** | First stop when "no magazines show up in the frontend" |
 | `npm run orchestrator:run-now`    | Run a one-shot daily scrape immediately (needs Redis) | Manual trigger, e.g., backfill                         |
 | `npm run apikey:create -- <name>` | Generate an API key, store hash, print plaintext once | Granting access to a new consumer (frontend, etc.)     |
 | `npm run typecheck`               | `tsc --noEmit`                                        | Always run before suggesting code is "done"            |

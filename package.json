@@ -38,6 +38,7 @@
     "scrape:url": "tsx --env-file=.env scripts/scrape-url.ts",
     "scrape:bulk": "tsx --env-file=.env scripts/import-urls.ts",
     "revistas:run": "tsx --env-file=.env scripts/scrape-revistas.ts",
+    "revistas:doctor": "tsx --env-file=.env scripts/revistas-doctor.ts",
     "apikey:create": "tsx --env-file=.env scripts/create-api-key.ts"
   },
   "dependencies": {

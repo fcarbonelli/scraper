@@ -47,21 +47,34 @@ export interface CreateMagazineArgs {
   scrapeRunId: string | null;
 }
 
-/** Insert a fresh magazine row in `processing` state and return its id. */
+/**
+ * Upsert a magazine row in `processing` state and return its id.
+ *
+ * Upsert (not insert) on the (supermarket_id, content_hash) unique key so that
+ * REPROCESSING the same issue — a `--force` run, or retrying a row stuck in
+ * `processing` after a crash — reuses the existing row instead of hitting a
+ * duplicate-key error. Resets it back to `processing` and clears the review
+ * timestamp; the caller then re-fills the review queue and flips it to
+ * `in_review`.
+ */
 export async function createMagazine(args: CreateMagazineArgs): Promise<string> {
   const { data, error } = await db
     .from('revista_magazines')
-    .insert({
-      supermarket_id: args.supermarketId,
-      label: args.label,
-      source_strategy: args.strategy,
-      source_url: args.sourceUrl,
-      content_hash: args.contentHash,
-      file_size: args.fileSize,
-      page_count: args.pageCount,
-      status: 'processing',
-      scrape_run_id: args.scrapeRunId,
-    })
+    .upsert(
+      {
+        supermarket_id: args.supermarketId,
+        label: args.label,
+        source_strategy: args.strategy,
+        source_url: args.sourceUrl,
+        content_hash: args.contentHash,
+        file_size: args.fileSize,
+        page_count: args.pageCount,
+        status: 'processing',
+        scrape_run_id: args.scrapeRunId,
+        reviewed_at: null,
+      },
+      { onConflict: 'supermarket_id,content_hash' },
+    )
     .select('id')
     .single();
   if (error) throw error;

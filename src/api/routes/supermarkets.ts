@@ -54,6 +54,8 @@ supermarketsRouter.get('/:id', async (req: Request, res: Response) => {
 
 const ListProductsQuery = PaginationQuery.extend({
   search: z.string().trim().min(1).max(200).optional(),
+  /** Barcode lookup. Prefix-matched against product.ean (digits only). */
+  ean: z.string().trim().min(1).max(20).optional(),
   in_stock: z.enum(['true', 'false']).optional(),
   /** active (default) = scraped; paused = is_active false; all = both. */
   status: z.enum(['active', 'paused', 'all']).default('active'),
@@ -74,11 +76,30 @@ supermarketsRouter.get('/:id/products', async (req: Request, res: Response) => {
   if (sm.error) throw sm.error;
   if (!sm.data) throw ApiError.notFound('Supermarket');
 
+  // EAN takes precedence over free-text search when both are supplied.
+  // Strip whitespace and reject anything that isn't a pure digit string:
+  // a non-digit query can never match a barcode, so we short-circuit to empty.
+  const eanPrefix = q.ean ? q.ean.replace(/\s+/g, '') : undefined;
+  const eanInvalid = eanPrefix !== undefined && !/^\d+$/.test(eanPrefix);
+  const useEan = eanPrefix !== undefined && !eanInvalid;
+
+  if (eanInvalid) {
+    res.json(paginated([], 0, page, limit));
+    return;
+  }
+
+  // When filtering by EAN we push the prefix match into the DB with an inner
+  // join on products, so pagination and the total count stay correct across
+  // the whole dataset (name search below still post-filters a single page).
+  const productJoin = useEan
+    ? 'products:product_id!inner ( id, name, brand, category, unit, ean, metadata )'
+    : 'products:product_id ( id, name, brand, category, unit, ean, metadata )';
+
   let mappingQuery = db
     .from('supermarket_products')
     .select(
       `id, external_id, external_url, is_active, created_at,
-       products:product_id ( id, name, brand, category, unit, ean, metadata )`,
+       ${productJoin}`,
       { count: 'exact' },
     )
     .eq('supermarket_id', req.params.id)
@@ -89,15 +110,15 @@ supermarketsRouter.get('/:id/products', async (req: Request, res: Response) => {
   if (q.status === 'active') mappingQuery = mappingQuery.eq('is_active', true);
   else if (q.status === 'paused') mappingQuery = mappingQuery.eq('is_active', false);
 
-  // Note: ilike on the joined table requires Supabase's foreign-table syntax.
-  // We do the filter post-fetch for v1 to keep the query simple.
+  // Prefix match on the joined product's EAN (e.g. "779013%").
+  if (useEan) mappingQuery = mappingQuery.like('products.ean', `${eanPrefix}%`);
 
   const mappingsRes = await mappingQuery;
   if (mappingsRes.error) throw mappingsRes.error;
   let mappings = mappingsRes.data ?? [];
 
-  // Post-filter by name search if requested
-  if (q.search) {
+  // Post-filter by name search if requested (only when not searching by EAN).
+  if (!useEan && q.search) {
     const needle = q.search.toLowerCase();
     mappings = mappings.filter((m) => {
       const p = Array.isArray(m.products) ? m.products[0] : m.products;

@@ -873,6 +873,7 @@ Products mapped to this supermarket, with their latest snapshot.
 |---|---|---|
 | `page`, `limit` | int | Pagination |
 | `search` | string | Substring of product name |
+| `ean` | string | Barcode lookup (digits only). **Prefix**-matched against `product.ean` (e.g. `779013` matches the full barcode). Whitespace is stripped; a non-digit query returns an empty page. Takes precedence over `search` if both are sent |
 | `in_stock` | `"true"` \| `"false"` | Filter by latest stock status |
 | `status` | `"active"` \| `"paused"` \| `"all"` | Filter by mapping state. Default `"active"`. Use `"paused"` for the resume list |
 
@@ -1420,8 +1421,49 @@ approval. Approving an item writes a `supermarket_products` mapping + a
 through the normal gate. Nothing reaches the client until a person approves it.
 
 > **Full spec (UI flow, modal, types, edge cases):**
-> [`docs/REVISTA_REVIEW.md`](./docs/REVISTA_REVIEW.md). Fixtures:
-> `examples/api/revistas-pending.json`, `revista-items.json`, `revista-approve.json`.
+> [`docs/REVISTA_REVIEW.md`](./docs/REVISTA_REVIEW.md). **Debug/analyze view:**
+> [`docs/REVISTA_DEBUG.md`](./docs/REVISTA_DEBUG.md). Fixtures:
+> `examples/api/revistas-pending.json`, `revista-items.json`, `revista-approve.json`,
+> `revista-analysis.json`.
+
+### `GET /v1/revistas`
+
+**Debug/analyze list** — every magazine the pipeline has ever detected, any
+status (unlike `pending`, which is only `in_review`). Powers the "Revistas" debug
+view. Returns an array of magazine headers with `counts`. Optional filters:
+
+| Param | Type | Description |
+|---|---|---|
+| `status` | `processing` \| `in_review` \| `reviewed` | Filter by status. `processing` = still running or crashed mid-run. |
+| `supermarket_id` | string | Only one chain |
+
+### `GET /v1/revistas/:magazineId/analysis`
+
+**Debug/analyze payload** — the full magazine as the AI saw it. Returns the page
+images for the *whole* magazine plus, per extracted product, whether it matched
+and *why*. This is the tool for answering "why did nothing match?". Shape:
+
+```ts
+{
+  magazine: MagazineHeader;              // same shape as /pending items
+  page_images: { page: number; url: string }[];   // ALL pages, sorted
+  extracted_total: number;               // products the AI read
+  matched_total: number;                 // of those, how many auto-matched
+  analysis: {
+    page: number;
+    extracted: { name; brand; ean; price; promo_price; promo_text; quantity };
+    matched: boolean;
+    method: "ean" | "llm" | "manual";
+    confidence: number;                  // 0..1
+    reason: string;                      // judge's explanation
+    matched_product_id: string | null;
+    top_candidates: { id; name; brand }[];  // up to 3 nearest catalog products
+  }[];
+}
+```
+
+`analysis` includes **unmatched** items too — so the operator sees the whole
+magazine, not just the few auto-matches. See `examples/api/revista-analysis.json`.
 
 ### `GET /v1/revistas/pending`
 

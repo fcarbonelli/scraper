@@ -1,0 +1,67 @@
+{
+  "data": {
+    "magazine": {
+      "id": "0dd31be0-a94e-4587-93ff-1c3ffff30800",
+      "supermarket_id": "makro",
+      "supermarket_name": "Makro",
+      "label": "jul2mm.pdf",
+      "scrape_run_id": null,
+      "source_strategy": "html-pdf-links",
+      "source_url": "https://makro-com-ar.b-cdn.net/wp-content/uploads/jul2mm.pdf",
+      "page_count": 16,
+      "status": "in_review",
+      "counts": { "total": 3, "pending": 3, "approved": 0, "rejected": 0 },
+      "detected_at": "2026-07-12T09:00:38.029Z"
+    },
+    "page_images": [
+      { "page": 1, "url": "https://xyzcompany.supabase.co/storage/v1/object/public/revista-pages/0dd31be0-a94e-4587-93ff-1c3ffff30800/page-001.png" },
+      { "page": 2, "url": "https://xyzcompany.supabase.co/storage/v1/object/public/revista-pages/0dd31be0-a94e-4587-93ff-1c3ffff30800/page-002.png" }
+    ],
+    "extracted_total": 157,
+    "matched_total": 3,
+    "analysis": [
+      {
+        "page": 1,
+        "extracted": {
+          "name": "Lavandina Ayudín Original",
+          "brand": "Ayudín",
+          "ean": null,
+          "price": 1890.0,
+          "promo_price": null,
+          "promo_text": "Precio x bulto",
+          "quantity": "2 L"
+        },
+        "matched": true,
+        "method": "llm",
+        "confidence": 0.92,
+        "reason": "Same product line (Ayudín lavandina original), size 2L matches.",
+        "matched_product_id": "b7c1a2d3-1111-4a2b-9c3d-000000000001",
+        "top_candidates": [
+          { "id": "b7c1a2d3-1111-4a2b-9c3d-000000000001", "name": "Lavandina Original Ayudin 2l", "brand": "AYUDÍN" },
+          { "id": "b7c1a2d3-1111-4a2b-9c3d-000000000002", "name": "Lavandina Ayudin Ropa Color 1l", "brand": "AYUDÍN" }
+        ]
+      },
+      {
+        "page": 3,
+        "extracted": {
+          "name": "Aceite de girasol Natura",
+          "brand": "Natura",
+          "ean": null,
+          "price": 3499.0,
+          "promo_price": 2999.0,
+          "promo_text": "2x1",
+          "quantity": "1.5 L"
+        },
+        "matched": false,
+        "method": "llm",
+        "confidence": 0.04,
+        "reason": "No catalog counterpart: catalog is cleaning/home-care only, no cooking oils.",
+        "matched_product_id": null,
+        "top_candidates": [
+          { "id": "b7c1a2d3-1111-4a2b-9c3d-000000000050", "name": "Limpiador Cremoso Cif 750ml", "brand": "CIF" }
+        ]
+      }
+    ]
+  },
+  "meta": { "ts": "2026-07-13T22:10:00.000Z" }
+}

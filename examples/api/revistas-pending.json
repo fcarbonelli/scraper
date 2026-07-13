@@ -6,6 +6,8 @@
       "supermarket_name": "Makro",
       "label": "Makro Ofertas 2da quincena Junio",
       "scrape_run_id": "8b1c5e30-3c8a-4933-8c11-eeff99887766",
+      "source_strategy": "html-pdf-links",
+      "source_url": "https://makro-com-ar.b-cdn.net/wp-content/uploads/jun2mm.pdf",
       "page_count": 57,
       "status": "in_review",
       "counts": { "total": 8, "pending": 8, "approved": 0, "rejected": 0 },

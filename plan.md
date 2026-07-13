@@ -216,7 +216,9 @@ revista_magazines (
   page_count       int
   status           text        -- 'processing' | 'in_review' | 'reviewed'
   scrape_run_id    uuid FK
-  metadata         jsonb       -- full per-page extraction kept here for debug
+  metadata         jsonb       -- { matched, total, page_images:[{page,url}], analysis:[{page,extracted,matched,method,confidence,reason,matched_product_id,top_candidates}] }
+                               -- ALL pages are uploaded + ALL extracted products (matched or not) recorded here.
+                               -- Powers the debug/analyze view (GET /v1/revistas/:id/analysis, docs/REVISTA_DEBUG.md).
   detected_at      timestamptz
   reviewed_at      timestamptz
   UNIQUE (supermarket_id, content_hash)

@@ -24,7 +24,7 @@ import { discoverCandidates, type MagazineCandidate } from './sources.js';
 import type { PageSelection, RevistaStrategyConfig } from './sources-shared.js';
 import { extractProductsFromPage, type ExtractedProduct } from './extract.js';
 import { loadCatalog } from './catalog.js';
-import { buildCatalogIndex, matchItems, type MatchResult } from './match.js';
+import { buildCatalogIndex, matchItems } from './match.js';
 import { mapPool } from './pool.js';
 import { uploadPageImage } from './storage.js';
 import {
@@ -99,19 +99,23 @@ async function processCandidate(
   const log = logger.child({ supermarket: sm.id, magazine: candidate.label });
   log.info({ hash: candidate.hash }, 'revista: new issue, processing');
 
-  const source = await candidate.fetch();
-  const magazineId = await createMagazine({
-    supermarketId: sm.id,
-    label: candidate.label,
-    strategy: sm.strategy.strategy,
-    sourceUrl: candidate.sourceUrl,
-    contentHash: candidate.hash,
-    fileSize: source.fileSize,
-    pageCount: source.pages.length,
-    scrapeRunId: opts.scrapeRunId ?? null,
-  });
-
+  // Everything below (download, create, vision, match, upload) is inside the
+  // try so ANY failure for one issue is contained: we return a 'failed' summary
+  // and move on to the next issue/chain instead of aborting the whole run.
+  let magazineId: string | undefined;
   try {
+    const source = await candidate.fetch();
+    magazineId = await createMagazine({
+      supermarketId: sm.id,
+      label: candidate.label,
+      strategy: sm.strategy.strategy,
+      sourceUrl: candidate.sourceUrl,
+      contentHash: candidate.hash,
+      fileSize: source.fileSize,
+      pageCount: source.pages.length,
+      scrapeRunId: opts.scrapeRunId ?? null,
+    });
+
     // 1. Vision: read every page (bounded concurrency).
     const perPage = await mapPages(source.pages, source.firstPage, log);
     const entries: { item: ExtractedProduct; page: number }[] = [];
@@ -126,10 +130,12 @@ async function processCandidate(
     const matched = results.filter((r) => r.matched);
     log.info({ matched: matched.length, total: results.length }, 'revista: matching done');
 
-    // 3. Upload page images (only the pages that produced a queued match).
-    const pageUrls = await uploadMatchedPages(magazineId, source, matched, log);
+    // 3. Upload EVERY page image (not just matched pages) so the review/analyze
+    //    UI can always show the full magazine — even when nothing matched.
+    const pageUrls = await uploadAllPages(magazineId, source, log);
 
-    // 4. Persist the review queue (matched items only — see REVISTA_REVIEW.md §6).
+    // 4. Persist the review queue (auto-matched items — the ones an operator
+    //    approves/rejects). Unmatched items live in metadata.analysis below.
     const items: ReviewItemInput[] = matched.map((result) => ({
       result,
       pageImageUrl: pageUrls.get(result.page) ?? null,
@@ -137,10 +143,38 @@ async function processCandidate(
     await clearReviewItems(magazineId); // idempotent reprocessing
     await insertReviewItems(magazineId, sm.id, items);
 
-    // Keep the full extraction for future debugging (not exposed in v1).
+    // 5. Persist the FULL analysis (every extracted product + why it did/didn't
+    //    match) and all page-image URLs, so the debug/analyze view can show what
+    //    the AI actually saw. This is the key diagnostic for "0 matched".
     await db
       .from('revista_magazines')
-      .update({ metadata: { extraction: perPage, matched: matched.length, total: results.length } })
+      .update({
+        metadata: {
+          matched: matched.length,
+          total: results.length,
+          page_images: [...pageUrls.entries()]
+            .map(([page, url]) => ({ page, url }))
+            .sort((a, b) => a.page - b.page),
+          analysis: results.map((r) => ({
+            page: r.page,
+            extracted: {
+              name: r.item.name,
+              brand: r.item.brand,
+              ean: r.item.ean,
+              price: r.item.price,
+              promo_price: r.item.promo_price,
+              promo_text: r.item.promo_text,
+              quantity: r.item.quantity,
+            },
+            matched: Boolean(r.matched),
+            method: r.method,
+            confidence: r.confidence,
+            reason: r.reason,
+            matched_product_id: r.matched?.id ?? null,
+            top_candidates: r.candidates.slice(0, 3).map((c) => ({ id: c.id, name: c.name, brand: c.brand ?? null })),
+          })),
+        },
+      })
       .eq('id', magazineId);
 
     await setMagazineStatus(magazineId, 'in_review');
@@ -150,8 +184,8 @@ async function processCandidate(
       type: 'revista_review',
       supermarketId: sm.id,
       title: `Nueva revista de ${sm.name} para revisar`,
-      message: `Se detectó una nueva revista (${candidate.label}). La IA encontró ${matched.length} producto(s) para revisar.`,
-      context: { magazine_id: magazineId, matched: matched.length, pages: source.pages.length },
+      message: `Se detectó una nueva revista (${candidate.label}). La IA leyó ${results.length} producto(s), ${matched.length} con match para revisar.`,
+      context: { magazine_id: magazineId, matched: matched.length, extracted: results.length, pages: source.pages.length },
     });
 
     return {
@@ -164,7 +198,7 @@ async function processCandidate(
       magazineId,
     };
   } catch (err) {
-    // Leave the magazine row in 'processing' so a later run retries it.
+    // Leave the magazine row (if created) in 'processing' so a later run retries.
     log.error({ err }, 'revista: processing failed');
     captureError(err, { supermarket: sm.id, magazine: candidate.label });
     return {
@@ -172,7 +206,7 @@ async function processCandidate(
       label: candidate.label,
       status: 'failed',
       hash: candidate.hash,
-      magazineId,
+      ...(magazineId ? { magazineId } : {}),
       error: err instanceof Error ? err.message : String(err),
     };
   }
@@ -196,18 +230,16 @@ async function mapPages(
   });
 }
 
-/** Upload the image of each page that yielded a queued match (deduped per page). */
-async function uploadMatchedPages(
+/** Upload EVERY page image so the review/analyze UI can show the full magazine. */
+async function uploadAllPages(
   magazineId: string,
   source: Awaited<ReturnType<MagazineCandidate['fetch']>>,
-  matched: MatchResult[],
   log: Logger,
 ): Promise<Map<number, string>> {
   const urls = new Map<number, string>();
-  const wantedPages = [...new Set(matched.map((m) => m.page))];
-  for (const page of wantedPages) {
-    const idx = page - source.firstPage;
-    const img = source.pages[idx];
+  for (let i = 0; i < source.pages.length; i++) {
+    const page = source.firstPage + i;
+    const img = source.pages[i];
     if (!img) continue;
     const url = await uploadPageImage(magazineId, page, img);
     if (url) urls.set(page, url);
