@@ -20,6 +20,7 @@ import {
 interface SupermarketRow {
   id: string;
   name: string;
+  config: { source_type?: string } | null;
 }
 
 interface SupermarketProductRow {
@@ -70,15 +71,21 @@ export async function runDailyScrape(
 
   log.info({ startedAt }, 'starting daily scrape run');
 
-  // 2. Load active supermarkets (optionally filtered to a single id)
+  // 2. Load active supermarkets (optionally filtered to a single id).
+  //    Magazine ("revista") chains are intentionally EXCLUDED: they have no
+  //    scraper adapter (their prices come from human-approved PDF review, and
+  //    are re-emitted daily by carryForwardRevistaPrices()). Enqueueing them
+  //    would just fail every job with "No adapter registered".
   let smQuery = db
     .from('supermarkets')
-    .select('id, name')
+    .select('id, name, config')
     .eq('is_active', true);
   if (opts.supermarketId) smQuery = smQuery.eq('id', opts.supermarketId);
   const smRes = await smQuery;
   if (smRes.error) throw smRes.error;
-  const supermarkets = (smRes.data ?? []) as SupermarketRow[];
+  const supermarkets = ((smRes.data ?? []) as SupermarketRow[]).filter(
+    (s) => s.config?.source_type !== 'revista',
+  );
 
   if (supermarkets.length === 0) {
     log.warn('no active supermarkets — finalizing run with 0 jobs');

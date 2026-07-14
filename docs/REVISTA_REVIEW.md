@@ -425,9 +425,22 @@ finalizeRevista: (id: string, force = false) =>
   down, and `promo_text` → `Promocion_1`. The frontend just sends what the
   reviewer confirms (`price` + optional `promo_price`/`promo_text`); the backend
   maps it onto the columns.
+- **Price persistence (carry‑forward).** A regular product gets a fresh snapshot
+  every day from the daily scrape, but a magazine product only gets one **when you
+  approve it**. So the backend runs a daily **carry‑forward** step
+  (`src/revistas/carryForward.ts`, in the orchestrator): it re‑emits each active
+  magazine product's **latest approved price** as a fresh snapshot dated today,
+  tied to the day's run. That's why an approved magazine price keeps appearing in
+  the daily export/compare **every day until the next revista supersedes it**
+  (policy: carry the latest price forward until a newer approval replaces it).
+  Revista chains are excluded from the scraper queue (they have no adapter).
+  **Frontend impact: none** — the data flows through the same snapshots the
+  export/compare/history already read. Just be aware magazine chains now appear in
+  the daily run every day (persisted prices), which is intended.
 - **Idempotency.** Re‑approving/rejecting an already‑reviewed item returns
   `409 CONFLICT`. Re‑running the same unchanged magazine never creates a new one
-  (dedup by content hash), so the queue is stable.
+  (dedup by content hash), so the queue is stable. The carry‑forward step is
+  idempotent per day (skips a product that already has a snapshot dated today).
 - **One magazine, many pages.** A chain can publish several folletos at once
   (e.g. Makro had 5). They're grouped under one magazine entry; `page_number` and
   `page_image_url` keep them straight.

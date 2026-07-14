@@ -25,6 +25,7 @@ import { closeAllQueues, getDiscoveryQueue } from '../shared/queue.js';
 import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
+import { carryForwardRevistaPrices } from '../revistas/carryForward.js';
 
 initSentry('orchestrator');
 
@@ -64,6 +65,18 @@ async function runRevistaCheckWithErrorHandling(
   } catch (err) {
     logger.error({ err }, 'revista check failed');
     captureError(err, { phase: 'revista-check' });
+  }
+
+  // Re-emit each magazine product's latest approved price as a fresh snapshot
+  // dated today (tied to this run) so magazine prices persist in the daily
+  // export until the next revista supersedes them. Independent of whether a new
+  // issue was detected above; runs every day.
+  try {
+    const carry = await carryForwardRevistaPrices(scrapeRunId);
+    if (carry.carried > 0) logger.info({ carry }, 'revista carry-forward complete');
+  } catch (err) {
+    logger.error({ err }, 'revista carry-forward failed');
+    captureError(err, { phase: 'revista-carry-forward' });
   }
 }
 

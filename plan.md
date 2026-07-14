@@ -205,6 +205,13 @@ api_keys (
 -- and src/revistas/. An APPROVED item writes a normal price_snapshots row
 -- (tier_used='ai', status='ok') tied to the day's run, so it publishes through
 -- the existing gate — nothing magazine-specific in client_base.
+--
+-- Revista chains have NO scraper adapter and are EXCLUDED from the daily
+-- BullMQ enqueue (src/orchestrator/enqueue.ts). Instead a daily carry-forward
+-- step (src/revistas/carryForward.ts) re-emits each active magazine product's
+-- latest approved price as a fresh snapshot dated today (tied to the day's run),
+-- so magazine prices persist in the daily export until the next issue supersedes
+-- them (policy: carry the latest approved price forward). Idempotent per day.
 revista_magazines (
   id               uuid PK
   supermarket_id   text FK

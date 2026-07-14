@@ -6,8 +6,10 @@
  *   npm run revistas:run -- --super=makro      # only one chain
  *   npm run revistas:run -- --super=makro --pages=1-8   # only pages 1..8 (cheap)
  *   npm run revistas:run -- --force            # reprocess even if unchanged
+ *   npm run revistas:run -- --carry-forward    # re-emit today's magazine prices (no AI, no scraping)
  *
  * Needs OPENAI_API_KEY (vision + matching) and Supabase env (catalog + storage).
+ * `--carry-forward` needs only Supabase env.
  */
 
 import { logger } from '../src/shared/logger.js';
@@ -17,6 +19,7 @@ import {
   runRevistaCheck,
   type ProcessOptions,
 } from '../src/revistas/pipeline.js';
+import { carryForwardRevistaPrices } from '../src/revistas/carryForward.js';
 import type { PageSelection } from '../src/revistas/sources-shared.js';
 
 function getArg(name: string): string | undefined {
@@ -36,6 +39,14 @@ function parsePages(): PageSelection | undefined {
 }
 
 async function main(): Promise<void> {
+  // Backfill mode: re-emit today's carried-forward magazine prices right now
+  // (run-less snapshot → immediately client-visible). No AI cost, no scraping.
+  if (process.argv.includes('--carry-forward')) {
+    const carry = await carryForwardRevistaPrices(null);
+    logger.info({ carry }, 'revista carry-forward complete');
+    process.exit(0);
+  }
+
   const onlySuper = getArg('super');
   const force = process.argv.includes('--force');
   const pageSelection = parsePages();
