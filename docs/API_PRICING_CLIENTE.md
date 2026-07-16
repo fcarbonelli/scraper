@@ -44,11 +44,44 @@ Devuelve los registros de pricing relevados, ordenados de la fecha más reciente
 más antigua. La respuesta admite **paginación** para permitir el consumo parcial de
 grandes volúmenes de información.
 
-### Ejemplo de solicitud
+### Prueba rápida (sin filtros)
+
+Para verificar la conexión y la credencial, la forma más simple es pedir la primera
+página **sin ningún filtro**: siempre devuelve los datos más recientes disponibles.
 
 ```bash
 curl -H "X-API-Key: <clave-provista>" \
-  "https://api.meganalytics.net/v1/data/pricing?from=2025-10-01&to=2025-10-07&page=1&limit=100"
+  "https://api.meganalytics.net/v1/data/pricing?page=1&limit=100"
+```
+
+### Ejemplo con filtro de fechas
+
+Al filtrar por fecha, usar un rango **dentro del período disponible** (los datos
+publicados son recientes). Ajustar `from` / `to` al período que se desea consultar:
+
+```bash
+curl -H "X-API-Key: <clave-provista>" \
+  "https://api.meganalytics.net/v1/data/pricing?from=2026-07-14&to=2026-07-16&page=1&limit=100"
+```
+
+> **Importante:** un rango de fechas sin datos (por ejemplo, anterior al inicio del
+> relevamiento) devuelve `ProcesadoOk: true` con `PriceData: []`. Esto **no es un
+> error**: significa que no hay registros para ese filtro. Ver la sección
+> [Solución de problemas](#71-solución-de-problemas-comunes).
+
+### Cómo probar la API
+
+- **Postman / Insomnia / código:** agregar el header `X-API-Key` con la clave provista
+  (el nombre del header debe ser exactamente `X-API-Key`). Es la forma recomendada.
+- **Navegador:** pegar la URL directamente en el navegador **no funciona**, porque no
+  permite enviar el header `X-API-Key` y la respuesta será `401`. Usar Postman/Insomnia
+  o `curl`.
+- **PowerShell (Windows):** `curl` es un alias de `Invoke-WebRequest` y **no** entiende
+  `-H`. Usar `curl.exe` y encerrar la URL entre comillas (el `&` de la query rompe el
+  comando si no está entrecomillado):
+
+```powershell
+curl.exe -H "X-API-Key: <clave-provista>" "https://api.meganalytics.net/v1/data/pricing?page=1&limit=100"
 ```
 
 ---
@@ -228,9 +261,9 @@ El objeto `Paginacion` permite recorrer la totalidad de los registros de a bloqu
 
 ```bash
 # Página 1
-curl -H "X-API-Key: <clave>" "https://api.meganalytics.net/v1/data/pricing?from=2025-10-06&to=2025-10-06&page=1&limit=500"
+curl -H "X-API-Key: <clave>" "https://api.meganalytics.net/v1/data/pricing?from=2026-07-16&to=2026-07-16&page=1&limit=500"
 # Página 2
-curl -H "X-API-Key: <clave>" "https://api.meganalytics.net/v1/data/pricing?from=2025-10-06&to=2025-10-06&page=2&limit=500"
+curl -H "X-API-Key: <clave>" "https://api.meganalytics.net/v1/data/pricing?from=2026-07-16&to=2026-07-16&page=2&limit=500"
 ```
 
 > **Recomendación:** para relevamientos diarios completos, filtrar por un día
@@ -265,6 +298,15 @@ Códigos HTTP asociados:
 | `400 Bad Request` | Parámetros de consulta inválidos. |
 | `401 Unauthorized` | Falta la clave de API o es inválida. |
 | `500 Internal Server Error` | Error inesperado del servicio. |
+
+### 7.1 Solución de problemas comunes
+
+| Síntoma | Causa probable | Solución |
+|---------|----------------|----------|
+| `401` con `"Error": "Missing X-API-Key header"` | No se envió el header (típico al pegar la URL en el navegador). | Enviar el header `X-API-Key` desde Postman/Insomnia o `curl`. El navegador no sirve para probar. |
+| `401` con `"Error": "Invalid API key"` | Clave incorrecta o nombre de header mal escrito. | Verificar que la clave sea la provista y que el header se llame exactamente `X-API-Key`. |
+| `ProcesadoOk: true` pero `PriceData: []` | El filtro (fechas, cadena o EAN) no coincide con ningún registro. **No es un error.** | Ampliar el rango de fechas o quitar filtros. Los datos publicados son recientes: un `from`/`to` fuera del período disponible devuelve vacío. Probar primero sin filtros. |
+| En PowerShell: `Invoke-WebRequest : Missing an argument for parameter 'SessionVariable'` | `curl` es un alias de `Invoke-WebRequest`, que no entiende `-H`. | Usar `curl.exe` (no `curl`) y encerrar la URL entre comillas. |
 
 ---
 
