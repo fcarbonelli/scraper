@@ -12,7 +12,8 @@
       "subcategory": "GASEOSAS",
       "format": "2.25L",
       "variety": "REGULAR",
-      "source": "catalog"
+      "image_url": "https://images.example.com/coca-cola-2250.jpg",
+      "source": "products"
     }
   },
   "meta": { "ts": "2026-07-16T01:31:12.400Z" }

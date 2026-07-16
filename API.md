@@ -1594,6 +1594,7 @@ anything. Use it to show the operator the product name before they type a price.
     subcategory: string | null;
     format: string | null;
     variety: string | null;
+    image_url: string | null;     // product photo (products.metadata.imageUrl); null for catalog-only matches
     source: "products" | "catalog";
   } | null;                        // null when found=false
 }

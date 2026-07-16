@@ -18,7 +18,7 @@ import { db } from '../../shared/db.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
-import { resolveEan } from '../../instore/resolve.js';
+import { resolveEan, type ResolvedProduct } from '../../instore/resolve.js';
 import { recordInStoreEntry, InStoreError } from '../../instore/entry.js';
 
 export const inStoreRouter = Router();
@@ -77,6 +77,23 @@ const LookupQuery = z.object({
   ean: z.string().trim().regex(/^\d{8,14}$/, 'EAN must be 8–14 digits'),
 });
 
+/** Map the resolver's internal (camelCase) shape to the snake_case API contract. */
+function toApiProduct(p: ResolvedProduct): Record<string, unknown> {
+  return {
+    product_id: p.productId,
+    ean: p.ean,
+    name: p.name,
+    brand: p.brand,
+    manufacturer: p.manufacturer,
+    category: p.category,
+    subcategory: p.subcategory,
+    format: p.format,
+    variety: p.variety,
+    image_url: p.imageUrl,
+    source: p.source,
+  };
+}
+
 inStoreRouter.get('/lookup', async (req: Request, res: Response) => {
   const q = parseQuery(req, LookupQuery);
   const product = await resolveEan(q.ean);
@@ -84,7 +101,7 @@ inStoreRouter.get('/lookup', async (req: Request, res: Response) => {
     success({
       ean: q.ean,
       found: product !== null,
-      product,
+      product: product ? toApiProduct(product) : null,
     }),
   );
 });

@@ -36,6 +36,8 @@ export interface ResolvedProduct {
   subcategory: string | null;
   format: string | null;
   variety: string | null;
+  /** Product photo (from products.metadata.imageUrl). null for catalog-only matches. */
+  imageUrl: string | null;
   source: MatchSource;
 }
 
@@ -48,10 +50,11 @@ interface ProductRow {
   subcategory: string | null;
   format: string | null;
   variety: string | null;
+  metadata: { imageUrl?: string | null } | null;
 }
 
 const PRODUCT_COLS =
-  'id, name, brand, manufacturer, category, subcategory, format, variety';
+  'id, name, brand, manufacturer, category, subcategory, format, variety, metadata';
 
 /** Find an existing master product by EAN. */
 async function findProductByEan(ean: string): Promise<ProductRow | null> {
@@ -75,6 +78,9 @@ function taxonomyToResolved(ean: string, t: TaxonomyEntry): ResolvedProduct {
     subcategory: t.subcategory || null,
     format: t.format || null,
     variety: t.variety || null,
+    // Catalog-only matches have no product row yet, so no image — the UI shows
+    // a placeholder.
+    imageUrl: null,
     source: 'catalog',
   };
 }
@@ -96,6 +102,7 @@ export async function resolveEan(ean: string): Promise<ResolvedProduct | null> {
       subcategory: existing.subcategory,
       format: existing.format,
       variety: existing.variety,
+      imageUrl: existing.metadata?.imageUrl ?? null,
       source: 'products',
     };
   }

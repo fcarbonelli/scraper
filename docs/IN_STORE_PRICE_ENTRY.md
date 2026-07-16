@@ -202,7 +202,9 @@ Resolve a scan (read-only). →
 { ean: string; found: boolean; product: {
     product_id: string | null; ean: string; name: string; brand: string | null;
     manufacturer: string | null; category: string | null; subcategory: string | null;
-    format: string | null; variety: string | null; source: 'products' | 'catalog';
+    format: string | null; variety: string | null;
+    image_url: string | null;   // product photo; null for catalog-only matches (show a placeholder)
+    source: 'products' | 'catalog';
   } | null }
 ```
 `found: false` → not in catalog → let the worker skip.
