@@ -195,6 +195,10 @@ api_keys (
   key_hash        text       -- bcrypt hash, never store plaintext
   is_active       bool
   rate_limit      int        -- requests per minute
+  scopes          text[]     -- migration 009. NULL/empty = full access; else the
+                             -- key is restricted to matching route prefixes
+                             -- (e.g. {'in-store'} → only /v1/in-store/*). Used for
+                             -- the key embedded in the public in-store mobile app.
   created_at      timestamptz
   last_used_at    timestamptz
 )
@@ -251,6 +255,43 @@ revista_review_items (
   reviewed_at                       timestamptz
   resulting_supermarket_product_id  uuid FK      -- set on approve
   resulting_snapshot_id             bigint       -- set on approve
+  created_at                        timestamptz
+)
+
+-- In-store manual price entry layer — migration 009. For (mostly wholesale)
+-- chains where a field worker physically visits the store, scans a barcode, and
+-- types the shelf price into a mobile web tool (src/instore/, /v1/in-store/*).
+-- A chain opts in via supermarkets.config.instore = { enabled: true } (orthogonal
+-- to source_type — a web or revista chain can ALSO collect in-store prices; only
+-- its in-store mappings are hand-entered). Pure in-store chains (Nini, Diarco,
+-- Yaguar, Don Gastón, Oscar David) use config = { source_type: 'instore',
+-- instore: { enabled: true } }.
+--
+-- A submission resolves the EAN to a master product (creating one from catalog
+-- taxonomy if needed), ensures a supermarket_products mapping (synthetic
+-- external_id = 'instore-<productId>', metadata.source='instore'), and writes ONE
+-- RUN-LESS price_snapshots row (tier_used='manual', status='ok', raw_data.source=
+-- 'instore') — trusted, always client-visible, no publish gate.
+--
+-- In-store chains/mappings are EXCLUDED from the daily BullMQ enqueue
+-- (src/orchestrator/enqueue.ts). A daily carry-forward (src/instore/carryForward.ts)
+-- re-emits each in-store mapping's latest price as a fresh snapshot dated today,
+-- so prices persist in the export between visits (entered ~twice a week).
+-- Idempotent per day. instore_price_entries is the audit log (who/what/when).
+instore_price_entries (
+  id                                uuid PK
+  supermarket_id                    text FK
+  ean                               text
+  product_id                        uuid FK        -- resolved/created master product
+  resulting_supermarket_product_id  uuid FK
+  resulting_snapshot_id             bigint
+  price                             numeric(12,2)  -- regular / shelf price as entered
+  list_price                        numeric(12,2)  -- regular when marked down
+  promo_price                       numeric(12,2)  -- offer price, if any
+  promo_text                        text           -- e.g. '2x1', '-30%'
+  entered_by                        text           -- field worker's name (required)
+  api_key_id                        uuid FK        -- which embedded key submitted
+  note                              text
   created_at                        timestamptz
 )
 ```
@@ -721,6 +762,15 @@ Decisions locked in:
   the canonical master (merging + enriching from the catalog; price history preserved via
   `src/ingest/bindEan.ts`). Worklist at `GET /v1/products/missing-ean`. Fixes blank
   general columns in the client_base export.
+- **In-store manual price entry** (migration `009`; `src/instore/`; `/v1/in-store/*`): a
+  mobile web tool for field workers who scan barcodes in physical (wholesale) stores and
+  type shelf prices. Trusted run-less snapshots (`tier_used='manual'`, `raw_data.source=
+  'instore'`) carried forward daily (`carryForwardInStorePrices`) so prices persist between
+  visits. Chains flagged via `config.instore.enabled`; pure in-store chains use
+  `source_type='instore'` (Nini, Diarco, Yaguar, Don Gastón, Oscar David — plus Makro/Vital/
+  Maxiconsumo which also keep their existing source). API key scoping (`api_keys.scopes`)
+  lets the app embed a key limited to `/v1/in-store/*`. Frontend contract:
+  `docs/IN_STORE_PRICE_ENTRY.md`.
 
 ---
 

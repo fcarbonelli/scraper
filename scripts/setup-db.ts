@@ -47,6 +47,23 @@ function revista(
   return { source_type: 'revista', revista: r };
 }
 
+/**
+ * config marker enabling the in-store manual price-entry tool for a chain.
+ * Chains with this flag appear in the in-store app's store dropdown. It's
+ * orthogonal to source_type — a web-scraped or revista chain can ALSO collect
+ * in-store scanned prices (only its in-store mappings are hand-entered).
+ */
+const INSTORE_ENABLED = { instore: { enabled: true } } as const;
+
+/**
+ * config for a pure in-store chain: no web adapter, no revista — its only
+ * prices come from field workers scanning barcodes on-site. `source_type:
+ * 'instore'` keeps it out of the daily web-scrape enqueue.
+ */
+function instoreOnly(): Record<string, unknown> {
+  return { source_type: 'instore', ...INSTORE_ENABLED };
+}
+
 // =============================================================================
 // Supermarket catalog — sourced from client's "Clientes" sheet.
 //
@@ -73,7 +90,8 @@ const SUPERMARKETS: SupermarketSeed[] = [
     zona: 'CAPITAL Y GBA',
     canal: 'MAY NACIONAL',
     cadena_display_name: 'MAKRO',
-    config: revista('html-pdf-links', 'https://makro.com.ar/ofertas/'),
+    // Magazine-sourced AND enabled for in-store scanned prices.
+    config: { ...revista('html-pdf-links', 'https://makro.com.ar/ofertas/'), ...INSTORE_ENABLED },
   },
   {
     id: 'maxi-carrefour',
@@ -98,6 +116,9 @@ const SUPERMARKETS: SupermarketSeed[] = [
     zona: 'CAPITAL Y GBA',
     canal: 'MAY NACIONAL',
     cadena_display_name: 'MAXI CONSUMO',
+    // Web-scraped AND enabled for in-store scanned prices (its in-store mappings
+    // are hand-entered; the web mappings keep scraping as usual).
+    config: { ...INSTORE_ENABLED },
   },
   {
     id: 'vital',
@@ -111,7 +132,8 @@ const SUPERMARKETS: SupermarketSeed[] = [
     zona: 'CAPITAL Y GBA',
     canal: 'MAY NACIONAL',
     cadena_display_name: 'VITAL',
-    config: revista('html-pdf-links', 'https://www.vital.com.ar/ofertas/'),
+    // Magazine-sourced AND enabled for in-store scanned prices.
+    config: { ...revista('html-pdf-links', 'https://www.vital.com.ar/ofertas/'), ...INSTORE_ENABLED },
   },
   {
     id: 'rosental',
@@ -126,6 +148,76 @@ const SUPERMARKETS: SupermarketSeed[] = [
     canal: 'MAY REGIONAL',
     cadena_display_name: 'ROSENTAL',
     config: revista('pubhtml5', 'https://www.rosental.com.ar/', 'https://online.pubhtml5.com/oggo/ignq/'),
+  },
+
+  // --- IN-STORE ONLY (mayorista; prices come from field workers scanning ------
+  //     barcodes on-site — no web adapter, no revista). Excluded from the daily
+  //     scrape; re-emitted daily by carryForwardInStorePrices(). Geography
+  //     below is a best-guess default — adjust provincia/zona/canal as needed.
+  {
+    id: 'diarco',
+    name: 'Diarco',
+    base_url: 'https://www.diarco.com.ar',
+    rate_limit_ms: 500,
+    concurrency: 3,
+    is_active: true,
+    provincia: 'BUENOS AIRES',
+    zona: 'CAPITAL Y GBA',
+    canal: 'MAY NACIONAL',
+    cadena_display_name: 'DIARCO',
+    config: instoreOnly(),
+  },
+  {
+    id: 'yaguar',
+    name: 'Yaguar',
+    base_url: 'https://www.yaguar.com',
+    rate_limit_ms: 500,
+    concurrency: 3,
+    is_active: true,
+    provincia: 'BUENOS AIRES',
+    zona: 'CAPITAL Y GBA',
+    canal: 'MAY NACIONAL',
+    cadena_display_name: 'YAGUAR',
+    config: instoreOnly(),
+  },
+  {
+    id: 'nini',
+    name: 'Nini',
+    base_url: '',
+    rate_limit_ms: 500,
+    concurrency: 3,
+    is_active: true,
+    provincia: 'BUENOS AIRES',
+    zona: 'CAPITAL Y GBA',
+    canal: 'MAY REGIONAL',
+    cadena_display_name: 'NINI',
+    config: instoreOnly(),
+  },
+  {
+    id: 'don-gaston',
+    name: 'Don Gastón',
+    base_url: '',
+    rate_limit_ms: 500,
+    concurrency: 3,
+    is_active: true,
+    provincia: 'BUENOS AIRES',
+    zona: 'CAPITAL Y GBA',
+    canal: 'MAY REGIONAL',
+    cadena_display_name: 'DON GASTON',
+    config: instoreOnly(),
+  },
+  {
+    id: 'oscar-david',
+    name: 'Oscar David',
+    base_url: '',
+    rate_limit_ms: 500,
+    concurrency: 3,
+    is_active: true,
+    provincia: 'BUENOS AIRES',
+    zona: 'CAPITAL Y GBA',
+    canal: 'MAY REGIONAL',
+    cadena_display_name: 'OSCAR DAVID',
+    config: instoreOnly(),
   },
 
   // --- SPM NACIONAL (national supermarkets) ---------------------------------

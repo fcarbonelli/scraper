@@ -22,11 +22,22 @@ interface CachedKey {
   id: string;
   name: string;
   isActive: boolean;
+  /** Route scopes. null/empty = full access; otherwise restricted (see enforceScopes). */
+  scopes: string[] | null;
   cachedAt: number;
 }
 
 const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, CachedKey>();
+
+/**
+ * Maps a key scope to the URL prefix it's allowed to reach. A scoped key is
+ * rejected on any path outside its allowed prefix(es); an unscoped key (full
+ * access) is unaffected. Keep this in sync when adding new scoped route groups.
+ */
+const SCOPE_PREFIXES: Record<string, string> = {
+  'in-store': '/v1/in-store',
+};
 
 function hashKey(plaintext: string): string {
   return createHash('sha256').update(plaintext).digest('hex');
@@ -35,15 +46,17 @@ function hashKey(plaintext: string): string {
 async function lookupKey(keyHash: string): Promise<CachedKey | null> {
   const { data, error } = await db
     .from('api_keys')
-    .select('id, name, is_active')
+    .select('id, name, is_active, scopes')
     .eq('key_hash', keyHash)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
+  const rawScopes = data.scopes as string[] | null;
   return {
     id: data.id as string,
     name: data.name as string,
     isActive: data.is_active as boolean,
+    scopes: rawScopes && rawScopes.length > 0 ? rawScopes : null,
     cachedAt: Date.now(),
   };
 }
@@ -83,7 +96,7 @@ export async function requireApiKey(
       throw ApiError.unauthorized('API key is disabled');
     }
 
-    req.apiKey = { id: entry.id, name: entry.name };
+    req.apiKey = { id: entry.id, name: entry.name, scopes: entry.scopes };
 
     // Best-effort last_used_at update — don't block the request on it.
     void db
@@ -100,5 +113,43 @@ export async function requireApiKey(
   }
 }
 
+/**
+ * Route-scope guard. Mount right after {@link requireApiKey} on `/v1`.
+ *
+ * Full-access keys (`scopes` null/empty) pass through untouched. A scoped key
+ * may only reach paths under a prefix mapped to one of its scopes — every other
+ * `/v1` route returns 403. This lets us embed a narrowly-scoped key in the
+ * public in-store mobile app: if it leaks, it can only submit in-store prices,
+ * never touch the rest of the API.
+ */
+export function enforceScopes(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  const scopes = req.apiKey?.scopes;
+  if (!scopes || scopes.length === 0) {
+    next();
+    return;
+  }
+  const path = req.originalUrl.split('?')[0] ?? '';
+  const allowed = scopes.some((scope) => {
+    const prefix = SCOPE_PREFIXES[scope];
+    return prefix != null && path.startsWith(prefix);
+  });
+  if (!allowed) {
+    next(
+      new ApiError(
+        'FORBIDDEN',
+        'This API key is not allowed to access this endpoint',
+      ),
+    );
+    return;
+  }
+  next();
+}
+
 /** Exposed for the create-api-key script so it uses the same hash function. */
 export { hashKey };
+/** Exposed so scripts/tooling can validate a requested scope name. */
+export { SCOPE_PREFIXES };

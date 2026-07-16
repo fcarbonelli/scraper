@@ -1,0 +1,19 @@
+{
+  "data": {
+    "ean": "7790040999999",
+    "found": true,
+    "product": {
+      "product_id": "50bb31b8-2222-4aaa-8bbb-000000000002",
+      "ean": "7790040999999",
+      "name": "Gaseosa Cola 2.25L",
+      "brand": "COCA COLA",
+      "manufacturer": "COCA COLA",
+      "category": "BEBIDAS",
+      "subcategory": "GASEOSAS",
+      "format": "2.25L",
+      "variety": "REGULAR",
+      "source": "catalog"
+    }
+  },
+  "meta": { "ts": "2026-07-16T01:31:12.400Z" }
+}

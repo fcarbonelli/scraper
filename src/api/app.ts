@@ -11,7 +11,7 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import './types.js'; // module augmentation for req.apiKey, req.pagination
 
-import { requireApiKey } from './middleware/auth.js';
+import { requireApiKey, enforceScopes } from './middleware/auth.js';
 import { pagination } from './middleware/pagination.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
@@ -26,6 +26,7 @@ import { alertsRouter } from './routes/alerts.js';
 import { dataRouter } from './routes/data.js';
 import { catalogRouter } from './routes/catalog.js';
 import { revistasRouter } from './routes/revistas.js';
+import { inStoreRouter } from './routes/inStore.js';
 import { telegramRouter } from './routes/telegram.js';
 
 export function buildApp(): Express {
@@ -55,7 +56,9 @@ export function buildApp(): Express {
   app.use('/telegram', telegramRouter);
 
   // Everything below requires a valid API key + has pagination available.
-  app.use('/v1', requireApiKey, pagination);
+  // `enforceScopes` restricts scoped keys (e.g. the in-store app key) to their
+  // allowed route prefixes; full-access keys pass through untouched.
+  app.use('/v1', requireApiKey, pagination, enforceScopes);
 
   app.use('/v1/products', productsRouter);
   app.use('/v1/supermarkets', supermarketsRouter);
@@ -66,6 +69,7 @@ export function buildApp(): Express {
   app.use('/v1/data', dataRouter);
   app.use('/v1/catalog', catalogRouter);
   app.use('/v1/revistas', revistasRouter);
+  app.use('/v1/in-store', inStoreRouter);
 
   // 404 + error handlers (must be last).
   app.use(notFoundHandler);

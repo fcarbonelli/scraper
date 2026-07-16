@@ -6,22 +6,44 @@
  * The plaintext is never recoverable after this.
  *
  * Usage:
- *   npx tsx --env-file=.env scripts/create-api-key.ts <name>
+ *   npx tsx --env-file=.env scripts/create-api-key.ts <name> [--scope=<scope>]
+ *
+ * `--scope` may be repeated. When given, the key is RESTRICTED to routes under
+ * that scope (see SCOPE_PREFIXES in src/api/middleware/auth.ts); with no scope
+ * flag the key has full API access. Use a scoped key for embedded/public apps.
  *
  * Examples:
  *   npx tsx --env-file=.env scripts/create-api-key.ts frontend-prod
  *   npx tsx --env-file=.env scripts/create-api-key.ts internal-test
+ *   npx tsx --env-file=.env scripts/create-api-key.ts instore-app --scope=in-store
  */
 
 import { randomBytes } from 'node:crypto';
 import { db } from '../src/shared/db.js';
 import { logger } from '../src/shared/logger.js';
-import { hashKey } from '../src/api/middleware/auth.js';
+import { hashKey, SCOPE_PREFIXES } from '../src/api/middleware/auth.js';
 
 async function main(): Promise<void> {
-  const name = process.argv[2]?.trim();
+  const args = process.argv.slice(2);
+  const scopes: string[] = [];
+  let name: string | undefined;
+  for (const a of args) {
+    if (a.startsWith('--scope=')) {
+      scopes.push(a.slice('--scope='.length).trim());
+    } else if (!a.startsWith('--')) {
+      name = name ?? a.trim();
+    }
+  }
+
   if (!name) {
-    logger.error('Usage: npx tsx --env-file=.env scripts/create-api-key.ts <name>');
+    logger.error('Usage: npx tsx --env-file=.env scripts/create-api-key.ts <name> [--scope=<scope>]');
+    process.exit(1);
+  }
+
+  const validScopes = Object.keys(SCOPE_PREFIXES);
+  const badScope = scopes.find((s) => !validScopes.includes(s));
+  if (badScope) {
+    logger.error({ badScope, validScopes }, 'unknown scope');
     process.exit(1);
   }
 
@@ -36,8 +58,9 @@ async function main(): Promise<void> {
       key_hash: keyHash,
       is_active: true,
       rate_limit: 60,
+      scopes: scopes.length > 0 ? scopes : null,
     })
-    .select('id, name, created_at')
+    .select('id, name, created_at, scopes')
     .single();
 
   if (error) {
@@ -53,6 +76,8 @@ async function main(): Promise<void> {
   console.log(`Name:    ${data.name}`);
   // eslint-disable-next-line no-console
   console.log(`Id:      ${data.id}`);
+  // eslint-disable-next-line no-console
+  console.log(`Scopes:  ${(data.scopes as string[] | null)?.join(', ') || '(full access)'}`);
   // eslint-disable-next-line no-console
   console.log(`Created: ${data.created_at}`);
   // eslint-disable-next-line no-console

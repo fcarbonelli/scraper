@@ -28,7 +28,16 @@ interface SupermarketProductRow {
   supermarket_id: string;
   external_id: string;
   external_url: string | null;
+  metadata: { source?: string } | null;
 }
+
+/**
+ * Supermarket source types that have no web scraper adapter — their prices come
+ * from humans (magazine review / in-store scans) and are re-emitted daily by
+ * their own carry-forward. Enqueueing them would just fail every job with
+ * "No adapter registered".
+ */
+const NON_SCRAPED_SOURCE_TYPES = new Set(['revista', 'instore']);
 
 /** Result summary for logs/observability. */
 export interface RunDailyResult {
@@ -72,10 +81,9 @@ export async function runDailyScrape(
   log.info({ startedAt }, 'starting daily scrape run');
 
   // 2. Load active supermarkets (optionally filtered to a single id).
-  //    Magazine ("revista") chains are intentionally EXCLUDED: they have no
-  //    scraper adapter (their prices come from human-approved PDF review, and
-  //    are re-emitted daily by carryForwardRevistaPrices()). Enqueueing them
-  //    would just fail every job with "No adapter registered".
+  //    Human-sourced chains (magazine "revista", in-store scans) are EXCLUDED:
+  //    they have no scraper adapter and are re-emitted daily by their own
+  //    carry-forward. Enqueueing them would just fail with "No adapter registered".
   let smQuery = db
     .from('supermarkets')
     .select('id, name, config')
@@ -84,7 +92,7 @@ export async function runDailyScrape(
   const smRes = await smQuery;
   if (smRes.error) throw smRes.error;
   const supermarkets = ((smRes.data ?? []) as SupermarketRow[]).filter(
-    (s) => s.config?.source_type !== 'revista',
+    (s) => !NON_SCRAPED_SOURCE_TYPES.has(s.config?.source_type ?? ''),
   );
 
   if (supermarkets.length === 0) {
@@ -107,7 +115,7 @@ export async function runDailyScrape(
   for (const sm of supermarkets) {
     const productsRes = await db
       .from('supermarket_products')
-      .select('id, supermarket_id, external_id, external_url')
+      .select('id, supermarket_id, external_id, external_url, metadata')
       .eq('supermarket_id', sm.id)
       .eq('is_active', true);
     if (productsRes.error) {
@@ -117,7 +125,12 @@ export async function runDailyScrape(
       );
       continue;
     }
-    const products = (productsRes.data ?? []) as SupermarketProductRow[];
+    // Skip in-store mappings even on a web-scraped chain (e.g. Maxiconsumo can
+    // have both): they have a synthetic external_id, not a real URL, so a scrape
+    // would always fail. Their prices are handled by carryForwardInStorePrices().
+    const products = ((productsRes.data ?? []) as SupermarketProductRow[]).filter(
+      (p) => p.metadata?.source !== 'instore',
+    );
     if (products.length === 0) {
       log.info({ supermarket: sm.id }, 'no active products for supermarket, skipping');
       bySupermarket[sm.id] = 0;

@@ -1,0 +1,13 @@
+{
+  "data": [
+    { "id": "diarco", "name": "Diarco", "display_name": "DIARCO" },
+    { "id": "don-gaston", "name": "Don Gastón", "display_name": "DON GASTON" },
+    { "id": "makro", "name": "Makro", "display_name": "MAKRO" },
+    { "id": "maxiconsumo", "name": "Maxiconsumo", "display_name": "MAXI CONSUMO" },
+    { "id": "nini", "name": "Nini", "display_name": "NINI" },
+    { "id": "oscar-david", "name": "Oscar David", "display_name": "OSCAR DAVID" },
+    { "id": "vital", "name": "Vital", "display_name": "VITAL" },
+    { "id": "yaguar", "name": "Yaguar", "display_name": "YAGUAR" }
+  ],
+  "meta": { "ts": "2026-07-16T01:30:00.000Z", "total": 8 }
+}

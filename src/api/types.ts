@@ -11,7 +11,7 @@ import type { PaginationQuery } from './lib/parseQuery.js';
 declare module 'express-serve-static-core' {
   interface Request {
     /** Populated by `auth` middleware after successful key validation. */
-    apiKey?: { id: string; name: string };
+    apiKey?: { id: string; name: string; scopes: string[] | null };
     /** Populated by `pagination` middleware. */
     pagination?: PaginationQuery & { offset: number };
   }

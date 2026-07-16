@@ -1542,6 +1542,140 @@ Errors: `409 CONFLICT` when items are still pending and `force` is not set.
 
 ---
 
+## In-store (manual price entry)
+
+A mobile-web tool for field workers who visit physical (mostly wholesale) stores,
+scan a product barcode, and type the shelf price. Submissions are trusted (the
+operator on-site is the gate): each writes a **run-less** `price_snapshots` row
+(always client-visible, no publish gate) and is **carried forward daily** until a
+newer entry replaces it — so a price checked on Monday keeps exporting every day
+until the next visit.
+
+> **Full spec (mobile UX, barcode scanner, offline queue, session model):**
+> [`docs/IN_STORE_PRICE_ENTRY.md`](./docs/IN_STORE_PRICE_ENTRY.md). Fixtures:
+> `examples/api/in-store-supermarkets.json`, `in-store-lookup.json`,
+> `in-store-entry.json`, `in-store-entries.json`.
+
+**Auth.** These routes accept the platform-standard `X-API-Key`. The mobile app
+embeds a key **scoped to `in-store`** (created with
+`npm run apikey:create -- instore-app --scope=in-store`). A scoped key can reach
+**only** `/v1/in-store/*` — every other `/v1` route returns `403 FORBIDDEN` — so a
+leaked app key can't touch the rest of the API. Full-access keys work here too.
+
+### `GET /v1/in-store/supermarkets`
+
+The chains to show in the store dropdown (every active supermarket flagged
+`config.instore.enabled`). No pagination.
+
+```ts
+{ data: { id: string; name: string; display_name: string }[]; meta: { ts; total } }
+```
+
+### `GET /v1/in-store/lookup?ean=<barcode>`
+
+Resolve a scanned barcode against the catalog. **Read-only** — never creates
+anything. Use it to show the operator the product name before they type a price.
+
+| Param | Type | Description |
+|---|---|---|
+| `ean` | string (8–14 digits) | The scanned barcode |
+
+```ts
+{
+  ean: string;
+  found: boolean;
+  product: {
+    product_id: string | null;   // null when it exists only in the catalog (not yet created)
+    ean: string;
+    name: string;
+    brand: string | null;
+    manufacturer: string | null;
+    category: string | null;
+    subcategory: string | null;
+    format: string | null;
+    variety: string | null;
+    source: "products" | "catalog";
+  } | null;                        // null when found=false
+}
+```
+
+`found: false` means the EAN is in neither our products nor the client catalog —
+the UI should let the operator skip it. Errors: `400 INVALID_REQUEST` (bad EAN).
+
+### `POST /v1/in-store/entries`
+
+Submit one scanned price. Resolves the EAN to a master product (creating one from
+catalog taxonomy if needed), ensures the in-store mapping, writes the snapshot,
+and logs the submission. Body:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `supermarket_id` | string | yes | Must be an `instore.enabled` chain |
+| `ean` | string (8–14 digits) | yes | Scanned barcode |
+| `price` | number > 0 | yes | Regular / shelf price |
+| `promo_price` | number > 0 \| null | no | Offer price when there's a promo |
+| `promo_text` | string \| null | no | Promo description (e.g. `"2x1"`, `"-30%"`) |
+| `list_price` | number > 0 \| null | no | Reserved; normally derived from promo |
+| `entered_by` | string (1–120) | yes | Field worker's name (from their browser) |
+| `note` | string \| null | no | Optional free text |
+
+**201** with:
+
+```ts
+{
+  entry_id: string;
+  supermarket_id: string;
+  ean: string;
+  product_id: string;
+  supermarket_product_id: string;
+  snapshot_id: number;
+  price: number;              // selling price stored (promo when present)
+  list_price: number | null;  // regular price when marked down
+  promo_price: number | null;
+  promo_text: string | null;
+  entered_by: string;
+  created_at: string;         // ISO
+}
+```
+
+Errors: `400 INVALID_REQUEST` (bad body, or chain not enabled for in-store),
+`404 NOT_FOUND` (unknown store, or EAN not in catalog).
+
+### `GET /v1/in-store/entries`
+
+Recent submissions — powers the "today's entries" list and operator review.
+Defaults to **today (Buenos Aires)** when no `date` is given. Paginated.
+
+| Param | Type | Description |
+|---|---|---|
+| `date` | `YYYY-MM-DD` | A single Buenos Aires day (default: today) |
+| `supermarket_id` | string | Only one chain |
+| `entered_by` | string | Only one person |
+| `page`, `limit` | int | Pagination |
+
+Each item:
+
+```ts
+{
+  id: string;
+  supermarket_id: string;
+  supermarket_name: string | null;
+  ean: string;
+  product_id: string | null;
+  product_name: string | null;
+  brand: string | null;
+  price: number;
+  list_price: number | null;
+  promo_price: number | null;
+  promo_text: string | null;
+  entered_by: string;
+  note: string | null;
+  created_at: string;
+}
+```
+
+---
+
 ## Quickstart
 
 ### cURL

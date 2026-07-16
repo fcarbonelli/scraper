@@ -26,6 +26,7 @@ import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
 import { carryForwardRevistaPrices } from '../revistas/carryForward.js';
+import { carryForwardInStorePrices } from '../instore/carryForward.js';
 
 initSentry('orchestrator');
 
@@ -77,6 +78,18 @@ async function runRevistaCheckWithErrorHandling(
   } catch (err) {
     logger.error({ err }, 'revista carry-forward failed');
     captureError(err, { phase: 'revista-carry-forward' });
+  }
+
+  // Same idea for in-store scanned prices: re-emit each in-store mapping's
+  // latest hand-entered price as a fresh run-less snapshot dated today so it
+  // persists in the export until a worker's next visit supersedes it. Runs
+  // every day, independent of any scrape run's publish gate.
+  try {
+    const carry = await carryForwardInStorePrices();
+    if (carry.carried > 0) logger.info({ carry }, 'instore carry-forward complete');
+  } catch (err) {
+    logger.error({ err }, 'instore carry-forward failed');
+    captureError(err, { phase: 'instore-carry-forward' });
   }
 }
 

@@ -44,6 +44,9 @@ export class ApiError extends Error {
   static unauthorized(message = 'Missing or invalid API key'): ApiError {
     return new ApiError('UNAUTHORIZED', message);
   }
+  static forbidden(message = 'Not allowed'): ApiError {
+    return new ApiError('FORBIDDEN', message);
+  }
   static notFound(resource: string): ApiError {
     return new ApiError('NOT_FOUND', `${resource} not found`);
   }
