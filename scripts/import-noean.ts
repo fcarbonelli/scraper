@@ -18,6 +18,7 @@
  */
 
 import ExcelJSmod from 'exceljs';
+import type { Row as ExcelRow } from 'exceljs';
 import { db } from '../src/shared/db.js';
 import { bindMappingToEan } from '../src/ingest/bindEan.js';
 
@@ -52,7 +53,7 @@ async function readRows(path: string): Promise<Row[]> {
   const header = new Map<string, number>();
   ws.getRow(1).eachCell((cell, col) => header.set(cellStr(cell.value).toUpperCase(), col));
   const col = (name: string): number => header.get(name.toUpperCase()) ?? -1;
-  const get = (row: ExcelJS.Row, name: string): string => {
+  const get = (row: ExcelRow, name: string): string => {
     const c = col(name);
     return c > 0 ? cellStr(row.getCell(c).value) : '';
   };
