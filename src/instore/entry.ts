@@ -1,17 +1,24 @@
 /**
  * Record an in-store price entry.
  *
- * A field worker, physically in the store, scans a barcode and types the shelf
- * price. That submission:
+ * A field worker, physically in the store, scans a barcode and enters the price
+ * fields the client asked for:
+ *   - price               Precio Regular (unitario)          → snapshot.price
+ *   - wholesalePrice      Precio con oferta (precio mayorista) → snapshot.offer_price_1
+ *   - wholesaleMinUnits   a partir de cuántas u. es mayorista  → snapshot.promotion_1 / raw_data
+ *   - note                Observaciones                        → raw_data.note
+ *
+ * The submission:
  *   1. resolves the EAN to a master product (creating one from catalog if
  *      needed — see resolve.ts),
  *   2. ensures a `supermarket_products` mapping for (store, product),
  *   3. writes ONE run-less `price_snapshots` row (trusted, always
  *      client-visible; carried forward daily until superseded),
- *   4. logs the submission to `instore_price_entries` for attribution/review.
+ *   4. logs the submission to `instore_price_entries` (linked to the PDV visit).
  *
- * The operator on-site is the gate, so snapshots are RUN-LESS (scrape_run_id =
- * null) exactly like the revista and manual-snapshot paths.
+ * Entries normally belong to a visit (see visits.ts): the visit carries the
+ * store, the worker name, and the branch location. Passing `supermarketId` +
+ * `enteredBy` directly (no visit) is still supported for one-off submissions.
  */
 
 import { db } from '../shared/db.js';
@@ -26,17 +33,28 @@ export function inStoreExternalId(productId: string): string {
 /** Marks mappings/snapshots created by the in-store tool (used by enqueue + carry-forward). */
 export const IN_STORE_SOURCE = 'instore';
 
+/** A branch location, captured on the visit. */
+export interface VisitLocation {
+  provincia: string | null;
+  localidad: string | null;
+  direccion: string | null;
+}
+
 export interface InStoreEntryInput {
-  supermarketId: string;
+  /** The PDV visit this entry belongs to (preferred). */
+  visitId?: string | null;
+  /** Required when there's no visitId. */
+  supermarketId?: string;
   ean: string;
-  /** Regular / shelf price the operator sees. */
+  /** Precio Regular (unitario). */
   price: number;
-  /** Sale/offer price, when there's a promotion. */
-  promoPrice?: number | null;
-  /** Free-text promo description (e.g. "2x1", "-30%"). */
-  promoText?: string | null;
-  /** Field worker's name (saved in their browser, required). */
-  enteredBy: string;
+  /** Precio con oferta (precio mayorista). */
+  wholesalePrice?: number | null;
+  /** A partir de cuántas unidades aplica el precio mayorista. */
+  wholesaleMinUnits?: number | null;
+  /** Worker name. Required when there's no visitId (else inherited from the visit). */
+  enteredBy?: string;
+  /** Observaciones. */
   note?: string | null;
   /** The API key that submitted (for the audit log). */
   apiKeyId?: string | null;
@@ -44,17 +62,45 @@ export interface InStoreEntryInput {
 
 export interface InStoreEntryResult {
   entryId: string;
+  visitId: string | null;
   supermarketId: string;
   ean: string;
   productId: string;
   supermarketProductId: string;
   snapshotId: number;
   price: number;
-  listPrice: number | null;
-  promoPrice: number | null;
-  promoText: string | null;
+  wholesalePrice: number | null;
+  wholesaleMinUnits: number | null;
   enteredBy: string;
+  note: string | null;
   createdAt: string;
+}
+
+/** Domain error with a coarse kind the route maps to an HTTP status. */
+export class InStoreError extends Error {
+  readonly kind: 'not_found' | 'invalid';
+  constructor(kind: 'not_found' | 'invalid', message: string) {
+    super(message);
+    this.name = 'InStoreError';
+    this.kind = kind;
+  }
+}
+
+/** Ensure the supermarket exists, is active, and is flagged for in-store entry. */
+export async function assertInStoreSupermarket(supermarketId: string): Promise<void> {
+  const { data, error } = await db
+    .from('supermarkets')
+    .select('id, is_active, config')
+    .eq('id', supermarketId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || !data.is_active) {
+    throw new InStoreError('not_found', `Supermarket "${supermarketId}" not found or inactive`);
+  }
+  const cfg = data.config as { instore?: { enabled?: boolean } } | null;
+  if (!cfg?.instore?.enabled) {
+    throw new InStoreError('invalid', `Supermarket "${supermarketId}" is not enabled for in-store entry`);
+  }
 }
 
 /**
@@ -93,30 +139,42 @@ async function ensureInStoreMapping(
   return inserted.data.id as string;
 }
 
-interface SnapshotPrices {
+interface SnapshotInput {
   price: number;
-  promoPrice: number | null;
-  promoText: string | null;
+  wholesalePrice: number | null;
+  wholesaleMinUnits: number | null;
 }
 
 /**
- * Write one run-less snapshot for an in-store entry. Price semantics match the
- * platform convention (also used by revista): `price` = the selling price (the
- * promo price when there's an offer), `list_price` = the regular crossed-out
- * price when marked down, promo text → Promocion_1.
+ * Write one run-less snapshot for an in-store entry.
+ *
+ * Price semantics chosen so the client_base export is correct without touching
+ * the view: `price` = the regular unit price (→ Precio_Regular), `offer_price_1`
+ * = the wholesale price (→ Precio_c_Oferta_1), and the min-units threshold
+ * becomes the promo text (→ Promocion_1). `list_price` stays null.
  */
 async function writeSnapshot(
   supermarketProductId: string,
-  prices: SnapshotPrices,
-  meta: { enteredBy: string; ean: string; apiKeyId: string | null; note: string | null },
-): Promise<{ snapshotId: number; listPrice: number | null }> {
-  const hasPromo = prices.promoPrice != null && prices.promoPrice > 0;
-  const regular = prices.price;
-  const selling = hasPromo ? (prices.promoPrice as number) : regular;
-  const listPrice = hasPromo && regular > selling ? regular : null;
-
-  const promotions = prices.promoText
-    ? [{ type: 'unknown', description: prices.promoText }]
+  prices: SnapshotInput,
+  meta: {
+    enteredBy: string;
+    ean: string;
+    apiKeyId: string | null;
+    note: string | null;
+    visitId: string | null;
+    location: VisitLocation | null;
+  },
+): Promise<number> {
+  const wholesale = prices.wholesalePrice != null && prices.wholesalePrice > 0 ? prices.wholesalePrice : null;
+  const minUnits = prices.wholesaleMinUnits ?? null;
+  const promoText =
+    wholesale != null
+      ? minUnits != null
+        ? `Precio mayorista desde ${minUnits} u.`
+        : 'Precio mayorista'
+      : null;
+  const promotions = promoText
+    ? [{ type: 'wholesale', description: promoText, min_units: minUnits }]
     : [];
 
   const { data, error } = await db
@@ -126,101 +184,129 @@ async function writeSnapshot(
       // Run-less: operator-trusted, always client-visible, no publish gate.
       scrape_run_id: null,
       scraped_at: new Date().toISOString(),
-      price: selling,
-      list_price: listPrice,
+      price: prices.price,
+      list_price: null,
+      offer_price_1: wholesale,
       in_stock: true,
       currency: 'ARS',
       tier_used: 'manual',
       status: 'ok',
       promotions,
-      promotion_1: prices.promoText ?? null,
-      offer_price_1: hasPromo ? (prices.promoPrice as number) : null,
+      promotion_1: promoText,
       raw_data: {
         source: IN_STORE_SOURCE,
         entered_by: meta.enteredBy,
         ean: meta.ean,
         api_key_id: meta.apiKeyId,
         note: meta.note,
+        visit_id: meta.visitId,
+        wholesale_min_units: minUnits,
+        provincia: meta.location?.provincia ?? null,
+        localidad: meta.location?.localidad ?? null,
+        direccion: meta.location?.direccion ?? null,
       },
     })
     .select('id')
     .single();
   if (error) throw error;
-  return { snapshotId: data.id as number, listPrice };
+  return data.id as number;
 }
 
-/** Domain error with a coarse kind the route maps to an HTTP status. */
-export class InStoreError extends Error {
-  readonly kind: 'not_found' | 'invalid';
-  constructor(kind: 'not_found' | 'invalid', message: string) {
-    super(message);
-    this.name = 'InStoreError';
-    this.kind = kind;
-  }
+interface VisitContext {
+  supermarketId: string;
+  enteredBy: string;
+  location: VisitLocation | null;
 }
 
-/** Ensure the supermarket exists, is active, and is flagged for in-store entry. */
-async function assertInStoreSupermarket(supermarketId: string): Promise<void> {
-  const { data, error } = await db
-    .from('supermarkets')
-    .select('id, is_active, config')
-    .eq('id', supermarketId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data || !data.is_active) {
-    throw new InStoreError('not_found', `Supermarket "${supermarketId}" not found or inactive`);
+/** Resolve the visit (if any) to the store/worker/location used for the entry. */
+async function resolveContext(input: InStoreEntryInput): Promise<VisitContext> {
+  if (input.visitId) {
+    const { data, error } = await db
+      .from('instore_visits')
+      .select('id, supermarket_id, entered_by, provincia, localidad, direccion, status')
+      .eq('id', input.visitId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new InStoreError('not_found', 'Visit not found');
+    if (data.status === 'finished') {
+      throw new InStoreError('invalid', 'Visit is already finished');
+    }
+    return {
+      supermarketId: data.supermarket_id as string,
+      enteredBy: input.enteredBy?.trim() || (data.entered_by as string),
+      location: {
+        provincia: (data.provincia as string | null) ?? null,
+        localidad: (data.localidad as string | null) ?? null,
+        direccion: (data.direccion as string | null) ?? null,
+      },
+    };
   }
-  const cfg = data.config as { instore?: { enabled?: boolean } } | null;
-  if (!cfg?.instore?.enabled) {
-    throw new InStoreError('invalid', `Supermarket "${supermarketId}" is not enabled for in-store entry`);
+
+  // No visit: caller must supply store + worker directly.
+  if (!input.supermarketId) {
+    throw new InStoreError('invalid', 'supermarket_id is required when no visit_id is given');
   }
+  if (!input.enteredBy?.trim()) {
+    throw new InStoreError('invalid', 'entered_by is required when no visit_id is given');
+  }
+  await assertInStoreSupermarket(input.supermarketId);
+  return { supermarketId: input.supermarketId, enteredBy: input.enteredBy.trim(), location: null };
 }
 
 /**
  * Record one in-store price submission end to end. Throws InStoreError for
- * caller mistakes (unknown store, EAN not in catalog); the route maps those to
- * HTTP status codes.
+ * caller mistakes (unknown store/visit, EAN not in catalog); the route maps
+ * those to HTTP status codes.
  */
 export async function recordInStoreEntry(
   input: InStoreEntryInput,
 ): Promise<InStoreEntryResult> {
-  await assertInStoreSupermarket(input.supermarketId);
+  const ctx = await resolveContext(input);
 
   const productId = await ensureMasterProductForEan(input.ean);
   if (!productId) {
-    throw new InStoreError(
-      'not_found',
-      `EAN ${input.ean} is not in the catalog`,
-    );
+    throw new InStoreError('not_found', `EAN ${input.ean} is not in the catalog`);
   }
 
-  const spId = await ensureInStoreMapping(input.supermarketId, productId);
+  const spId = await ensureInStoreMapping(ctx.supermarketId, productId);
 
-  const prices: SnapshotPrices = {
-    price: input.price,
-    promoPrice: input.promoPrice ?? null,
-    promoText: input.promoText ?? null,
-  };
-  const { snapshotId, listPrice } = await writeSnapshot(spId, prices, {
-    enteredBy: input.enteredBy,
-    ean: input.ean,
-    apiKeyId: input.apiKeyId ?? null,
-    note: input.note ?? null,
-  });
+  const wholesalePrice =
+    input.wholesalePrice != null && input.wholesalePrice > 0 ? input.wholesalePrice : null;
+  const wholesaleMinUnits = input.wholesaleMinUnits ?? null;
+
+  const snapshotId = await writeSnapshot(
+    spId,
+    { price: input.price, wholesalePrice, wholesaleMinUnits },
+    {
+      enteredBy: ctx.enteredBy,
+      ean: input.ean,
+      apiKeyId: input.apiKeyId ?? null,
+      note: input.note ?? null,
+      visitId: input.visitId ?? null,
+      location: ctx.location,
+    },
+  );
+
+  const promoText =
+    wholesalePrice != null && wholesaleMinUnits != null
+      ? `Precio mayorista desde ${wholesaleMinUnits} u.`
+      : null;
 
   const entryInsert = await db
     .from('instore_price_entries')
     .insert({
-      supermarket_id: input.supermarketId,
+      visit_id: input.visitId ?? null,
+      supermarket_id: ctx.supermarketId,
       ean: input.ean,
       product_id: productId,
       resulting_supermarket_product_id: spId,
       resulting_snapshot_id: snapshotId,
       price: input.price,
-      list_price: listPrice,
-      promo_price: input.promoPrice ?? null,
-      promo_text: input.promoText ?? null,
-      entered_by: input.enteredBy,
+      list_price: null,
+      promo_price: wholesalePrice,
+      promo_min_units: wholesaleMinUnits,
+      promo_text: promoText,
+      entered_by: ctx.enteredBy,
       api_key_id: input.apiKeyId ?? null,
       note: input.note ?? null,
     })
@@ -229,22 +315,23 @@ export async function recordInStoreEntry(
   if (entryInsert.error) throw entryInsert.error;
 
   logger.info(
-    { supermarketId: input.supermarketId, ean: input.ean, productId, spId, snapshotId, enteredBy: input.enteredBy },
+    { visitId: input.visitId ?? null, supermarketId: ctx.supermarketId, ean: input.ean, productId, spId, snapshotId, enteredBy: ctx.enteredBy },
     'instore: price entry recorded',
   );
 
   return {
     entryId: entryInsert.data.id as string,
-    supermarketId: input.supermarketId,
+    visitId: input.visitId ?? null,
+    supermarketId: ctx.supermarketId,
     ean: input.ean,
     productId,
     supermarketProductId: spId,
     snapshotId,
     price: input.price,
-    listPrice,
-    promoPrice: input.promoPrice ?? null,
-    promoText: input.promoText ?? null,
-    enteredBy: input.enteredBy,
+    wholesalePrice,
+    wholesaleMinUnits,
+    enteredBy: ctx.enteredBy,
+    note: input.note ?? null,
     createdAt: entryInsert.data.created_at as string,
   };
 }

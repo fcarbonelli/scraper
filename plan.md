@@ -278,21 +278,60 @@ revista_review_items (
 -- re-emits each in-store mapping's latest price as a fresh snapshot dated today,
 -- so prices persist in the export between visits (entered ~twice a week).
 -- Idempotent per day. instore_price_entries is the audit log (who/what/when).
+--
+-- Migration 010 (client review) adds a VISIT model: work is grouped as one worker
+-- at one store BRANCH on one occasion. The visit carries the branch location
+-- (a chain has many branches), owns entries + flyer photos, and has an explicit
+-- finish step ("save & leave the PDV"). Price semantics were also aligned to the
+-- client's four fields: price = Precio Regular (unitario, -> snapshot.price ->
+-- Precio_Regular), promo_price = Precio con oferta / mayorista (-> offer_price_1
+-- -> Precio_c_Oferta_1), promo_min_units = min units for the wholesale price
+-- (-> promotion_1 text 'Precio mayorista desde N u.'), note = Observaciones.
+-- Flyer/offer photos are uploaded to a public Supabase Storage bucket
+-- ('instore-photos') and recorded in instore_photos.
+instore_visits (                    -- one PDV relevamiento (migration 010)
+  id              uuid PK
+  supermarket_id  text FK
+  provincia       text              -- branch location (a chain has many branches)
+  localidad       text
+  direccion       text
+  entered_by      text              -- field worker's name (required)
+  note            text
+  status          text              -- 'open' | 'finished'
+  api_key_id      uuid FK
+  started_at      timestamptz
+  finished_at     timestamptz
+)
+
 instore_price_entries (
   id                                uuid PK
+  visit_id                          uuid FK        -- the PDV visit (migration 010)
   supermarket_id                    text FK
   ean                               text
   product_id                        uuid FK        -- resolved/created master product
   resulting_supermarket_product_id  uuid FK
   resulting_snapshot_id             bigint
-  price                             numeric(12,2)  -- regular / shelf price as entered
-  list_price                        numeric(12,2)  -- regular when marked down
-  promo_price                       numeric(12,2)  -- offer price, if any
-  promo_text                        text           -- e.g. '2x1', '-30%'
+  price                             numeric(12,2)  -- Precio Regular (unitario)
+  list_price                        numeric(12,2)  -- legacy; unused by the new flow
+  promo_price                       numeric(12,2)  -- Precio con oferta (precio mayorista)
+  promo_min_units                   integer        -- a partir de cuántas u. es mayorista (mig 010)
+  promo_text                        text           -- generated 'Precio mayorista desde N u.'
   entered_by                        text           -- field worker's name (required)
   api_key_id                        uuid FK        -- which embedded key submitted
-  note                              text
+  note                              text           -- Observaciones
   created_at                        timestamptz
+)
+
+instore_photos (                    -- flyer/offer photos per visit (migration 010)
+  id              uuid PK
+  visit_id        uuid FK
+  supermarket_id  text FK
+  url             text              -- public Supabase Storage URL
+  storage_path    text
+  caption         text
+  entered_by      text
+  api_key_id      uuid FK
+  created_at      timestamptz
 )
 ```
 
@@ -762,14 +801,20 @@ Decisions locked in:
   the canonical master (merging + enriching from the catalog; price history preserved via
   `src/ingest/bindEan.ts`). Worklist at `GET /v1/products/missing-ean`. Fixes blank
   general columns in the client_base export.
-- **In-store manual price entry** (migration `009`; `src/instore/`; `/v1/in-store/*`): a
+- **In-store manual price entry** (migrations `009`+`010`; `src/instore/`; `/v1/in-store/*`): a
   mobile web tool for field workers who scan barcodes in physical (wholesale) stores and
-  type shelf prices. Trusted run-less snapshots (`tier_used='manual'`, `raw_data.source=
+  type prices. Trusted run-less snapshots (`tier_used='manual'`, `raw_data.source=
   'instore'`) carried forward daily (`carryForwardInStorePrices`) so prices persist between
   visits. Chains flagged via `config.instore.enabled`; pure in-store chains use
   `source_type='instore'` (Nini, Diarco, Yaguar, Don Gastón, Oscar David — plus Makro/Vital/
   Maxiconsumo which also keep their existing source). API key scoping (`api_keys.scopes`)
-  lets the app embed a key limited to `/v1/in-store/*`. Frontend contract:
+  lets the app embed a key limited to `/v1/in-store/*`. **Migration 010 (client review)**
+  organizes work as **visits** (`instore_visits`): one worker at one store branch, carrying
+  the branch location (provincia/localidad/dirección), with a finish step to save & leave the
+  PDV. Four capture fields per product (regular unit price → `price`; wholesale price →
+  `promo_price`/`offer_price_1`; min units for wholesale → `promo_min_units`/`promotion_1`;
+  observations → `note`) and **flyer photos** (`instore_photos`, Supabase Storage bucket
+  `instore-photos`) instead of per-product promo flags. Frontend contract:
   `docs/IN_STORE_PRICE_ENTRY.md`.
 
 ---

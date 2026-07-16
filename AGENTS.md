@@ -14,7 +14,7 @@ A Node/TypeScript backend service that scrapes 100+ products across 30+ supermar
 - `**DEPLOY.md**` — step-by-step deployment guide (AWS setup, server bootstrap, first deploy, GitHub Actions, troubleshooting). Read when working on infra; keep in sync when changing the deploy flow.
 - `**docs/ADDING_SUPERMARKETS.md**` — hands-on playbook for mapping a new supermarket: the VTEX factory, verification commands, the preview-vs-go-live distinction, and the gotchas (Cencosud WAF, `listPrice` sentinel). Read this before adding a store.
 - `**docs/REVISTA_REVIEW.md**` — design + frontend contract for the **magazine (revista) review** path (IMPLEMENTED): AI reads promo PDFs/flipbooks for chains that don't publish prices on the web (Makro, Vital, Rosental, Maxicomodín), matches them against the catalog, and an operator approves/rejects in a modal inside the Daily Review screen. Backend lives in `src/revistas/` (orchestrator runs the daily check; `/v1/revistas/*` serves the review UI). Read before touching the revista pipeline.
-- `**docs/IN_STORE_PRICE_ENTRY.md**` — design + frontend contract for the **in-store manual price entry** path (IMPLEMENTED): a mobile web tool where a field worker scans a barcode in a physical (wholesale) store and types the shelf price. Trusted run-less snapshots, carried forward daily until the next visit. Backend lives in `src/instore/` (`/v1/in-store/*` serves the tool; orchestrator runs the daily carry-forward). Read before touching the in-store pipeline.
+- `**docs/IN_STORE_PRICE_ENTRY.md**` — design + frontend contract for the **in-store manual price entry** path (IMPLEMENTED): a mobile web tool where a field worker starts a **visit** at a store branch (location), scans barcodes and types four fields (regular unit price, wholesale price, wholesale min-units, observations), uploads flyer photos, and finishes the visit to save & leave. Trusted run-less snapshots, carried forward daily until the next visit. Backend lives in `src/instore/` (`/v1/in-store/*` serves the tool; orchestrator runs the daily carry-forward). Read before touching the in-store pipeline.
 - `**summary.md**` — original problem framing (read once for context, then ignore).
 
 ## Tech stack (locked in)
@@ -116,6 +116,8 @@ scraper/
     ├── instore/                       ← in-store manual price entry — see docs/IN_STORE_PRICE_ENTRY.md
     │   ├── resolve.ts                 ← scanned EAN → master product (create from catalog if needed)
     │   ├── entry.ts                   ← record a submission → supermarket_products + run-less snapshot + audit log
+    │   ├── visits.ts                  ← PDV visit lifecycle (create w/ location, finish/exit, counts)
+    │   ├── storage.ts                 ← flyer/offer photo upload to Supabase Storage (bucket 'instore-photos')
     │   └── carryForward.ts            ← daily re-emit of each in-store mapping's latest price
     ├── orchestrator/
     │   ├── index.ts                   ← cron + finalizer interval
@@ -152,7 +154,7 @@ scraper/
             ├── runs.ts                ← list, detail with breakdown
             ├── alerts.ts              ← list, PATCH (ack/resolve)
             ├── revistas.ts            ← magazine review UI (/v1/revistas/*)
-            └── inStore.ts             ← in-store price entry (/v1/in-store/*): supermarkets, lookup, entries
+            └── inStore.ts             ← in-store price entry (/v1/in-store/*): supermarkets, lookup, visits, photos, entries
 ```
 
 ## Commands cheat sheet
@@ -360,6 +362,6 @@ Track the build phases (see `plan.md` for full breakdown):
 - **Phase 3** — Add a Playwright-based supermarket (deferred until next supermarket chosen)
 - **Phase 4** — Express API: all routes (`products`, `supermarkets`, `snapshots`, `runs`, `alerts`, `health`), X-API-Key auth (SHA-256 + cache), pagination, error envelope, CORS, request logging. End-to-end smoke tested. Carrefour adapter added (VTEX-based), Coto adapter refactored to expose `resolveExternalId`.
 - [~] **Phase 5** — Deploy: artifacts written (`scripts/setup-ec2.sh`, `Caddyfile`, `.github/workflows/deploy.yml`, `DEPLOY.md`). User performs AWS setup; first deploy & GitHub Actions wiring still pending.
-- **Phase 6** — Scale: more supermarkets, monitoring tuning. **Product management** (see `docs/PRODUCT_MANAGEMENT.md`): per-mapping pause/delete, runtime-editable catalog (`catalog_extra_eans`, migration 007), async EAN discovery (`/v1/data/discover` on the `discovery` queue), pause-aware coverage, weekly coverage **sweep** (`SWEEP_CRON`, re-searches missing EANs + Telegram summary), and **EAN healing** (`PATCH /v1/supermarket-products/:id { ean }` + `GET /v1/products/missing-ean` → `src/ingest/bindEan.ts`) to fix blank export columns. **In-store manual price entry** (see `docs/IN_STORE_PRICE_ENTRY.md`): mobile web tool (`/v1/in-store/*`, `src/instore/`, migration 009) for field workers to scan barcodes + type shelf prices at wholesale chains (Nini, Diarco, Yaguar, Don Gastón, Oscar David + Makro/Vital/Maxiconsumo); trusted run-less snapshots carried forward daily; scoped API keys (`api_keys.scopes`).
+- **Phase 6** — Scale: more supermarkets, monitoring tuning. **Product management** (see `docs/PRODUCT_MANAGEMENT.md`): per-mapping pause/delete, runtime-editable catalog (`catalog_extra_eans`, migration 007), async EAN discovery (`/v1/data/discover` on the `discovery` queue), pause-aware coverage, weekly coverage **sweep** (`SWEEP_CRON`, re-searches missing EANs + Telegram summary), and **EAN healing** (`PATCH /v1/supermarket-products/:id { ean }` + `GET /v1/products/missing-ean` → `src/ingest/bindEan.ts`) to fix blank export columns. **In-store manual price entry** (see `docs/IN_STORE_PRICE_ENTRY.md`): mobile web tool (`/v1/in-store/*`, `src/instore/`, migrations 009+010) for field workers to scan barcodes + type prices at wholesale chains (Nini, Diarco, Yaguar, Don Gastón, Oscar David + Makro/Vital/Maxiconsumo); work grouped as **visits** with branch location + flyer photos + a finish step; four capture fields (regular/wholesale/min-units/observations); trusted run-less snapshots carried forward daily; scoped API keys (`api_keys.scopes`).
 
 When completing a phase, mark it done here AND in `plan.md` (section 10).

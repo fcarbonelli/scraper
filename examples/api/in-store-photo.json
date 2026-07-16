@@ -1,0 +1,12 @@
+{
+  "data": {
+    "id": "7c8d9e0f-1122-4334-8556-7788990011cc",
+    "visit_id": "0a1b2c3d-4e5f-4071-8a2b-3c4d5e6f7081",
+    "supermarket_id": "diarco",
+    "url": "https://<project>.supabase.co/storage/v1/object/public/instore-photos/0a1b2c3d-4e5f-4071-8a2b-3c4d5e6f7081/9f8e7d6c-5b4a-4231-8c1d-0e1f2a3b4c5d.jpg",
+    "caption": "Folleto ofertas mayoristas",
+    "entered_by": "Juan Pérez",
+    "created_at": "2026-07-16T01:45:22.000Z"
+  },
+  "meta": { "ts": "2026-07-16T01:45:22.120Z" }
+}

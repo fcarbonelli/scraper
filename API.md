@@ -1545,15 +1545,23 @@ Errors: `409 CONFLICT` when items are still pending and `force` is not set.
 ## In-store (manual price entry)
 
 A mobile-web tool for field workers who visit physical (mostly wholesale) stores,
-scan a product barcode, and type the shelf price. Submissions are trusted (the
-operator on-site is the gate): each writes a **run-less** `price_snapshots` row
-(always client-visible, no publish gate) and is **carried forward daily** until a
-newer entry replaces it — so a price checked on Monday keeps exporting every day
-until the next visit.
+scan a product barcode, and type the price. Submissions are trusted (the operator
+on-site is the gate): each writes a **run-less** `price_snapshots` row (always
+client-visible, no publish gate) and is **carried forward daily** until a newer
+entry replaces it — so a price checked on Monday keeps exporting every day until
+the next visit.
 
-> **Full spec (mobile UX, barcode scanner, offline queue, session model):**
+**Visit model (PDV relevamiento).** Work is organized as a **visit**: one worker
+at one store branch on one occasion. The worker starts a visit (picking the chain
+and typing the branch **address / locality / province** — a chain has many
+branches), records product entries and uploads flyer photos against that visit,
+then **finishes** it to save the relevamiento and leave the PDV. Location and
+photos live on the visit, not on each product.
+
+> **Full spec (mobile UX, barcode scanner, offline queue, visit flow):**
 > [`docs/IN_STORE_PRICE_ENTRY.md`](./docs/IN_STORE_PRICE_ENTRY.md). Fixtures:
 > `examples/api/in-store-supermarkets.json`, `in-store-lookup.json`,
+> `in-store-visit.json`, `in-store-visits.json`, `in-store-photo.json`,
 > `in-store-entry.json`, `in-store-entries.json`.
 
 **Auth.** These routes accept the platform-standard `X-API-Key`. The mobile app
@@ -1603,44 +1611,128 @@ anything. Use it to show the operator the product name before they type a price.
 `found: false` means the EAN is in neither our products nor the client catalog —
 the UI should let the operator skip it. Errors: `400 INVALID_REQUEST` (bad EAN).
 
-### `POST /v1/in-store/entries`
+### `POST /v1/in-store/visits`
 
-Submit one scanned price. Resolves the EAN to a master product (creating one from
-catalog taxonomy if needed), ensures the in-store mapping, writes the snapshot,
-and logs the submission. Body:
+Start a PDV relevamiento. Captures the chain and the specific branch location.
+Returns the visit whose `id` you pass to every subsequent entry / photo. Body:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `supermarket_id` | string | yes | Must be an `instore.enabled` chain |
-| `ean` | string (8–14 digits) | yes | Scanned barcode |
-| `price` | number > 0 | yes | Regular / shelf price |
-| `promo_price` | number > 0 \| null | no | Offer price when there's a promo |
-| `promo_text` | string \| null | no | Promo description (e.g. `"2x1"`, `"-30%"`) |
-| `list_price` | number > 0 \| null | no | Reserved; normally derived from promo |
 | `entered_by` | string (1–120) | yes | Field worker's name (from their browser) |
-| `note` | string \| null | no | Optional free text |
+| `provincia` | string \| null | no | Branch province |
+| `localidad` | string \| null | no | Branch locality/city |
+| `direccion` | string \| null | no | Branch street address |
+| `note` | string \| null | no | Optional free text about the visit |
+
+**201** with the visit object:
+
+```ts
+{
+  id: string;
+  supermarket_id: string;
+  provincia: string | null;
+  localidad: string | null;
+  direccion: string | null;
+  entered_by: string;
+  note: string | null;
+  status: "open" | "finished";
+  started_at: string;   // ISO
+  finished_at: string | null;
+}
+```
+
+### `GET /v1/in-store/visits`
+
+List visits — defaults to **today (Buenos Aires)**. Paginated. Filters: `date`
+(`YYYY-MM-DD`), `supermarket_id`, `status` (`open`|`finished`), `entered_by`.
+Each item adds `supermarket_name` and omits nothing else from the visit shape.
+
+### `GET /v1/in-store/visits/:id`
+
+One visit plus `counts: { entries, photos }`.
+
+### `POST /v1/in-store/visits/:id/finish`
+
+Save & close the visit (the worker leaves this PDV). Idempotent. Returns the
+visit with `status: "finished"`, `finished_at`, and `counts: { entries, photos }`.
+Errors: `404 NOT_FOUND` (unknown visit).
+
+### `POST /v1/in-store/visits/:id/photos`
+
+Upload one flyer/offer photo. **The image is the raw request body** (not JSON, not
+multipart): send the file bytes with an `image/*` `Content-Type`. PNG, JPEG, WebP
+and GIF up to 15 MB. Optional `?caption=<text>`.
+
+```js
+await fetch(`${BASE}/in-store/visits/${visitId}/photos?caption=Folleto`, {
+  method: 'POST',
+  headers: { 'X-API-Key': KEY, 'Content-Type': file.type },
+  body: file, // a File/Blob/ArrayBuffer
+});
+```
+
+**201** with:
+
+```ts
+{ id: string; visit_id: string; supermarket_id: string; url: string;
+  caption: string | null; entered_by: string | null; created_at: string }
+```
+
+Errors: `404 NOT_FOUND` (unknown visit), `400 INVALID_REQUEST` (empty body or
+unsupported image format).
+
+### `GET /v1/in-store/visits/:id/photos`
+
+List a visit's photos (newest first), same item shape as the upload response.
+
+### `POST /v1/in-store/entries`
+
+Submit one scanned price. Resolves the EAN to a master product (creating one from
+catalog taxonomy if needed), ensures the in-store mapping, writes the snapshot,
+and logs the submission. Normally called **inside a visit** — pass `visit_id` and
+the store/worker/location are inherited from it. (For one-off use you may instead
+pass `supermarket_id` + `entered_by`.) Body:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `visit_id` | uuid | yes* | The open visit this entry belongs to |
+| `supermarket_id` | string | yes* | Chain — only if no `visit_id` |
+| `entered_by` | string (1–120) | yes* | Worker name — only if no `visit_id` |
+| `ean` | string (8–14 digits) | yes | Scanned barcode |
+| `price` | number > 0 | yes | **Precio Regular (unitario)** |
+| `wholesale_price` | number > 0 \| null | no | **Precio con oferta (precio mayorista)** |
+| `wholesale_min_units` | int > 0 \| null | no | **Promoción**: min units for the wholesale price |
+| `note` | string \| null | no | **Observaciones** |
+
+\* Provide **either** `visit_id`, **or** both `supermarket_id` and `entered_by`.
+
+Price mapping into the export: `price` → **Precio_Regular**, `wholesale_price` →
+**Precio_c_Oferta_1**, and `wholesale_min_units` becomes the **Promocion_1** text
+(`"Precio mayorista desde N u."`).
 
 **201** with:
 
 ```ts
 {
   entry_id: string;
+  visit_id: string | null;
   supermarket_id: string;
   ean: string;
   product_id: string;
   supermarket_product_id: string;
   snapshot_id: number;
-  price: number;              // selling price stored (promo when present)
-  list_price: number | null;  // regular price when marked down
-  promo_price: number | null;
-  promo_text: string | null;
+  price: number;                        // Precio Regular (unitario)
+  wholesale_price: number | null;       // Precio con oferta (mayorista)
+  wholesale_min_units: number | null;   // min units for the wholesale price
+  note: string | null;                  // Observaciones
   entered_by: string;
-  created_at: string;         // ISO
+  created_at: string;                   // ISO
 }
 ```
 
-Errors: `400 INVALID_REQUEST` (bad body, or chain not enabled for in-store),
-`404 NOT_FOUND` (unknown store, or EAN not in catalog).
+Errors: `400 INVALID_REQUEST` (bad body, chain not enabled, or finished visit),
+`404 NOT_FOUND` (unknown store/visit, or EAN not in catalog).
 
 ### `GET /v1/in-store/entries`
 
@@ -1650,6 +1742,7 @@ Defaults to **today (Buenos Aires)** when no `date` is given. Paginated.
 | Param | Type | Description |
 |---|---|---|
 | `date` | `YYYY-MM-DD` | A single Buenos Aires day (default: today) |
+| `visit_id` | uuid | Only one visit |
 | `supermarket_id` | string | Only one chain |
 | `entered_by` | string | Only one person |
 | `page`, `limit` | int | Pagination |
@@ -1659,18 +1752,18 @@ Each item:
 ```ts
 {
   id: string;
+  visit_id: string | null;
   supermarket_id: string;
   supermarket_name: string | null;
   ean: string;
   product_id: string | null;
   product_name: string | null;
   brand: string | null;
-  price: number;
-  list_price: number | null;
-  promo_price: number | null;
-  promo_text: string | null;
+  price: number;                        // Precio Regular (unitario)
+  wholesale_price: number | null;       // Precio con oferta (mayorista)
+  wholesale_min_units: number | null;   // min units for the wholesale price
+  note: string | null;                  // Observaciones
   entered_by: string;
-  note: string | null;
   created_at: string;
 }
 ```
