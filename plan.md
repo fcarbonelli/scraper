@@ -124,7 +124,8 @@ CREATE INDEX ON price_snapshots (supermarket_product_id, scraped_at DESC);
 --   `list_price` = the REGULAR / crossed-out price, set only when there's a
 --                  markdown (price < list_price). Every VTEX store uses this
 --                  pattern (e.g. Cordiez: list_price 4362.12, price 2999).
--- The client-facing `client_base` view (migration 002, fixed in 003) maps these
+-- The client-facing `client_base` view (migration 002, fixed in 003; publication
+-- layer in 005; active-filter in 008) maps these
 -- to the client's columns: Precio_Regular = COALESCE(list_price, price),
 -- Precio_c_Oferta_1 = the sale price when marked down, and Descuento_Unitario =
 -- max(named-promo discount, markdown gap). Do NOT change `price` to mean the
@@ -700,7 +701,10 @@ Decisions locked in:
 
 **Product-management features (implemented):** see `docs/PRODUCT_MANAGEMENT.md`.
 - Per-mapping pause/resume + hard delete (`PATCH`/`DELETE /v1/supermarket-products/:id`).
-  `is_active=false` skips the mapping in the daily enqueue.
+  `is_active=false` skips the mapping in the daily enqueue **and hides it from the
+  `client_base` export** (migration 008; same for a chain paused via
+  `supermarkets.is_active=false`). History is retained and reappears on re-activate.
+  To keep a gone product visible with a marker instead, use `lifecycle_status`.
 - Runtime-editable catalog: `catalog_extra_eans` table (migration `007`) supplements
   the hardcoded `TAXONOMY_BY_EAN`; coverage/discovery read the union via
   `src/shared/catalog.ts`. CRUD at `/v1/catalog/eans`.

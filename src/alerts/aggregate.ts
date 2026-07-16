@@ -15,6 +15,11 @@
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { createAlert } from './createAlert.js';
+import {
+  isTransientErrorType,
+  scheduleSupermarketRecovery,
+  shouldAutoRecover,
+} from '../orchestrator/recovery.js';
 import type { ErrorType } from '../shared/errors.js';
 
 const CRITICAL_THRESHOLD = 0.8;
@@ -140,11 +145,21 @@ function topErrorsSummary(stat: SupermarketStat, take = 3): string {
  * twice for the same run — it will create duplicate alerts. Callers should
  * only invoke this once per finalize cycle.
  */
-export async function generateAlertsForRun(scrapeRunId: string): Promise<{
-  alertsCreated: number;
-}> {
+export interface GenerateAlertsOptions {
+  /**
+   * Whether the run being finalized is itself a recovery run. Recovery runs
+   * never spawn further recoveries — if they still fail, they alert directly.
+   */
+  isRecoveryRun?: boolean;
+}
+
+export async function generateAlertsForRun(
+  scrapeRunId: string,
+  opts: GenerateAlertsOptions = {},
+): Promise<{ alertsCreated: number; recoveriesScheduled: number }> {
   const stats = await computeStats(scrapeRunId);
   let alertsCreated = 0;
+  let recoveriesScheduled = 0;
 
   for (const stat of stats) {
     if (stat.total === 0) continue;
@@ -156,9 +171,48 @@ export async function generateAlertsForRun(scrapeRunId: string): Promise<{
       total: stat.total,
     });
 
+    // Below the warning band → nothing to do (individual failures stay visible
+    // in job_executions / the dashboard).
+    if (failureRate < WARNING_THRESHOLD) {
+      log.debug('no aggregate alert needed');
+      continue;
+    }
+
+    const dom = dominantError(stat);
+
+    // Transient whole-site failure (site blocked the IP, CDN blip, timeouts):
+    // schedule ONE delayed retry instead of alerting now. The recovery run
+    // alerts on its own if it still fails, so persistent breakage isn't hidden.
+    if (
+      shouldAutoRecover({
+        failed: stat.failed,
+        dominantType: dom?.type ?? null,
+        dominantFraction: dom?.fraction ?? 0,
+        isRecoveryRun: opts.isRecoveryRun ?? false,
+      })
+    ) {
+      try {
+        const recoveryRunId = await scheduleSupermarketRecovery(
+          scrapeRunId,
+          stat.supermarketId,
+        );
+        if (recoveryRunId) {
+          recoveriesScheduled += 1;
+          log.warn(
+            { recoveryRunId, dominant: dom?.type },
+            'scheduled auto-recovery (alert deferred)',
+          );
+          continue;
+        }
+      } catch (err) {
+        // If scheduling fails, don't swallow the incident — fall through and
+        // alert as usual.
+        log.error({ err }, 'auto-recovery scheduling failed; alerting instead');
+      }
+    }
+
     if (failureRate >= CRITICAL_THRESHOLD) {
       // Pick a more specific alert type if one error class dominates.
-      const dom = dominantError(stat);
       const alertType =
         dom && dom.fraction > 0.7 && dom.type === 'selector_failed'
           ? 'selector_broken'
@@ -186,7 +240,7 @@ export async function generateAlertsForRun(scrapeRunId: string): Promise<{
       });
       alertsCreated += 1;
       log.warn({ alertType }, 'created CRITICAL aggregate alert');
-    } else if (failureRate >= WARNING_THRESHOLD) {
+    } else {
       const errorsLine = topErrorsSummary(stat);
       await createAlert({
         severity: 'warning',
@@ -205,12 +259,10 @@ export async function generateAlertsForRun(scrapeRunId: string): Promise<{
       });
       alertsCreated += 1;
       log.info('created WARNING aggregate alert');
-    } else {
-      log.debug('no aggregate alert needed');
     }
   }
 
-  return { alertsCreated };
+  return { alertsCreated, recoveriesScheduled };
 }
 
 /**
@@ -233,6 +285,14 @@ export async function generateEarlyAlertForRunSupermarket(
   if (failureRate < WARNING_THRESHOLD) return;
 
   const dom = dominantError(stat);
+
+  // Transient whole-site failures are handled by the finalizer's automatic
+  // recovery (a delayed retry with no ping). Don't fire a mid-run early alert
+  // for them — that's exactly the self-healing noise we want to avoid.
+  // Non-transient failures (e.g. a broken selector) won't recover on retry, so
+  // those still get an early heads-up.
+  if (isTransientErrorType(dom?.type ?? null) && (dom?.fraction ?? 0) >= 0.5) return;
+
   const alertType =
     dom && dom.fraction > 0.7 && dom.type === 'selector_failed'
       ? 'selector_broken'

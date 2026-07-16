@@ -9,12 +9,14 @@
  * export the day after approval.
  *
  * This step fixes that: once per day it re-emits each active revista product's
- * latest known price as a fresh snapshot dated today (tied to the day's run, so
- * it publishes through the normal gate). Semantics: **carry each product's
- * latest approved price forward until a newer approved price replaces it** (the
- * `carry_latest` policy). A new issue's approvals simply become the new latest
- * price and carry forward from then; products dropped from a new issue keep
- * their last price until re-approved.
+ * latest known price as a fresh RUN-LESS snapshot dated today. Run-less
+ * (`scrape_run_id = null`) means always client-visible — exactly like the
+ * approval snapshot it copies — so magazine prices never depend on a daily run
+ * being published (several days sit in `pending_review` for a while). Semantics:
+ * **carry each product's latest approved price forward until a newer approved
+ * price replaces it** (the `carry_latest` policy). A new issue's approvals
+ * simply become the new latest price and carry forward from then; products
+ * dropped from a new issue keep their last price until re-approved.
  *
  * Idempotent per day: a product that already has a snapshot dated today (either
  * approved today, or already carried today) is skipped, so re-running is safe
@@ -78,13 +80,11 @@ export interface CarryForwardResult {
 
 /**
  * Re-emit the latest known price for every active revista product as a fresh
- * snapshot dated today, tied to `scrapeRunId` (nullable — a run-less snapshot is
- * always client-visible, handy for manual backfills).
+ * run-less snapshot dated today (always client-visible; decoupled from the daily
+ * publish gate).
  */
-export async function carryForwardRevistaPrices(
-  scrapeRunId: string | null,
-): Promise<CarryForwardResult> {
-  const log = logger.child({ phase: 'revista-carry-forward', scrapeRunId });
+export async function carryForwardRevistaPrices(): Promise<CarryForwardResult> {
+  const log = logger.child({ phase: 'revista-carry-forward' });
   const smIds = await activeRevistaSupermarketIds();
   const result: CarryForwardResult = {
     supermarkets: smIds.length,
@@ -140,7 +140,8 @@ export async function carryForwardRevistaPrices(
       const insErr = (
         await db.from('price_snapshots').insert({
           supermarket_product_id: productId,
-          scrape_run_id: scrapeRunId,
+          // Run-less: always client-visible, never gated on a daily run publish.
+          scrape_run_id: null,
           scraped_at: new Date().toISOString(),
           price: snap.price,
           list_price: snap.list_price,

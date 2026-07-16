@@ -357,7 +357,7 @@ const SUPERMARKETS: SupermarketSeed[] = [
     rate_limit_ms: 500,
     concurrency: 3,
     is_active: true,
-    provincia: 'CÓRDOBA',
+    provincia: 'CORDOBA',
     zona: 'RIO CUARTO',
     canal: 'SPM REGIONAL',
     cadena_display_name: 'SUPERTOP',

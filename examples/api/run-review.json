@@ -57,7 +57,18 @@
         "resolved_status": "out_of_stock"
       }
     ],
-    "recovery_run_ids": ["dd44dd44-4444-4444-8444-444444444444"]
+    "recovery_run_ids": ["dd44dd44-4444-4444-8444-444444444444"],
+    "revistas": {
+      "pending_magazines": 1,
+      "approved_today": 6,
+      "carried_today": 58,
+      "products_today": 64,
+      "by_chain": [
+        { "supermarket_id": "makro", "supermarket_name": "Makro", "products_today": 5, "pending_items": 0 },
+        { "supermarket_id": "vital", "supermarket_name": "Vital", "products_today": 6, "pending_items": 0 },
+        { "supermarket_id": "rosental", "supermarket_name": "Rosental", "products_today": 53, "pending_items": 4 }
+      ]
+    }
   },
   "meta": { "ts": "2026-05-06T18:30:14.679Z" }
 }

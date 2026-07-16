@@ -7,10 +7,15 @@
  *
  * Pause vs lifecycle vs delete:
  *   - `is_active` (PATCH /:id) is the SCRAPE lever: false → the daily run skips
- *     this mapping entirely (already gated in orchestrator/enqueue.ts). Fully
- *     reversible, price history kept. This is "stop running this product here".
+ *     this mapping entirely (gated in orchestrator/enqueue.ts) AND the mapping
+ *     drops out of the client_base export (migration 008). Fully reversible —
+ *     price history is retained in the DB and reappears the moment it's
+ *     re-activated. This is "stop running AND hide this product here".
  *   - `lifecycle_status` (PATCH /:id/lifecycle) is a CLIENT-VISIBLE marker: the
- *     product is still scraped but publish emits out_of_stock/delisted.
+ *     product stays is_active and IS still scraped/shown, but publish emits an
+ *     out_of_stock/delisted marker so the client history stays gap-free. Use
+ *     this (not pause) when a product is officially gone but you want its
+ *     absence recorded for the client.
  *   - DELETE /:id hard-removes the mapping + its price history (mistakes only).
  */
 

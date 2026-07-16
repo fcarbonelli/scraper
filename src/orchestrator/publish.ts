@@ -21,6 +21,7 @@
 import { db, fetchAllPages, fetchInChunks } from '../shared/db.js';
 import { loadRunDiagnostics } from '../shared/runDiagnostics.js';
 import { ApiError } from '../api/lib/apiError.js';
+import { revistaRunSummary, type RevistaRunSummary } from '../revistas/summary.js';
 
 // =============================================================================
 // Status model
@@ -98,6 +99,13 @@ export interface RunReview {
   }>;
   gaps: RunGap[];
   recovery_run_ids: string[];
+  /**
+   * Magazine-sourced chains for this day. They're not part of the run's
+   * coverage/gaps (no jobs, run-less snapshots), so this is a separate
+   * informational panel: what's pending review + what magazine prices landed
+   * today. Never blocks publishing.
+   */
+  revistas: RevistaRunSummary;
 }
 
 interface GapMappingDetail {
@@ -210,6 +218,8 @@ export async function computeRunReview(runId: string): Promise<RunReview> {
   const expected = Math.max(progress.total_jobs, finalOutcomes.length);
   const coveredCount = progress.succeeded + resolvedByFix;
 
+  const revistas = await revistaRunSummary(run.started_at);
+
   return {
     run: {
       id: run.id,
@@ -230,6 +240,7 @@ export async function computeRunReview(runId: string): Promise<RunReview> {
     bySupermarket,
     gaps,
     recovery_run_ids: recoveryRunIds,
+    revistas,
   };
 }
 

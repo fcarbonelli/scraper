@@ -3,9 +3,17 @@
  *
  * Approving (or manually adding) an item:
  *   1. ensures a `supermarket_products` mapping for (supermarket, product),
- *   2. writes ONE `price_snapshots` row (`tier_used:'ai'`, `status:'ok'`) tied
- *      to the magazine's run, so it flows through the normal publish gate,
+ *   2. writes ONE `price_snapshots` row (`tier_used:'ai'`, `status:'ok'`),
  *   3. stamps the review item with the result.
+ *
+ * Snapshots are written RUN-LESS (`scrape_run_id = null`). A human approving the
+ * item in the revista review IS the gate — so, like operator manual snapshots,
+ * these are trusted and always client-visible (client_base surfaces run-less
+ * snapshots unconditionally). This deliberately decouples magazine prices from
+ * the daily scrape's publish gate: an approved price shows in the export
+ * immediately and keeps showing (re-emitted daily by carryForwardRevistaPrices)
+ * until the next revista supersedes it — regardless of whether any daily run is
+ * published.
  *
  * Catalog-only: `product_id` must reference an existing master product. There's
  * no "create a new master product" path here (see docs/REVISTA_REVIEW.md §3).
@@ -73,7 +81,6 @@ export interface SnapshotPrices {
  */
 async function writeSnapshot(
   supermarketProductId: string,
-  scrapeRunId: string | null,
   prices: SnapshotPrices,
   siteProductName: string | null,
 ): Promise<number> {
@@ -94,7 +101,9 @@ async function writeSnapshot(
     .from('price_snapshots')
     .insert({
       supermarket_product_id: supermarketProductId,
-      scrape_run_id: scrapeRunId,
+      // Run-less on purpose: an approved revista price is operator-trusted and
+      // always client-visible, independent of any daily run's publish gate.
+      scrape_run_id: null,
       scraped_at: new Date().toISOString(),
       price: selling,
       list_price: listPrice,
@@ -149,17 +158,6 @@ export interface ApproveResult {
   productId: string;
 }
 
-/** Resolve the run a magazine's snapshots attach to. */
-async function magazineRunId(magazineId: string): Promise<string | null> {
-  const { data, error } = await db
-    .from('revista_magazines')
-    .select('scrape_run_id')
-    .eq('id', magazineId)
-    .maybeSingle();
-  if (error) throw error;
-  return (data?.scrape_run_id as string | null) ?? null;
-}
-
 /**
  * Approve a queued review item → mapping + snapshot. Throws on conflict
  * (already reviewed) / missing match; the route maps these to HTTP codes.
@@ -195,8 +193,7 @@ export async function approveReviewItem(
   }
 
   const spId = await ensureSupermarketProduct(item.supermarket_id, productId, item.magazine_id);
-  const runId = await magazineRunId(item.magazine_id);
-  const snapshotId = await writeSnapshot(spId, runId, prices, item.extracted?.name ?? null);
+  const snapshotId = await writeSnapshot(spId, prices, item.extracted?.name ?? null);
 
   const upd = await db
     .from('revista_review_items')
@@ -240,8 +237,7 @@ export async function addManualItem(
   };
 
   const spId = await ensureSupermarketProduct(supermarketId, body.productId, magazineId);
-  const runId = await magazineRunId(magazineId);
-  const snapshotId = await writeSnapshot(spId, runId, prices, null);
+  const snapshotId = await writeSnapshot(spId, prices, null);
 
   const { data, error } = await db
     .from('revista_review_items')

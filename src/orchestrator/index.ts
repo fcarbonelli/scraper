@@ -67,12 +67,12 @@ async function runRevistaCheckWithErrorHandling(
     captureError(err, { phase: 'revista-check' });
   }
 
-  // Re-emit each magazine product's latest approved price as a fresh snapshot
-  // dated today (tied to this run) so magazine prices persist in the daily
-  // export until the next revista supersedes them. Independent of whether a new
-  // issue was detected above; runs every day.
+  // Re-emit each magazine product's latest approved price as a fresh run-less
+  // snapshot dated today so magazine prices persist in the daily export until
+  // the next revista supersedes them. Run-less = always client-visible, so this
+  // is independent of whether the day's scrape run is published. Runs every day.
   try {
-    const carry = await carryForwardRevistaPrices(scrapeRunId);
+    const carry = await carryForwardRevistaPrices();
     if (carry.carried > 0) logger.info({ carry }, 'revista carry-forward complete');
   } catch (err) {
     logger.error({ err }, 'revista carry-forward failed');

@@ -15,9 +15,15 @@
  *     unknown — treated as `product_not_found`, not as success.
  *   - The JSON-LD `brand.name` is broken in their theme (renders the literal
  *     "$shop.name"), so we ignore it and don't surface a brand for now.
+ *   - Átomo's edge refuses connections from the EC2 datacenter IP (undici
+ *     reports a bare `fetch failed`), so — like La Anónima / Maxiconsumo — we
+ *     egress through the AR residential proxy when `AR_PROXY_URL` is configured
+ *     (see src/shared/proxy.ts). Direct connection otherwise.
  */
 
+import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
+import { getProxyDispatcher } from '../shared/proxy.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -118,9 +124,13 @@ async function fetchAtomoHtml(
     signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  let res: Response;
+  // Átomo's edge blocks the datacenter IP, so egress through the AR proxy when
+  // one is configured (undefined otherwise — direct connection).
+  const dispatcher = getProxyDispatcher('atomo');
+
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await fetch(url, {
+    res = await undiciFetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
@@ -129,6 +139,7 @@ async function fetchAtomoHtml(
       },
       redirect: followRedirects ? 'follow' : 'manual',
       signal: controller.signal,
+      ...(dispatcher ? { dispatcher } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {

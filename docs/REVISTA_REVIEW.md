@@ -56,9 +56,18 @@ you review gaps and publish the day).
 - The same signal also appears as an **alert** (`type: "revista_review"`), so it
   shows up in the alert inbox and fires a Telegram ping. Either can drive the
   badge; the canonical source for the modal is `GET /v1/revistas/pending`.
+- **`GET /v1/revistas/pending` only returns magazines that actually have
+  something to review** (status `in_review` **and** ≥1 pending item). Magazines
+  where the AI matched nothing — the common case, since most folletos are
+  grocery items and our catalog is cleaning-focused — do **not** raise the
+  banner (they'd give the operator an empty queue). They stay inspectable in the
+  full list (`GET /v1/revistas`) and the analysis view. So: **no banner ⇒
+  nothing to approve**, not "the feature is broken."
 - Reviewing a magazine is **independent of publishing the day** — a pending
-  magazine does **not** block `POST /v1/runs/:id/publish`. Approved magazine
-  products simply become snapshots on the current day's run and publish with it.
+  magazine does **not** block `POST /v1/runs/:id/publish`. When you approve an
+  item, its price snapshot is written **run-less** (`scrape_run_id = null`):
+  operator-trusted and **immediately client-visible**, exactly like a manual
+  snapshot. It does **not** wait for any daily run to be published.
 
 ```
 06:00  Daily run. Magazine unchanged → nothing happens.
@@ -74,7 +83,8 @@ You    Open Daily Review → modal "nueva revista de Makro (8 productos)".
          • + Agregar producto   → AI missed one you can see → pick product + price
        Finish → magazine marked reviewed, drops out of "pending".
 
-You    Publish the day as usual. Approved magazine prices are included.
+       Approved prices are already live in the client export (run-less), and a
+       daily carry-forward re-emits them every day until the next issue.
 ```
 
 ---
@@ -223,8 +233,9 @@ EAN matches).
 ### `POST /v1/revistas/items/:itemId/approve`
 
 Approve a queued item. Writes a `supermarket_products` mapping (if missing) +
-one `price_snapshots` row (`tier_used: "ai"`, `status: "ok"`) tied to the
-magazine's `scrape_run_id`.
+one **run-less** `price_snapshots` row (`tier_used: "ai"`, `status: "ok"`,
+`scrape_run_id: null`). Run-less = operator-trusted and always client-visible,
+so the approved price shows in the export immediately (no publish step needed).
 
 ```jsonc
 // Body — all optional; omit to accept the AI's values as-is.
@@ -297,8 +308,10 @@ still `pending` (they stay pending and can be revisited).
 
 - `GET /v1/products?search=` — the **product picker** for "elegir otro producto"
   and "agregar manual".
-- `GET /v1/runs/:id/review`, `POST /v1/runs/:id/publish` — the day's publish gate;
-  approved magazine snapshots are included automatically.
+- `GET /v1/runs/:id/review`, `POST /v1/runs/:id/publish` — the day's publish gate
+  for the **web-scraped** chains. Magazine snapshots are run-less, so they are
+  **not** part of any run's review/gap list and don't depend on it — they surface
+  in the client export on their own.
 
 ---
 
@@ -429,14 +442,20 @@ finalizeRevista: (id: string, force = false) =>
   every day from the daily scrape, but a magazine product only gets one **when you
   approve it**. So the backend runs a daily **carry‑forward** step
   (`src/revistas/carryForward.ts`, in the orchestrator): it re‑emits each active
-  magazine product's **latest approved price** as a fresh snapshot dated today,
-  tied to the day's run. That's why an approved magazine price keeps appearing in
-  the daily export/compare **every day until the next revista supersedes it**
-  (policy: carry the latest price forward until a newer approval replaces it).
-  Revista chains are excluded from the scraper queue (they have no adapter).
-  **Frontend impact: none** — the data flows through the same snapshots the
-  export/compare/history already read. Just be aware magazine chains now appear in
-  the daily run every day (persisted prices), which is intended.
+  magazine product's **latest approved price** as a fresh **run-less** snapshot
+  dated today. Run-less = always client-visible, so it does **not** depend on any
+  daily run being published (a day left in `pending_review` would otherwise hide
+  it). That's why an approved magazine price keeps appearing in the daily
+  export/compare **every day until the next revista supersedes it** (policy:
+  carry the latest price forward until a newer approval replaces it). Revista
+  chains are excluded from the scraper queue (they have no adapter). **Frontend
+  impact: none** — the data flows through the same snapshots the
+  export/compare/history already read.
+  > **Operational note:** carry-forward only fires when the **orchestrator**
+  > process runs its daily cycle. If magazine prices stop appearing on new days,
+  > the orchestrator isn't running the current build — redeploy/restart it, or
+  > run `npm run revistas:run -- --carry-forward` to backfill today by hand
+  > (no AI cost).
 - **Idempotency.** Re‑approving/rejecting an already‑reviewed item returns
   `409 CONFLICT`. Re‑running the same unchanged magazine never creates a new one
   (dedup by content hash), so the queue is stable. The carry‑forward step is

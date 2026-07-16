@@ -145,8 +145,21 @@ revistasRouter.get('/', async (req: Request, res: Response) => {
 
 // =============================================================================
 // GET /v1/revistas/pending
+//
+// Drives the "nueva revista para revisar" banner in the Daily Review screen.
+// Only magazines that actually have SOMETHING to review are returned — i.e.
+// status='in_review' AND at least one pending item. Magazines where the AI
+// matched nothing (very common: grocery folletos vs. our cleaning-focused
+// catalog) or that are already fully approved/rejected would otherwise nag the
+// operator with an empty queue. Those are still inspectable via GET /v1/revistas
+// and the analysis view. Set ?include_empty=true to bypass the filter.
 // =============================================================================
-revistasRouter.get('/pending', async (_req: Request, res: Response) => {
+const PendingQuery = z.object({
+  include_empty: z.coerce.boolean().optional(),
+});
+
+revistasRouter.get('/pending', async (req: Request, res: Response) => {
+  const q = parseQuery(req, PendingQuery);
   const { data, error } = await db
     .from('revista_magazines')
     .select(MAGAZINE_COLS)
@@ -163,11 +176,14 @@ revistasRouter.get('/pending', async (_req: Request, res: Response) => {
     for (const s of sms ?? []) names.set(s.id as string, s.name as string);
   }
 
-  const out = await Promise.all(
-    magazines.map(async (m) =>
-      magazineResponse(m, names.get(m.supermarket_id) ?? m.supermarket_id, await countsFor(m.id)),
-    ),
+  const withCounts = await Promise.all(
+    magazines.map(async (m) => ({ m, counts: await countsFor(m.id) })),
   );
+  const out = withCounts
+    .filter(({ counts }) => q.include_empty || counts.pending > 0)
+    .map(({ m, counts }) =>
+      magazineResponse(m, names.get(m.supermarket_id) ?? m.supermarket_id, counts),
+    );
   res.json(success(out));
 });
 

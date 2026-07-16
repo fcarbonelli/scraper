@@ -1218,13 +1218,31 @@ is a product that failed and was not fixed by a re-run or a manual price.
         "name": "...", "external_url": "...", "error_type": "selector_failed",
         "error_message": "...", "lifecycle_status": "active", "resolved_status": "scrape_failed" }
     ],
-    "recovery_run_ids": ["..."]
+    "recovery_run_ids": ["..."],
+    "revistas": {
+      "pending_magazines": 1,
+      "approved_today": 6,
+      "carried_today": 58,
+      "products_today": 64,
+      "by_chain": [
+        { "supermarket_id": "rosental", "supermarket_name": "Rosental", "products_today": 53, "pending_items": 4 }
+      ]
+    }
   },
   "meta": { "ts": "..." }
 }
 ```
 
 `resolved_status` is the marker status the gap would get if published as-is.
+
+**`revistas`** is an informational side-panel for magazine-sourced chains. They
+have no scrape jobs and write run-less snapshots, so they're **not** part of
+`coverage`/`gaps` and **never block publishing**. It reports, for the day the run
+covers: `pending_magazines` (magazines with items still awaiting review — these
+raise the review banner), `approved_today` (freshly approved magazine prices),
+`carried_today` (prices re-emitted by the daily carry-forward), `products_today`
+(distinct magazine products present in today's export), and a `by_chain`
+breakdown (only chains with activity). Actual review happens via `/v1/revistas/*`.
 
 ---
 
@@ -1470,6 +1488,12 @@ magazine, not just the few auto-matches. See `examples/api/revista-analysis.json
 Magazines awaiting review (drives the modal/badge in the Daily Review screen).
 Returns an array of magazine headers, each with a `counts` breakdown
 (`total`/`pending`/`approved`/`rejected`). See `examples/api/revistas-pending.json`.
+
+Only magazines with **something to review** are returned: status `in_review`
+**and** ≥1 pending item. Magazines where the AI matched nothing (common) or that
+are fully reviewed are omitted so the banner isn't raised on an empty queue — use
+`GET /v1/revistas` to see every magazine regardless of state. Pass
+`?include_empty=true` to bypass the filter (returns all `in_review` magazines).
 
 ### `GET /v1/revistas/:magazineId`
 

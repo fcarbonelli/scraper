@@ -37,12 +37,13 @@ interface RunningRun {
   id: string;
   started_at: string;
   total_jobs: number;
+  metadata: Record<string, unknown> | null;
 }
 
 async function loadRunningRuns(): Promise<RunningRun[]> {
   const { data, error } = await db
     .from('scrape_runs')
-    .select('id, started_at, total_jobs')
+    .select('id, started_at, total_jobs, metadata')
     .eq('status', 'running');
   if (error) throw error;
   return (data ?? []) as RunningRun[];
@@ -96,10 +97,20 @@ async function finalizeRun(
     .eq('status', 'running'); // guard against double-finalize
   if (updateErr) throw updateErr;
 
-  // 2. Generate aggregated alerts (1 per supermarket, max)
+  // 2. Generate aggregated alerts (1 per supermarket, max). Transient
+  //    whole-site failures schedule a delayed recovery run instead of alerting;
+  //    a recovery run that still fails alerts directly (no further recovery).
+  const isRecoveryRun = run.metadata?.recovery === true;
   try {
-    const result = await generateAlertsForRun(run.id);
-    log.info({ alertsCreated: result.alertsCreated }, 'generated run alerts');
+    const result = await generateAlertsForRun(run.id, { isRecoveryRun });
+    log.info(
+      {
+        alertsCreated: result.alertsCreated,
+        recoveriesScheduled: result.recoveriesScheduled,
+        isRecoveryRun,
+      },
+      'generated run alerts',
+    );
   } catch (err) {
     log.error({ err }, 'alert generation failed (run still finalized)');
   }

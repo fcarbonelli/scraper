@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   // Backfill mode: re-emit today's carried-forward magazine prices right now
   // (run-less snapshot → immediately client-visible). No AI cost, no scraping.
   if (process.argv.includes('--carry-forward')) {
-    const carry = await carryForwardRevistaPrices(null);
+    const carry = await carryForwardRevistaPrices();
     logger.info({ carry }, 'revista carry-forward complete');
     process.exit(0);
   }

@@ -3,10 +3,11 @@
  *
  * A few regional sites sit behind a CDN/WAF edge that penalizes non-Argentine /
  * datacenter IPs: Super Mami and Maxiconsumo silently drop the connection (the
- * cloud worker hangs until timeout), and La Anónima started returning a hard 403
- * (WAF block) to the EC2 IP. When `AR_PROXY_URL` is set, those (and ONLY those)
- * adapters route their HTTP requests through it via an undici ProxyAgent; every
- * other supermarket keeps going direct.
+ * cloud worker hangs until timeout), La Anónima started returning a hard 403
+ * (WAF block) to the EC2 IP, and Átomo Conviene refuses the TCP/TLS connection
+ * outright (undici surfaces this as a bare `fetch failed`). When `AR_PROXY_URL`
+ * is set, those (and ONLY those) adapters route their HTTP requests through it
+ * via an undici ProxyAgent; every other supermarket keeps going direct.
  *
  * Environment:
  *   AR_PROXY_URL           Full proxy endpoint, e.g.
@@ -15,7 +16,7 @@
  *                          provider inside the username/password.)
  *   AR_PROXY_SUPERMARKETS  Optional comma-separated allowlist of supermarket
  *                          ids to route through the proxy. Defaults to
- *                          "mami,maxiconsumo".
+ *                          DEFAULT_PROXIED below.
  *
  * If `AR_PROXY_URL` is unset, `getProxyDispatcher()` always returns undefined
  * and behaviour is identical to before (direct connection).
@@ -25,7 +26,7 @@ import { ProxyAgent, type Dispatcher } from 'undici';
 
 const PROXY_URL = process.env.AR_PROXY_URL?.trim();
 
-const DEFAULT_PROXIED = ['mami', 'maxiconsumo', 'mercadolibre', 'la-anonima'];
+const DEFAULT_PROXIED = ['mami', 'maxiconsumo', 'mercadolibre', 'la-anonima', 'atomo'];
 
 /** Supermarket ids whose traffic should egress through the AR proxy. */
 const proxiedIds = new Set(

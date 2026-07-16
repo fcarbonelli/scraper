@@ -109,6 +109,12 @@ Same 31-column shape, three changes:
   manual operator inserts) are trusted and stay visible.
 - **Internal failures hidden:** `AND status <> 'scrape_failed'` — operational
   failures never reach the client.
+- **Active-only (migration 008):** `AND s.is_active AND sp.is_active` — a chain
+  paused at the supermarket level (e.g. `mercadolibre`) or a mapping paused via
+  `PATCH /v1/supermarket-products/:id {is_active:false}` drops out of the export
+  entirely. History is retained in the DB and reappears on re-activation. This is
+  orthogonal to `lifecycle_status`: a delisted/out-of-stock product stays
+  `is_active` and keeps showing via its marker row.
 - **New `Estado` column** exposing `price_snapshots.status` (only the
   client-facing values ever appear, since `scrape_failed` is filtered).
 - **NULL-price-safe** calculated columns (`LEAST`/`GREATEST` ignore NULLs; the
