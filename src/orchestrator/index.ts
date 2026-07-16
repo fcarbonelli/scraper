@@ -27,6 +27,8 @@ import { finalizePendingRuns } from './finalize.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
 import { carryForwardRevistaPrices } from '../revistas/carryForward.js';
 import { carryForwardInStorePrices } from '../instore/carryForward.js';
+import { withTimeout } from '../revistas/pool.js';
+import { revistaConfig } from '../revistas/config.js';
 
 initSentry('orchestrator');
 
@@ -60,18 +62,12 @@ async function runScrapeWithErrorHandling(
 async function runRevistaCheckWithErrorHandling(
   scrapeRunId: string | null,
 ): Promise<void> {
-  try {
-    const summaries = await runRevistaCheck({ scrapeRunId });
-    if (summaries.length > 0) logger.info({ summaries }, 'revista check complete');
-  } catch (err) {
-    logger.error({ err }, 'revista check failed');
-    captureError(err, { phase: 'revista-check' });
-  }
-
-  // Re-emit each magazine product's latest approved price as a fresh run-less
-  // snapshot dated today so magazine prices persist in the daily export until
-  // the next revista supersedes them. Run-less = always client-visible, so this
-  // is independent of whether the day's scrape run is published. Runs every day.
+  // 1. Carry-forwards run FIRST and independently of the AI magazine check.
+  //    They're cheap (DB-only) and MUST run every day so approved magazine /
+  //    in-store prices persist in the export. Running them before the check
+  //    means a slow or hung discovery (Playwright, network) can never block
+  //    them — that wedge is what made magazine prices vanish the day after
+  //    approval.
   try {
     const carry = await carryForwardRevistaPrices();
     if (carry.carried > 0) logger.info({ carry }, 'revista carry-forward complete');
@@ -80,16 +76,28 @@ async function runRevistaCheckWithErrorHandling(
     captureError(err, { phase: 'revista-carry-forward' });
   }
 
-  // Same idea for in-store scanned prices: re-emit each in-store mapping's
-  // latest hand-entered price as a fresh run-less snapshot dated today so it
-  // persists in the export until a worker's next visit supersedes it. Runs
-  // every day, independent of any scrape run's publish gate.
   try {
     const carry = await carryForwardInStorePrices();
     if (carry.carried > 0) logger.info({ carry }, 'instore carry-forward complete');
   } catch (err) {
     logger.error({ err }, 'instore carry-forward failed');
     captureError(err, { phase: 'instore-carry-forward' });
+  }
+
+  // 2. The magazine check (discovery + vision AI) runs LAST and is
+  //    timeout-guarded, so a wedged site can't stall the orchestrator. Each
+  //    site also logs a check row (revista_check_log) so the operator can see
+  //    the probe ran even on the (common) days nothing changed.
+  try {
+    const summaries = await withTimeout(
+      runRevistaCheck({ scrapeRunId }),
+      revistaConfig.checkTimeoutMs,
+      'revista check',
+    );
+    if (summaries.length > 0) logger.info({ summaries }, 'revista check complete');
+  } catch (err) {
+    logger.error({ err }, 'revista check failed');
+    captureError(err, { phase: 'revista-check' });
   }
 }
 

@@ -25,7 +25,8 @@ import type { PageSelection, RevistaStrategyConfig } from './sources-shared.js';
 import { extractProductsFromPage, type ExtractedProduct } from './extract.js';
 import { loadCatalog } from './catalog.js';
 import { buildCatalogIndex, matchItems } from './match.js';
-import { mapPool } from './pool.js';
+import { mapPool, withTimeout } from './pool.js';
+import { recordRevistaCheck } from './checkLog.js';
 import { uploadPageImage } from './storage.js';
 import {
   clearReviewItems,
@@ -255,13 +256,32 @@ export async function processSupermarket(
   catalogIndexPromise?: Promise<Awaited<ReturnType<typeof buildCatalogIndex>>>,
 ): Promise<MagazineSummary[]> {
   const log = logger.child({ supermarket: sm.id });
+  const startedAt = Date.now();
+
   let candidates: MagazineCandidate[];
   try {
-    candidates = await discoverCandidates(sm.strategy, opts.pageSelection);
+    // Timeout the discovery probe so a stalled site (e.g. Playwright/publuu)
+    // can't wedge the sequential daily check for the other chains.
+    candidates = await withTimeout(
+      discoverCandidates(sm.strategy, opts.pageSelection),
+      revistaConfig.discoverTimeoutMs,
+      `revista discovery (${sm.id})`,
+    );
   } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
     log.error({ err }, 'revista: discovery failed');
     captureError(err, { supermarket: sm.id, phase: 'discover' });
-    return [{ supermarketId: sm.id, label: '(discovery)', status: 'failed', hash: '', error: err instanceof Error ? err.message : String(err) }];
+    await recordRevistaCheck({
+      supermarketId: sm.id,
+      strategy: sm.strategy.strategy,
+      outcome: 'error',
+      candidates: 0,
+      newIssues: 0,
+      durationMs: Date.now() - startedAt,
+      detail,
+      scrapeRunId: opts.scrapeRunId ?? null,
+    });
+    return [{ supermarketId: sm.id, label: '(discovery)', status: 'failed', hash: '', error: detail }];
   }
 
   // Decide which candidates actually need (expensive) processing.
@@ -278,6 +298,16 @@ export async function processSupermarket(
 
   if (toProcess.length === 0) {
     log.info({ candidates: candidates.length }, 'revista: nothing changed, skipping');
+    await recordRevistaCheck({
+      supermarketId: sm.id,
+      strategy: sm.strategy.strategy,
+      outcome: 'no_change',
+      candidates: candidates.length,
+      newIssues: 0,
+      durationMs: Date.now() - startedAt,
+      detail: candidates.length === 0 ? 'no magazine found on site' : 'all issues already known',
+      scrapeRunId: opts.scrapeRunId ?? null,
+    });
     return summaries;
   }
 
@@ -286,6 +316,19 @@ export async function processSupermarket(
   for (const c of toProcess) {
     summaries.push(await processCandidate(sm, c, opts, indexPromise));
   }
+
+  const processed = summaries.filter((s) => s.status === 'processed').length;
+  const failed = summaries.filter((s) => s.status === 'failed').length;
+  await recordRevistaCheck({
+    supermarketId: sm.id,
+    strategy: sm.strategy.strategy,
+    outcome: processed > 0 ? 'new_issue' : failed > 0 ? 'error' : 'no_change',
+    candidates: candidates.length,
+    newIssues: processed,
+    durationMs: Date.now() - startedAt,
+    detail: `processed=${processed} failed=${failed} of ${toProcess.length} new issue(s)`,
+    scrapeRunId: opts.scrapeRunId ?? null,
+  });
   return summaries;
 }
 

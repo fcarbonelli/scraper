@@ -22,3 +22,28 @@ export async function mapPool<T, R>(
   await Promise.all(Array.from({ length: workers }, () => worker()));
   return results;
 }
+
+/**
+ * Reject with a timeout error if `p` doesn't settle within `ms`. Used to stop a
+ * hung magazine discovery (e.g. a stalled Playwright/network call) from wedging
+ * the whole daily revista check — and, in turn, blocking the carry-forward step
+ * that runs after it.
+ *
+ * Note: this races the promise; it does not cancel the underlying work (the
+ * caller's error path just moves on). The dangling work is harmless.
+ */
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
+}

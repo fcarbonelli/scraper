@@ -1483,6 +1483,21 @@ and *why*. This is the tool for answering "why did nothing match?". Shape:
 `analysis` includes **unmatched** items too — so the operator sees the whole
 magazine, not just the few auto-matches. See `examples/api/revista-analysis.json`.
 
+### `GET /v1/revistas/checks`
+
+The daily "did any magazine change?" probe log — one row **per chain per check**,
+written whether or not a new issue was found. This is how you see the check
+actually ran on the (common) days nothing changed. See
+`examples/api/revista-checks.json`.
+
+- `outcome`: `no_change` (checked, nothing new) · `new_issue` (found + processed
+  a new issue) · `error` (discovery/processing failed or timed out).
+- `candidates` = issues found on the site, `new_issues` = newly processed,
+  `duration_ms` = how long the probe took, `detail` = short summary / error.
+- Query params: `?supermarket_id=makro` (one chain), `?latest=true` (only the
+  most-recent check per chain — for a "last checked" dashboard; returns a plain
+  array, not paginated), `?page`/`?limit` (pagination otherwise).
+
 ### `GET /v1/revistas/pending`
 
 Magazines awaiting review (drives the modal/badge in the Daily Review screen).

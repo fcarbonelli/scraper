@@ -207,16 +207,25 @@ api_keys (
 -- only exist in a weekly/bi-weekly PDF/flipbook (Makro, Vital, Rosental,
 -- Maxicomodín). Flagged via supermarkets.config = { source_type: 'revista',
 -- revista: { strategy, offersUrl, pubhtml5Url? } }. See docs/REVISTA_REVIEW.md
--- and src/revistas/. An APPROVED item writes a normal price_snapshots row
--- (tier_used='ai', status='ok') tied to the day's run, so it publishes through
--- the existing gate — nothing magazine-specific in client_base.
+-- and src/revistas/. An APPROVED item writes a RUN-LESS price_snapshots row
+-- (tier_used='ai', status='ok', scrape_run_id=null): operator-trusted and always
+-- client-visible, exactly like a manual snapshot — the human approval IS the
+-- gate, so it does NOT depend on the daily run being published.
 --
 -- Revista chains have NO scraper adapter and are EXCLUDED from the daily
 -- BullMQ enqueue (src/orchestrator/enqueue.ts). Instead a daily carry-forward
 -- step (src/revistas/carryForward.ts) re-emits each active magazine product's
--- latest approved price as a fresh snapshot dated today (tied to the day's run),
--- so magazine prices persist in the daily export until the next issue supersedes
--- them (policy: carry the latest approved price forward). Idempotent per day.
+-- latest approved price as a fresh RUN-LESS snapshot dated today, so magazine
+-- prices persist in the daily export until the next issue supersedes them
+-- (policy: carry the latest approved price forward). Idempotent per day.
+-- IMPORTANT: carry-forward runs FIRST and independently of the AI magazine check
+-- in the orchestrator (src/orchestrator/index.ts) — a hung discovery must never
+-- block it (that regression made prices vanish the day after approval).
+--
+-- revista_check_log (migration 011): one row per (chain, daily check), written
+-- whether or not a new issue was found, so the operator can SEE the probe ran on
+-- the (common) days nothing changed (GET /v1/revistas/checks). The AI check is
+-- timeout-guarded; each site's discovery is timeout-guarded too.
 revista_magazines (
   id               uuid PK
   supermarket_id   text FK

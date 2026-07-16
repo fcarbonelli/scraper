@@ -68,6 +68,12 @@ you review gaps and publish the day).
   item, its price snapshot is written **run-less** (`scrape_run_id = null`):
   operator-trusted and **immediately client-visible**, exactly like a manual
   snapshot. It does **not** wait for any daily run to be published.
+- **Daily check visibility.** Most days no magazine changes, so nothing is
+  created — which used to look like "the check isn't running". Every daily probe
+  now writes a row per chain to a **check log** (`GET /v1/revistas/checks`), so
+  the operator can always see *"Makro — checked 12:00, sin cambios"*. Show this
+  as a small "Revistas — últimos chequeos" panel (see §6a). `?latest=true` gives
+  one row per chain for a compact "last checked" view.
 
 ```
 06:00  Daily run. Magazine unchanged → nothing happens.
@@ -416,7 +422,31 @@ finalizeRevista: (id: string, force = false) =>
   request<ApiSuccess<{ magazine_id: string; status: RevistaMagazineStatus }>>(
     `/revistas/${id}/finalize`, { method: 'POST', body: JSON.stringify({ force }) },
   ),
+listRevistaChecks: (q: { supermarket_id?: string; latest?: boolean; page?: number; limit?: number } = {}) =>
+  request(`/revistas/checks?${new URLSearchParams(q as Record<string, string>)}`),
 ```
+
+---
+
+## 6a. "Revistas — últimos chequeos" panel (`GET /v1/revistas/checks`)
+
+A small read-only panel (put it near the revista banner in the Daily Review, or
+on the debug/analyze page) that answers *"is the system actually checking the
+magazines?"* — because on most days nothing changes and there's nothing else to
+show.
+
+- Call `GET /v1/revistas/checks?latest=true` → a plain array with the most-recent
+  check per chain. Render one row per chain:
+  `{supermarket_name} · {checked_at, relative} · {outcome}` with a colored dot —
+  green `new_issue`, grey `no_change`, red `error`.
+- Optionally a "ver historial" link → `GET /v1/revistas/checks` (paginated) for
+  the full feed (all chains, newest first), with `?supermarket_id=` to filter.
+- Fields per row: `outcome` (`no_change`/`new_issue`/`error`), `candidates`
+  (issues found on the site), `new_issues` (newly processed), `duration_ms`,
+  `detail` (short summary / error text). See `examples/api/revista-checks.json`.
+- A row with `outcome: "error"` + a timeout `detail` means that site's probe is
+  failing — surface it so an operator can flag it (it does **not** affect the
+  other chains or the carry-forward).
 
 ---
 
@@ -451,11 +481,16 @@ finalizeRevista: (id: string, force = false) =>
   chains are excluded from the scraper queue (they have no adapter). **Frontend
   impact: none** — the data flows through the same snapshots the
   export/compare/history already read.
-  > **Operational note:** carry-forward only fires when the **orchestrator**
-  > process runs its daily cycle. If magazine prices stop appearing on new days,
-  > the orchestrator isn't running the current build — redeploy/restart it, or
-  > run `npm run revistas:run -- --carry-forward` to backfill today by hand
-  > (no AI cost).
+  > **Reliability:** carry-forward runs **first and independently** of the AI
+  > magazine check in the orchestrator's daily cycle. Earlier it ran *after* the
+  > check, so a slow/hung discovery (Playwright, network) could block it and make
+  > magazine prices vanish the day after approval — that's fixed. The check
+  > itself is now timeout-guarded and each site's probe is logged.
+  > **Operational note:** carry-forward still only fires when the **orchestrator**
+  > runs its daily cycle. If magazine prices stop appearing on new days, the
+  > orchestrator isn't running the current build — redeploy/restart it, or run
+  > `npm run revistas:run -- --carry-forward` to backfill today by hand (no AI
+  > cost).
 - **Idempotency.** Re‑approving/rejecting an already‑reviewed item returns
   `409 CONFLICT`. Re‑running the same unchanged magazine never creates a new one
   (dedup by content hash), so the queue is stable. The carry‑forward step is

@@ -144,6 +144,115 @@ revistasRouter.get('/', async (req: Request, res: Response) => {
 });
 
 // =============================================================================
+// GET /v1/revistas/checks
+//
+// The daily "did any magazine change?" probe log. One row per (chain, check),
+// written whether or not a new issue was found — so the operator has evidence
+// the check ran even on the (common) days nothing changed. Backed by
+// revista_check_log (migration 009).
+//
+//   ?supermarket_id=makro   only one chain
+//   ?latest=true            only the most-recent check per chain (dashboard view)
+//   ?page/?limit            pagination (ignored when latest=true)
+// =============================================================================
+interface CheckLogRow {
+  id: number;
+  supermarket_id: string;
+  strategy: string | null;
+  checked_at: string;
+  outcome: string;
+  candidates: number;
+  new_issues: number;
+  duration_ms: number | null;
+  detail: string | null;
+  scrape_run_id: string | null;
+}
+
+const CHECK_COLS =
+  'id, supermarket_id, strategy, checked_at, outcome, candidates, new_issues, duration_ms, detail, scrape_run_id';
+
+const ChecksQuery = PaginationQuery.extend({
+  supermarket_id: z.string().trim().min(1).optional(),
+  // Note: z.coerce.boolean() treats "false" as true — parse the string explicitly.
+  latest: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
+});
+
+function checkResponse(r: CheckLogRow, supermarketName: string): object {
+  return {
+    id: r.id,
+    supermarket_id: r.supermarket_id,
+    supermarket_name: supermarketName,
+    strategy: r.strategy,
+    checked_at: r.checked_at,
+    outcome: r.outcome,
+    candidates: r.candidates,
+    new_issues: r.new_issues,
+    duration_ms: r.duration_ms,
+    detail: r.detail,
+    scrape_run_id: r.scrape_run_id,
+  };
+}
+
+revistasRouter.get('/checks', async (req: Request, res: Response) => {
+  const q = parseQuery(req, ChecksQuery);
+
+  // Latest-per-chain: fetch a recent window and keep the first (newest) row per
+  // supermarket. Cheap — the log is one row per chain per day.
+  if (q.latest) {
+    let query = db
+      .from('revista_check_log')
+      .select(CHECK_COLS)
+      .order('checked_at', { ascending: false })
+      .limit(500);
+    if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data ?? []) as CheckLogRow[];
+
+    const latestPerChain = new Map<string, CheckLogRow>();
+    for (const r of rows) if (!latestPerChain.has(r.supermarket_id)) latestPerChain.set(r.supermarket_id, r);
+
+    const smIds = [...latestPerChain.keys()];
+    const names = new Map<string, string>();
+    if (smIds.length > 0) {
+      const { data: sms } = await db.from('supermarkets').select('id, name').in('id', smIds);
+      for (const s of sms ?? []) names.set(s.id as string, s.name as string);
+    }
+    const out = [...latestPerChain.values()].map((r) =>
+      checkResponse(r, names.get(r.supermarket_id) ?? r.supermarket_id),
+    );
+    res.json(success(out));
+    return;
+  }
+
+  const page = req.pagination?.page ?? q.page;
+  const limit = req.pagination?.limit ?? q.limit;
+  const offset = req.pagination?.offset ?? (page - 1) * limit;
+
+  let query = db
+    .from('revista_check_log')
+    .select(CHECK_COLS, { count: 'exact' })
+    .order('checked_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
+  const { data, error, count } = await query;
+  if (error) throw error;
+  const rows = (data ?? []) as CheckLogRow[];
+
+  const smIds = [...new Set(rows.map((r) => r.supermarket_id))];
+  const names = new Map<string, string>();
+  if (smIds.length > 0) {
+    const { data: sms } = await db.from('supermarkets').select('id, name').in('id', smIds);
+    for (const s of sms ?? []) names.set(s.id as string, s.name as string);
+  }
+  const out = rows.map((r) => checkResponse(r, names.get(r.supermarket_id) ?? r.supermarket_id));
+  res.json(paginated(out, count ?? 0, page, limit));
+});
+
+// =============================================================================
 // GET /v1/revistas/pending
 //
 // Drives the "nueva revista para revisar" banner in the Daily Review screen.
@@ -155,7 +264,11 @@ revistasRouter.get('/', async (req: Request, res: Response) => {
 // and the analysis view. Set ?include_empty=true to bypass the filter.
 // =============================================================================
 const PendingQuery = z.object({
-  include_empty: z.coerce.boolean().optional(),
+  // Note: z.coerce.boolean() treats "false" as true — parse the string explicitly.
+  include_empty: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
 });
 
 revistasRouter.get('/pending', async (req: Request, res: Response) => {

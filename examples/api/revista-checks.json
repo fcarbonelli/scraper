@@ -1,0 +1,45 @@
+{
+  "data": [
+    {
+      "id": 1487,
+      "supermarket_id": "makro",
+      "supermarket_name": "Makro",
+      "strategy": "html-pdf-links",
+      "checked_at": "2026-07-16T12:00:31.000Z",
+      "outcome": "no_change",
+      "candidates": 5,
+      "new_issues": 0,
+      "duration_ms": 2143,
+      "detail": "all issues already known",
+      "scrape_run_id": "c8dbce81-139c-4ded-aa72-f0cd8e622a64"
+    },
+    {
+      "id": 1486,
+      "supermarket_id": "rosental",
+      "supermarket_name": "Rosental",
+      "strategy": "pubhtml5",
+      "checked_at": "2026-07-16T12:00:18.000Z",
+      "outcome": "new_issue",
+      "candidates": 1,
+      "new_issues": 1,
+      "duration_ms": 5120,
+      "detail": "processed=1 failed=0 of 1 new issue(s)",
+      "scrape_run_id": "c8dbce81-139c-4ded-aa72-f0cd8e622a64"
+    },
+    {
+      "id": 1485,
+      "supermarket_id": "maxicomodin",
+      "supermarket_name": "Maxicomodín",
+      "strategy": "publuu",
+      "checked_at": "2026-07-16T12:00:05.000Z",
+      "outcome": "error",
+      "candidates": 0,
+      "new_issues": 0,
+      "duration_ms": 90000,
+      "detail": "revista discovery (maxicomodin) timed out after 90000ms",
+      "scrape_run_id": "c8dbce81-139c-4ded-aa72-f0cd8e622a64"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 3, "totalPages": 1 },
+  "meta": { "ts": "2026-07-16T12:05:00.000Z" }
+}

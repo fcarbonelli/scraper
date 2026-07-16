@@ -18,6 +18,12 @@ export const revistaConfig = {
   concurrency: env.REVISTA_CONCURRENCY,
   storageBucket: env.REVISTA_STORAGE_BUCKET,
   enabled: env.REVISTA_ENABLED,
+  /** Max time for ONE site's discovery probe before we give up (prevents a hung
+   *  Playwright/network call from blocking the rest of the daily check). */
+  discoverTimeoutMs: 90_000,
+  /** Hard ceiling for the whole daily magazine check (all sites) — belt-and-
+   *  suspenders so a wedge can never stall the orchestrator indefinitely. */
+  checkTimeoutMs: 20 * 60_000,
 } as const;
 
 /** Throw a clear error if the OpenAI key is missing right before we need it. */
