@@ -1,0 +1,657 @@
+{
+  "852a3f8c-8fc6-464a-97a1-57a03881a5ed": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "sin candidatos"
+  },
+  "001fba62-bc40-4740-a9f0-46eed13d404e": {
+    "ean": "7790520009494",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato (165 cc)."
+  },
+  "0176e5e0-f930-4546-a51d-a095ed2c6800": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide exactamente en formato y tamaño."
+  },
+  "0256606b-eab3-4712-b012-bfd840f7cea3": {
+    "ean": "7790520995162",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato (900 ml)."
+  },
+  "0256d08a-c64d-4026-8f42-5340588f74b7": {
+    "ean": "7790117061850",
+    "confidence": 0.8,
+    "reason": "El tamaño de 40u no coincide con las 10u de este candidato, hay tres candidatos pero ninguno coincide."
+  },
+  "092d071a-babe-4a16-b34a-ce0d11127367": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide en marcas y tamaños."
+  },
+  "0c13b53c-66fc-446d-b98e-9852b322afd5": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide en marca y tamaño."
+  },
+  "0d1b6738-c6eb-4c59-823b-747d5b4d97d0": {
+    "ean": "7798023697415",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato (1 L)."
+  },
+  "0de01e43-264f-4988-ac69-f2175a68a95b": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias relevantes, candidatos son guantes."
+  },
+  "0e27bb73-b0b9-4f4a-9f21-92bb46807e0e": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias relevantes, candidatos son esponjas y paños distintos."
+  },
+  "0e86edfd-1a3d-4c55-b9f2-ec8b54b8a19e": {
+    "ean": "7793253003265",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato (650 cc)."
+  },
+  "0fc08da2-cfd5-414b-8dd8-94ea009fc7bd": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide exactamente en formato y tamaño."
+  },
+  "11c7873d-ddb0-448f-b64d-d5ff1112839a": {
+    "ean": "7793253003791",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato (700 ml)."
+  },
+  "12aebf57-7da1-4b15-86f3-fdeaa487c802": {
+    "ean": "7794440994212",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Guante Plisse Satinado L Mapa 1 Un."
+  },
+  "16816fe5-ccca-402c-8c14-c35f2aeb2ffc": {
+    "ean": "7791905023227",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Lavandina Ayudin Original 4l."
+  },
+  "189ef0df-b8ce-4884-a664-3af2fe86791d": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide con el producto RAID ESPIRALES CAJAx150g."
+  },
+  "1a670529-9c0a-485e-a21a-58494a653b01": {
+    "ean": "7791274198762",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Perfumante de Telas Suave Brisa 250ml Algabo."
+  },
+  "1dd75be2-116b-4074-b049-982743096f21": {
+    "ean": "7793253005856",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Lavandina En Gel Original Ayudin 500ml."
+  },
+  "1e1c7d00-8d36-45e3-bedd-7564631b262a": {
+    "ean": "7790520010445",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Insecticida Raid Repele Mosquitos en Espiral 12un."
+  },
+  "1f3ddb79-2e3f-44cf-af9b-eabed115ff33": {
+    "ean": "7793253005863",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Lavandina En Gel Ayudin Pureza Cítrica 500 Ml."
+  },
+  "1f94ffa6-e458-4e2d-b538-9593a0c80de5": {
+    "ean": "7793253003777",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Lavandina Ayudin Anti-Splash 1lt."
+  },
+  "203f5537-4667-4ee8-86fc-84acc1d9741e": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide con el producto Bolsa N°5 Asurin 50x70 cm."
+  },
+  "21360943-e02e-460d-ae9a-7ad4808257dc": {
+    "ean": "7793253005146",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Insecticida Selton Mata Moscas y Mosquitos 360 Cm 3."
+  },
+  "220ce811-8194-4fa4-9d95-aedb9fd3734e": {
+    "ean": "7791130683760",
+    "confidence": 1,
+    "reason": "Coincide marca, variedad y formato: Limpiador Líquido Pisos Procenex 2 En 1 Lavanda 1,8 Lts."
+  },
+  "25e97951-ecae-49b0-af37-d276c89000b3": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide con el producto Unknown product."
+  },
+  "293b63e7-f6d0-4315-87b9-51e910c08b94": {
+    "ean": "7790520995308",
+    "confidence": 1,
+    "reason": "Exact match encontrado: misma marca, variedad, y formato."
+  },
+  "29cc0f58-f58e-44ed-88af-193707d3c732": {
+    "ean": "7791905023197",
+    "confidence": 1,
+    "reason": "Exact match encontrado: misma marca, variedad, y formato."
+  },
+  "2e168121-b3de-4c54-9f91-cfce59c83dd1": {
+    "ean": "7793253003869",
+    "confidence": 1,
+    "reason": "Exact match encontrado: misma marca, variedad, y formato."
+  },
+  "2fe165c5-585c-44c6-b9be-af7a0ffa2afb": {
+    "ean": "7791905002512",
+    "confidence": 1,
+    "reason": "Exact match encontrado: misma marca, variedad, y formato."
+  },
+  "31210ae3-ffc3-4abc-b27b-df66c80f5a37": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas con la misma marca, variedad y formato."
+  },
+  "348be493-1b54-473f-b6bd-ba55ccd6d691": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas con la misma marca, variedad y formato."
+  },
+  "3739e8d1-5ad9-45a0-b59a-6bd4959d726f": {
+    "ean": "7793253005474",
+    "confidence": 1,
+    "reason": "Exact match encontrado: misma marca, variedad, y formato."
+  },
+  "39e14c39-e30e-41f8-b227-869c95c14685": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas con la misma marca, variedad y formato."
+  },
+  "3bbd5978-41d8-4141-b47a-72708b755c9a": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas con la misma marca, variedad y formato."
+  },
+  "3dfbf17f-4abf-497e-aac5-6fd214597776": {
+    "ean": "7791905002529",
+    "confidence": 1,
+    "reason": "Exact match encontrado: misma marca, variedad, y formato."
+  },
+  "4058154e-f5ba-4c26-900b-34c1387b5f1e": {
+    "ean": "7790117000071",
+    "confidence": 0.8,
+    "reason": "Coincidiendo la marca y dimensiones, pero sin coincidencia exacta."
+  },
+  "41f13250-ef8b-46db-85b2-81513837b874": {
+    "ean": "7792389000315",
+    "confidence": 1,
+    "reason": "Exact match encontrado: misma marca, variedad, y formato."
+  },
+  "43fcc01f-f3a0-4f13-8bf8-cc101e688ebd": {
+    "ean": "7793253005290",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "451be2d5-bf5d-4553-a36d-9c52c3788610": {
+    "ean": "7793253003807",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "453c8800-002c-44c1-88b9-7bc6e38731a0": {
+    "ean": "7793253038526",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "4974b6ff-7391-438c-8668-0f040395a1a0": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato es el mismo producto."
+  },
+  "4a824b82-22ea-4a20-9782-71d2a5e91a2e": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato es el mismo producto."
+  },
+  "4b4f03ab-d03c-4c6f-a39d-0bdfc38108b8": {
+    "ean": "7793253003838",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "4b734bfa-c977-41de-97ff-97c3e073aa12": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato es el mismo producto."
+  },
+  "4ee3a704-8364-48ae-aa94-d43d72103c80": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato es el mismo producto."
+  },
+  "532bdadc-1572-430a-a53d-2f068f68eec7": {
+    "ean": "7793253003241",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "59189b33-e4b0-454b-b4a4-c95383b0fe78": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato es el mismo producto."
+  },
+  "59686bee-a8cc-45b6-ba5f-114bcc1a8ed4": {
+    "ean": "7794440994205",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "5acd65d0-bf49-4af3-92bc-fb0b2c319ce3": {
+    "ean": "7791130002240",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "5ad8e270-28bd-4c90-b981-360f3c3784ee": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencia exacta en marca, variedad o formato."
+  },
+  "5ed89192-de1f-4dd8-ab7d-21f273cc321b": {
+    "ean": "7793253003869",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (1.5 L)."
+  },
+  "5eed762e-f2f3-48ee-b696-d11cc2965f92": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No se puede determinar producto a partir de la información proporcionada."
+  },
+  "5ff5e0d8-920f-4b93-89a4-1e69d4f91b54": {
+    "ean": "7791130683845",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (1.8 L)."
+  },
+  "65f3d4c2-6d8b-4bd8-ae17-f32cc9eed774": {
+    "ean": "7791130683524",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (900 ml)."
+  },
+  "6792611b-8233-40b7-95e0-5b0b68625c2b": {
+    "ean": "7793253005481",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (65 un.)."
+  },
+  "69191cc5-6f1f-4708-a0b9-935704df0d8b": {
+    "ean": "7793253005146",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (360 cc)."
+  },
+  "69e90b3f-77be-42f2-84c4-4d861ae0e4c2": {
+    "ean": "7791130683661",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (900 ml)."
+  },
+  "6bc026c6-71cd-491f-9857-52512a24b393": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencia exacta en marca, variedad o formato."
+  },
+  "6eb73cd4-b91a-465b-9766-716026591243": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencia exacta en marca, variedad o formato."
+  },
+  "6ef8f6d4-9b1d-4887-9072-3e43d0f4ec39": {
+    "ean": "7793253003838",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (700 ml)."
+  },
+  "7295fac3-6446-4253-8f9e-a0996f904cbe": {
+    "ean": "7793253002565",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato exacto (450 gr)."
+  },
+  "76ba85f8-fe37-4528-84bd-9e58854e2cb0": {
+    "ean": "7793253300081",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "7aa343e7-ff9f-4586-954d-1f4601856173": {
+    "ean": "7790520997654",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "7ce1b495-117a-48a6-bffb-d0419f3a9c94": {
+    "ean": "7793253000905",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "7fef9939-0655-4619-b7ae-cf3349559041": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide debido a nombres vagos."
+  },
+  "82ce96ad-826b-4d4d-b2a4-eb2b5c445c26": {
+    "ean": "7790520028938",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "843aa382-0048-47b7-b193-ba2a682fa5ac": {
+    "ean": "7791905002529",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "8620ab7f-0ef9-48dd-8808-94f560d145b1": {
+    "ean": "7791130001748",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "8a27a467-9474-4f1a-97ec-5a16bf63dd5b": {
+    "ean": "7793253003272",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "8a9750ef-7efb-4cc8-8f09-ec6272548657": {
+    "ean": "7793253003838",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "8b85558e-0ded-4fa2-ad18-626668510f49": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "Ningún candidato coincide debido a nombres vagos."
+  },
+  "8bb33c52-0464-40d7-a2c6-dd32e2dfd121": {
+    "ean": "7793253005306",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "8ef50f2b-fa08-442b-be5a-6a9851483393": {
+    "ean": "7791290794962",
+    "confidence": 1,
+    "reason": "Marca, variedad y formato coinciden exactamente."
+  },
+  "8f688a5b-dee7-4b39-ab85-b091757daf8d": {
+    "ean": "7790520028655",
+    "confidence": 0.9,
+    "reason": "La marca, variedad y formato coinciden, aunque hay un ligero error en el tamaño declarado en el nombre. Este EAN se refiere a un mismo producto."
+  },
+  "8f692007-55a3-4813-bfc3-c329d1a28df1": {
+    "ean": "7790520995216",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "903b7b7e-eb3e-4e1d-a946-9e43b41d3a32": {
+    "ean": "7791130002240",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "908e5f5b-ca77-4a8d-8d88-ad4d9a99345a": {
+    "ean": "7793253003586",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "92154c34-23a3-4841-9036-ce9282dc93f0": {
+    "ean": "7793253003234",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "93e65c3e-67e4-4797-b56b-70a8a78ada52": {
+    "ean": "7798131250045",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "98382884-b273-4d48-944c-457d31421fc7": {
+    "ean": "7793253003876",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "98f0d760-6aab-4210-adbe-ee406d4a8a2b": {
+    "ean": "7793253386160",
+    "confidence": 1,
+    "reason": "La marca y formato coinciden exactamente."
+  },
+  "9de116b7-07fd-45aa-a161-d801eceac194": {
+    "ean": "7790520996381",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "a097874d-cb89-4865-869e-b0376b85e423": {
+    "ean": "7790520998880",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "a1911024-a409-437b-acc9-685c4c7aea82": {
+    "ean": "7793253003272",
+    "confidence": 1,
+    "reason": "La marca, variedad y formato coinciden exactamente."
+  },
+  "a1996d0a-743f-4fd3-b17f-32bac83a94f9": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencia exacta en marca, variedad y formato."
+  },
+  "a3fce14f-9a03-4944-bac4-2928b708c58a": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas en marca, variedad y formato."
+  },
+  "a879ec66-10ab-478a-bc9e-15656dc7a7ff": {
+    "ean": "7793253004231",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Poett Frescura de Lavanda en aerosol 360 ml."
+  },
+  "a8cdfbad-7b8e-4048-af7d-d5e1831aa787": {
+    "ean": "7702626214832",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Quitamanchas Vanish polvo blanco repuesto 450 g."
+  },
+  "ab39cea6-dfea-4809-807f-e4225d676236": {
+    "ean": "7793253005276",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Limpiador De Baño Ayudín Limpieza Activa - Gatillo 500 ml."
+  },
+  "ab5b5cc9-e46e-44e1-a55d-f5f5df5b4310": {
+    "ean": "7793253098773",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Aromatizante De Telas POETT Sedosa Primavera Botella Con Gatillo 250 Ml."
+  },
+  "ad2a56af-fd79-4119-b1d0-aaf809046d87": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas en marca, variedad y formato."
+  },
+  "af99ad59-9e55-4843-b348-680428268f37": {
+    "ean": "7790520995285",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Desinfectante elimina olores Lysoform original aerosol 360 ml."
+  },
+  "b1be20b0-b64f-4c1c-9fee-fdbb7e13894e": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas en marca, variedad y formato."
+  },
+  "b24b96d7-eb9f-4976-be6c-6e511d023491": {
+    "ean": "7793253003913",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Toallitas Desinfectantes Ayudín Fresco 35 Un."
+  },
+  "b2e40328-8545-449b-b875-e83aba3e3882": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencias exactas en marca, variedad y formato."
+  },
+  "b3ddc5ee-070d-45bd-94e6-f7143488adf9": {
+    "ean": "7793253003418",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Quitamanchas Ayudín para ropa color botella 700 cc."
+  },
+  "b61553f9-66c5-45f8-9a09-9f7f4c9b53e4": {
+    "ean": "7793253004743",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato: Limpiador desinfectante Ayudín floral 900 ml."
+  },
+  "b9a6faa0-246a-40b4-9b5c-9a3238bb4c3e": {
+    "ean": "7794440002399",
+    "confidence": 0.8,
+    "reason": "La marca es Virulana y el formato coincide con el del candidato aunque hay una discrepancia en la descripción que parece referirse a otro producto."
+  },
+  "bc279399-b975-4f65-8656-2b87a9c54612": {
+    "ean": "7791130683784",
+    "confidence": 1,
+    "reason": "Coinciden la marca Procenex, la variedad 'Marina' y el formato de 1.8l."
+  },
+  "bca2a473-66d7-4612-b81e-a78f5e496e19": {
+    "ean": "7790117000071",
+    "confidence": 1,
+    "reason": "Coinciden la marca Asurín, el tamaño 45x60 cm, y 30 unidades."
+  },
+  "c3e2a626-076b-4315-8c9c-041ea7711754": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay candidatos que coincidan en marca, variedad o tamaño."
+  },
+  "c674ac7a-a7b6-42bb-82c8-1c6fa0c3925b": {
+    "ean": "7790520028792",
+    "confidence": 1,
+    "reason": "Coinciden la marca Glade, la variedad 'Flores Tropicales y Coco' y el formato de 380ml."
+  },
+  "cf0e3521-b396-45b1-bea8-c25b7a28f4e1": {
+    "ean": "7793253003241",
+    "confidence": 1,
+    "reason": "Coinciden la marca Ayudín, la variedad 'Colores Vivos' y el formato de 650ml."
+  },
+  "cf5de033-2cd0-4b3d-bd21-72e5a4a5a4fe": {
+    "ean": "7793253005276",
+    "confidence": 1,
+    "reason": "Coinciden la marca Ayudín, la variedad 'Limpieza Activa' y el formato de 500ml."
+  },
+  "d1fb8cc4-0e01-4bf1-baf0-21513d51b4de": {
+    "ean": "7791130002752",
+    "confidence": 1,
+    "reason": "Coinciden la marca Procenex, el tipo 'Antigrasa' y el formato de 420ml."
+  },
+  "d42e80c1-7f3e-4871-bbe5-2569c60ca597": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay candidatos disponibles para identificar el producto."
+  },
+  "d471bfb8-0d0b-4b99-b6c8-76bb64f34052": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay candidatos que coincidan en marca, tamaño, o tipo de bolsa."
+  },
+  "d700dfdd-e9fa-4159-979f-e6fa77c0c188": {
+    "ean": "7793253003425",
+    "confidence": 1,
+    "reason": "Coinciden la marca Ayudín, la variedad 'Blanco Supremo' y el formato de 700ml."
+  },
+  "da92299b-67da-4122-8da4-f394cde1a193": {
+    "ean": "7793253003869",
+    "confidence": 1,
+    "reason": "Coinciden la marca Ayudín, el tipo 'Gel' y el formato de 1.5l."
+  },
+  "dbe5fd69-aa3c-4727-abcc-f759faf3bb8c": {
+    "ean": "7791905002499",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "dc0b65cb-76c9-4f15-92cc-3d093e08cafa": {
+    "ean": "7793253001162",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "dc9de1ab-d885-4bd0-8a25-030e71882a21": {
+    "ean": "7793253005726",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "dd273b5e-37c9-4a9c-b09b-9ce20cb2e5c6": {
+    "ean": "7793253005146",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e14bca5e-c4c8-426f-9499-b3e3de499c43": {
+    "ean": "7791130683784",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e245d082-29a4-46db-b288-25593df73a16": {
+    "ean": "7793253005863",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e403c468-e262-4db9-a640-f921775d70ef": {
+    "ean": "7790520995285",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e5e4323c-30ad-4af6-b41d-734dc70dc730": {
+    "ean": "7793253005146",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e5f8c0d4-2ad3-4222-9ac4-9d16b3631f0e": {
+    "ean": "7791130683753",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e62a538d-672f-4cf0-86d4-2efc22952afc": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay coincidencia clara."
+  },
+  "e62ae591-37ff-433f-87fc-4a32ddef5247": {
+    "ean": "7793253006716",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e7197640-78b6-40af-ab88-b6740f435a55": {
+    "ean": "7793253005153",
+    "confidence": 1,
+    "reason": "Coinciden marca, variedad y formato."
+  },
+  "e783e136-8176-47a7-a83b-10310595719a": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay candidatos que coincidan en marca, variedad y formato."
+  },
+  "e8e63e9e-8341-44f1-812b-fff6af1a9c62": {
+    "ean": "7791290795648",
+    "confidence": 1,
+    "reason": "Coincide exactamente con marca, variedad y formato (900ml)."
+  },
+  "f106e21d-20af-41cf-a852-ce74b9aa9dd5": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay candidatos que coincidan en marca, variedad y formato."
+  },
+  "f145ce89-e103-4b0d-b9e9-6cedb66a06ca": {
+    "ean": "7791130683852",
+    "confidence": 1,
+    "reason": "Coincide exactamente con marca, variedad y formato (5 L)."
+  },
+  "f5061830-a029-4afa-954c-7afd86f10639": {
+    "ean": "7793253170622",
+    "confidence": 1,
+    "reason": "Coincide exactamente con marca, variedad y formato (400 cm3)."
+  },
+  "fa0feb46-0cf3-4c04-81ef-b37209825308": {
+    "ean": "7793253005122",
+    "confidence": 1,
+    "reason": "Coincide exactamente con marca, variedad y formato (360 cc)."
+  },
+  "fa6cd459-fde0-4c40-b260-d12f382f0442": {
+    "ean": "7791130001748",
+    "confidence": 1,
+    "reason": "Coincide exactamente con marca, variedad y formato (400ml)."
+  },
+  "fb5e97b7-2a74-4727-a748-90c7ec3faaf2": {
+    "ean": null,
+    "confidence": 0,
+    "reason": "No hay candidatos que coincidan en marca, variedad y formato."
+  },
+  "fbd77391-f257-4a45-b8fe-8493116d6955": {
+    "ean": "7790520995162",
+    "confidence": 1,
+    "reason": "Coincide exactamente con marca, variedad y formato (900 ml)."
+  },
+  "fffef03b-8580-4409-925a-806bf8fc1755": {
+    "ean": "7790520995186",
+    "confidence": 1,
+    "reason": "Coincide exactamente con marca, variedad y formato (900 ml)."
+  }
+}

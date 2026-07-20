@@ -32,6 +32,8 @@ export interface PriceDataItem {
   Pricing_Id: string;
   Fecha_Creacion: string;
   Fecha_Modificacion: string;
+  /** Date the price was captured (scraped_at::date). Usually same day as creation. */
+  Fecha_Relevamiento: string;
   Provincia: string;
   Zona: string;
   Mes: string;
@@ -55,11 +57,29 @@ export interface PriceDataItem {
    */
   Estado: string;
   Precio_Regular: string;
+  /** Price under the 1st active promotion. Empty when there's no promo. */
+  Precio_c_Oferta_1: string;
+  /** Price under a 2nd concurrent promotion. Empty when there's no 2nd promo. */
+  Precio_c_Oferta_2: string;
+  /** Human-readable description of the 1st promotion. */
+  Promocion_1: string;
+  /** Human-readable description of the 2nd promotion. */
+  Promocion_2: string;
+  /** Effective unit discount (0..1) derived from list vs. offer price. */
+  Descuento_Unitario: string;
   URL: string;
   Precio_Mas_Bajo: string;
-  /** Campo pendiente de definición — se entrega vacío por ahora. */
+  /** Campo pendiente de definición — llega con el Price List. Vacío por ahora. */
+  PRECIO_TGT_SPM: string;
+  /** Campo pendiente de definición — llega con el Price List. Vacío por ahora. */
+  PRECIO_TGT_MAY: string;
+  /** Campo pendiente de definición (cálculo a definir). Vacío por ahora. */
+  IDX_VS_COMPETENCIA: string;
+  /** Campo pendiente de definición (cálculo a definir). Vacío por ahora. */
+  PRECIO_PRODUCTO_EN_CATEGORIA: string;
+  /** Legacy — reemplazado por IDX_VS_COMPETENCIA. Se mantiene vacío por compatibilidad. */
   Index_Competencia: string;
-  /** Campo pendiente de definición — se entrega vacío por ahora. */
+  /** Legacy — pendiente de definición. Se mantiene vacío por compatibilidad. */
   Marca_Competencia: string;
 }
 
@@ -87,6 +107,7 @@ export function toPriceData(row: Record<string, unknown>): PriceDataItem {
     Pricing_Id: str(row['ID']),
     Fecha_Creacion: str(row['Fecha_Creacion']),
     Fecha_Modificacion: str(row['Fecha_Actualizacion']),
+    Fecha_Relevamiento: str(row['Fecha_Relevamiento']),
     Provincia: str(row['Provincia']),
     Zona: str(row['Zona']),
     Mes: str(row['Mes']),
@@ -104,8 +125,20 @@ export function toPriceData(row: Record<string, unknown>): PriceDataItem {
     Desc_Sku_Sitio: str(row['Desc_Sku_Sitio']),
     Estado: str(row['Estado']),
     Precio_Regular: str(row['Precio_Regular']),
+    Precio_c_Oferta_1: str(row['Precio_c_Oferta_1']),
+    Precio_c_Oferta_2: str(row['Precio_c_Oferta_2']),
+    Promocion_1: str(row['Promocion_1']),
+    Promocion_2: str(row['Promocion_2']),
+    Descuento_Unitario: str(row['Descuento_Unitario']),
     URL: str(row['URL']),
     Precio_Mas_Bajo: str(row['Precio_MasBajo']),
+    // Empty until their source data / formula is defined (columns exist in the
+    // view as NULL for now, so they'll populate automatically once computed).
+    PRECIO_TGT_SPM: str(row['PRECIO_TGT_SPM']),
+    PRECIO_TGT_MAY: str(row['PRECIO_TGT_MAY']),
+    IDX_VS_COMPETENCIA: str(row['IDX_VS_COMPETENCIA']),
+    PRECIO_PRODUCTO_EN_CATEGORIA: str(row['PRECIO_PRODUCTO_EN_CATEGORIA']),
+    // Legacy fields kept for backward compatibility; always empty.
     Index_Competencia: '',
     Marca_Competencia: '',
   };

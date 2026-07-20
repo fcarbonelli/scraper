@@ -1,0 +1,5 @@
+# 4 productos ausentes del scraper, con URL — ingest via scrape:bulk
+https://www.cotodigital.com.ar/sitios/cdigi/productos/limpiador-liquido-desinfectante-de-superficies-lysoform-floral-perfection-botella-1-8l-/_/R-00520546-00520546-200
+https://www.abastecedor.com.ar/mortimer-pa%C3%B1o-mult-absorv-amarillo-x3u--1/p
+https://www.lacoopeencasa.coop/producto/lavandina-odex-comun-1000cm3/311857
+https://www.maxiconsumo.com/sucursal_moreno/quitamancha-vanish-liquido-doypack-400-ml-17062.html

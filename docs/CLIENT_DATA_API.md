@@ -118,8 +118,12 @@ server-side download route, so the key isn't exposed in the browser).
 
 ## Notes & future fields
 
-Four columns in `client_base` are intentionally empty for now (per the client's
-spec): `PRECIO_TGT_SPM` and `PRECIO_TGT_MAY` arrive with the Price List, and
-`IDX_VS_COMPETENCIA` / `PRECIO_PRODUCTO_EN_CATEGORIA` are calculated fields to be
-defined later. They appear in both the JSON and the file export so the structure
-is stable.
+`PRECIO_TGT_SPM` and `PRECIO_TGT_MAY` are populated from the client's **Price
+List** (`price_targets`, loaded via `npm run lp:import <file.xlsx>` — migration
+012). Each row shows only the target for its own channel: supermarket rows
+(`Canal` `SPM ...`) carry `PRECIO_TGT_SPM`, mayorista rows (`MAY ...`) carry
+`PRECIO_TGT_MAY`; the other stays empty, as does any EAN not in the list.
+
+Two columns remain intentionally empty until their logic is defined:
+`IDX_VS_COMPETENCIA` and `PRECIO_PRODUCTO_EN_CATEGORIA`. All columns appear in
+both the JSON and the file export so the structure is stable.

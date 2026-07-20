@@ -120,6 +120,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Pricing_Id": "1024",
       "Fecha_Creacion": "2025-10-06T09:15:00.000Z",
       "Fecha_Modificacion": "2025-10-06T09:15:00.000Z",
+      "Fecha_Relevamiento": "2025-10-06",
       "Provincia": "MENDOZA",
       "Zona": "OESTE",
       "Mes": "Octubre del 2025",
@@ -137,8 +138,17 @@ La respuesta es un objeto con la siguiente estructura:
       "Desc_Sku_Sitio": "DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML.",
       "Estado": "ok",
       "Precio_Regular": "3648",
+      "Precio_c_Oferta_1": "2999",
+      "Precio_c_Oferta_2": "",
+      "Promocion_1": "2da unidad al 70%",
+      "Promocion_2": "",
+      "Descuento_Unitario": "0.1779",
       "URL": "https://www.atomoconviene.com/...",
-      "Precio_Mas_Bajo": "3648",
+      "Precio_Mas_Bajo": "2999",
+      "PRECIO_TGT_SPM": "3450",
+      "PRECIO_TGT_MAY": "",
+      "IDX_VS_COMPETENCIA": "",
+      "PRECIO_PRODUCTO_EN_CATEGORIA": "",
       "Index_Competencia": "",
       "Marca_Competencia": ""
     },
@@ -146,6 +156,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Pricing_Id": "1025",
       "Fecha_Creacion": "2025-10-06T09:16:00.000Z",
       "Fecha_Modificacion": "2025-10-06T09:16:00.000Z",
+      "Fecha_Relevamiento": "2025-10-06",
       "Provincia": "MENDOZA",
       "Zona": "OESTE",
       "Mes": "Octubre del 2025",
@@ -163,8 +174,17 @@ La respuesta es un objeto con la siguiente estructura:
       "Desc_Sku_Sitio": "DESINF.AMBIENTE GLADE ORIGINAL 360 ML.",
       "Estado": "out_of_stock",
       "Precio_Regular": "",
+      "Precio_c_Oferta_1": "",
+      "Precio_c_Oferta_2": "",
+      "Promocion_1": "",
+      "Promocion_2": "",
+      "Descuento_Unitario": "",
       "URL": "https://www.atomoconviene.com/...",
       "Precio_Mas_Bajo": "",
+      "PRECIO_TGT_SPM": "",
+      "PRECIO_TGT_MAY": "",
+      "IDX_VS_COMPETENCIA": "",
+      "PRECIO_PRODUCTO_EN_CATEGORIA": "",
       "Index_Competencia": "",
       "Marca_Competencia": ""
     }
@@ -199,6 +219,7 @@ La respuesta es un objeto con la siguiente estructura:
 | `Pricing_Id` | Sí | Identificador único e incremental del registro. | `"1024"` |
 | `Fecha_Creacion` | Sí | Fecha y hora de creación del registro (ISO 8601). | `"2025-10-06T09:15:00.000Z"` |
 | `Fecha_Modificacion` | Sí | Fecha y hora de última actualización del registro (ISO 8601). | `"2025-10-06T09:15:00.000Z"` |
+| `Fecha_Relevamiento` | Sí | Fecha (sin hora) en que se relevó el precio. Generalmente coincide con el día de `Fecha_Creacion`. Es el campo sobre el que operan los filtros `from` / `to`. | `"2025-10-06"` |
 | `Provincia` | Sí | Provincia asociada a la cadena/sucursal relevada. | `"MENDOZA"` |
 | `Zona` | Sí | Zona geográfica. | `"OESTE"` |
 | `Mes` | Sí | Mes del relevamiento en formato legible. | `"Octubre del 2025"` |
@@ -216,10 +237,19 @@ La respuesta es un objeto con la siguiente estructura:
 | `Desc_Sku_Sitio` | Sí | Descripción del producto tal como figura en el sitio relevado. | `"DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML."` |
 | `Estado` | Sí | Estado del relevamiento del registro. `ok` indica un precio real; cualquier otro valor indica que ese día no hubo precio y explica el motivo (ver [Estados](#51-estados-del-registro-estado)). | `"ok"` |
 | `Precio_Regular` | Sí | Precio regular (de lista). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"ok"`. | `"3648"` |
+| `Precio_c_Oferta_1` | Sí | Precio con la 1ª promoción vigente. **Vacío (`""`)** si no hay promoción. | `"2999"` |
+| `Precio_c_Oferta_2` | Sí | Precio con una 2ª promoción simultánea. **Vacío (`""`)** si no hay una segunda promoción. | `""` |
+| `Promocion_1` | Sí | Descripción de la 1ª promoción. **Vacío (`""`)** si no hay promoción. | `"2da unidad al 70%"` |
+| `Promocion_2` | Sí | Descripción de la 2ª promoción. **Vacío (`""`)** si no hay una segunda promoción. | `""` |
+| `Descuento_Unitario` | Sí | Descuento unitario efectivo (0 a 1) derivado de precio de lista vs. precio con oferta. **Vacío (`""`)** si no hay descuento. | `"0.1779"` |
 | `URL` | Sí | URL de la página del producto relevada. | `"https://..."` |
-| `Precio_Mas_Bajo` | Sí | Precio más bajo detectado (considerando ofertas vigentes). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"ok"`. | `"3648"` |
-| `Index_Competencia` | Sí | Índice de competencia. **Pendiente** (ver sección 8). | `""` |
-| `Marca_Competencia` | Sí | Marca de competencia asociada. **Pendiente** (ver sección 8). | `""` |
+| `Precio_Mas_Bajo` | Sí | Precio más bajo detectado (considerando ofertas vigentes). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"ok"`. | `"2999"` |
+| `PRECIO_TGT_SPM` | Sí | Precio target de supermercado (de la Lista de Precios). Se completa **solo en registros de cadenas de canal supermercado** (`Canal` = `SPM ...`); en registros mayoristas viene vacío. También vacío si el EAN no está en la lista. | `"8145"` |
+| `PRECIO_TGT_MAY` | Sí | Precio target mayorista (de la Lista de Precios). Se completa **solo en registros de cadenas de canal mayorista** (`Canal` = `MAY ...`); en registros de supermercado viene vacío. También vacío si el EAN no está en la lista. | `"7537"` |
+| `IDX_VS_COMPETENCIA` | Sí | Índice vs. competencia. **Pendiente** (ver sección 8). | `""` |
+| `PRECIO_PRODUCTO_EN_CATEGORIA` | Sí | Precio del producto en su categoría. **Pendiente** (ver sección 8). | `""` |
+| `Index_Competencia` | Sí | *Legacy* — reemplazado por `IDX_VS_COMPETENCIA`. Se mantiene vacío por compatibilidad. | `""` |
+| `Marca_Competencia` | Sí | *Legacy* — marca de competencia asociada. Se mantiene vacío por compatibilidad. | `""` |
 
 ### 5.1 Estados del registro (`Estado`)
 
@@ -318,8 +348,10 @@ de la disponibilidad de la información de origen:
 
 | Campo | Motivo |
 |-------|--------|
-| `Index_Competencia` | Indicador calculado de competencia. Pendiente de definición de la fórmula. |
-| `Marca_Competencia` | Marca de competencia asociada a cada producto. Pendiente de la tabla de equivalencias por EAN. |
+| `IDX_VS_COMPETENCIA` | Índice calculado de competencia. Pendiente de definición de la fórmula. |
+| `PRECIO_PRODUCTO_EN_CATEGORIA` | Precio del producto dentro de su categoría. Pendiente de definición del cálculo. |
+| `Index_Competencia` | *Legacy* — reemplazado por `IDX_VS_COMPETENCIA`. Se mantiene vacío por compatibilidad. |
+| `Marca_Competencia` | *Legacy* — marca de competencia asociada. Pendiente de la tabla de equivalencias por EAN. |
 
 Estos campos se mantendrán presentes en la respuesta para no alterar la estructura;
 únicamente se completará su valor cuando estén disponibles.

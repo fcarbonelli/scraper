@@ -40,6 +40,7 @@
     "revistas:run": "tsx --env-file=.env scripts/scrape-revistas.ts",
     "revistas:doctor": "tsx --env-file=.env scripts/revistas-doctor.ts",
     "instore:carry-forward": "tsx --env-file=.env scripts/instore-carry-forward.ts",
+    "lp:import": "tsx --env-file=.env scripts/import-price-list.ts",
     "apikey:create": "tsx --env-file=.env scripts/create-api-key.ts"
   },
   "dependencies": {

@@ -125,11 +125,33 @@ CREATE INDEX ON price_snapshots (supermarket_product_id, scraped_at DESC);
 --                  markdown (price < list_price). Every VTEX store uses this
 --                  pattern (e.g. Cordiez: list_price 4362.12, price 2999).
 -- The client-facing `client_base` view (migration 002, fixed in 003; publication
--- layer in 005; active-filter in 008) maps these
+-- layer in 005; active-filter in 008; target-prices in 012) maps these
 -- to the client's columns: Precio_Regular = COALESCE(list_price, price),
 -- Precio_c_Oferta_1 = the sale price when marked down, and Descuento_Unitario =
 -- max(named-promo discount, markdown gap). Do NOT change `price` to mean the
 -- regular price — the regular/offer split is a view concern only.
+
+-- Client Price List target prices (migration 012). The client sends a periodic
+-- xlsx ("Lista de Precios") with a target price (EDP) per EAN per commercial
+-- channel. We store all channels; the view surfaces two of them.
+price_targets (
+  ean                  text          -- joins products.ean
+  canal                text          -- SPM | MAY | MAY REG | PRO | DISTRI
+  edp                  numeric(12,2) -- the target price we surface as PRECIO_TGT_*
+  precio_regular_caja  numeric(12,2)
+  precio_unitario      numeric(12,2)
+  codigo_lista         text
+  vigencia             date
+  anio                 integer
+  mes                  text
+  updated_at           timestamptz
+  PRIMARY KEY (ean, canal)          -- upserted by `npm run lp:import <file.xlsx>`
+)
+-- client_base fills PRECIO_TGT_SPM from the 'SPM' row and PRECIO_TGT_MAY from the
+-- 'MAY' row, but shows each ONLY on rows of its own channel: supermarket rows
+-- (supermarkets.canal LIKE 'SPM%') get PRECIO_TGT_SPM, mayorista rows ('MAY%')
+-- get PRECIO_TGT_MAY, the other column stays NULL. MAY REG / PRO / DISTRI are
+-- stored but not yet mapped to any export column.
 
 -- promotions JSONB shape (array of objects, each object normalized):
 -- [
