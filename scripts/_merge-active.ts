@@ -122,7 +122,7 @@ async function main(): Promise<void> {
         const twinActiveHere = twinChains.get(m.supermarket_id) === true;
         if (chainActive.get(m.supermarket_id) && !twinActiveHere) {
           pausedOnLiveChain++;
-          reactivateCands.push({ mappingId: m.id, chain: m.supermarket_id, siteEan: o.ean ?? '(null)', siteName: o.name, url: m.external_url ?? '', clientEan: v.ean, clientDesc: twin.name, conf: v.confidence });
+          reactivateCands.push({ mappingId: m.id, chain: m.supermarket_id, siteEan: o.ean ?? '(null)', siteName: o.name ?? '', url: m.external_url ?? '', clientEan: v.ean, clientDesc: twin.name, conf: v.confidence });
         } else pausedOnDeadChain++;
         continue;
       }
