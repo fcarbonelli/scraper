@@ -1,0 +1,33 @@
+{
+  "data": {
+    "days": ["2026-07-19", "2026-07-20", "2026-07-21"],
+    "count": 1,
+    "duplicates": [
+      {
+        "supermarket_product_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        "supermarket_id": "rosental",
+        "product_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "ean": "7793253038106",
+        "name": "Ayudin Lavandina Tradicional 2L",
+        "day": "2026-07-20",
+        "keep": {
+          "snapshot_id": 101,
+          "price": 1899,
+          "promotion_1": "OFERTA",
+          "offer_price_1": 1899,
+          "scraped_at": "2026-07-20T18:30:00.000Z"
+        },
+        "drop": [
+          {
+            "snapshot_id": 100,
+            "price": 2199,
+            "promotion_1": null,
+            "offer_price_1": null,
+            "scraped_at": "2026-07-20T12:00:00.000Z"
+          }
+        ]
+      }
+    ]
+  },
+  "meta": { "ts": "2026-07-21T16:00:00.000Z" }
+}

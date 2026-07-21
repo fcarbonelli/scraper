@@ -1,0 +1,30 @@
+{
+  "data": {
+    "day": "2026-07-20",
+    "count": 1,
+    "collisions": [
+      {
+        "ean": "7790117061850",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_ids": [
+          "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee1",
+          "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee2"
+        ],
+        "rows": [
+          {
+            "product_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee1",
+            "name": "Flexi, cierre",
+            "snapshot_id": 42
+          },
+          {
+            "product_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee2",
+            "name": "Cierra fácil",
+            "snapshot_id": 43
+          }
+        ]
+      }
+    ]
+  },
+  "meta": { "ts": "2026-07-20T16:00:00.000Z" }
+}

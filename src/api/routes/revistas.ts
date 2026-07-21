@@ -1,13 +1,21 @@
 /**
  * Revista (magazine) review routes.
  *
- *   GET  /v1/revistas/pending                  magazines awaiting review (modal/badge)
- *   GET  /v1/revistas/:magazineId              one magazine header + counts
- *   GET  /v1/revistas/:magazineId/items        the review queue (paginated)
- *   POST /v1/revistas/items/:itemId/approve    approve → mapping + snapshot
- *   POST /v1/revistas/items/:itemId/reject     reject (discard)
- *   POST /v1/revistas/:magazineId/items        manually add a missed product
- *   POST /v1/revistas/:magazineId/finalize     mark magazine reviewed
+ *   GET    /v1/revistas/pending                  magazines awaiting review
+ *   GET    /v1/revistas/checks                   daily probe log
+ *   GET    /v1/revistas/items                    cross-magazine item list (control view)
+ *   GET    /v1/revistas/ean-collisions           same-EAN / distinct-product warnings
+ *   GET    /v1/revistas/duplicates               same-mapping / same-day snapshot dupes
+ *   POST   /v1/revistas/duplicates/resolve       collapse one duplicate group
+ *   GET    /v1/revistas/:magazineId              one magazine header + counts
+ *   GET    /v1/revistas/:magazineId/items        per-magazine review queue
+ *   GET    /v1/revistas/:magazineId/analysis     debug/analyze payload
+ *   POST   /v1/revistas/items/:itemId/approve    approve → mapping + snapshot
+ *   POST   /v1/revistas/items/:itemId/reject     reject (discard)
+ *   PATCH  /v1/revistas/items/:itemId            edit an approved item
+ *   DELETE /v1/revistas/items/:itemId            undo an approval → pending
+ *   POST   /v1/revistas/:magazineId/items        manually add a missed product
+ *   POST   /v1/revistas/:magazineId/finalize     mark magazine reviewed
  *
  * Contract: docs/REVISTA_REVIEW.md. Auth + envelope are the platform standard.
  */
@@ -19,9 +27,20 @@ import { logger } from '../../shared/logger.js';
 import {
   approveReviewItem,
   addManualItem,
+  updateApprovedItem,
+  undoApprovedItem,
   ItemError,
   type ApproveResult,
 } from '../../revistas/approve.js';
+import {
+  findEanCollisions,
+  buenosAiresDate,
+  lastBaDays,
+  isRevistaSnapshotSource,
+  pickWinnerAmongDuplicates,
+  losersAmongDuplicates,
+  type DedupCandidate,
+} from '../../revistas/pricing.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
@@ -100,6 +119,26 @@ async function loadMagazine(id: string): Promise<MagazineRow> {
 async function supermarketName(id: string): Promise<string> {
   const { data } = await db.from('supermarkets').select('name').eq('id', id).maybeSingle();
   return (data?.name as string) ?? id;
+}
+
+function approveResultResponse(r: ApproveResult): object {
+  return {
+    item_id: r.itemId,
+    status: r.status,
+    supermarket_product_id: r.supermarketProductId,
+    snapshot_id: r.snapshotId,
+    product_id: r.productId,
+  };
+}
+
+/** Translate a domain ItemError into the matching ApiError. */
+function mapItemError(err: unknown): never {
+  if (err instanceof ItemError) {
+    if (err.kind === 'not_found') throw ApiError.notFound('Review item');
+    if (err.kind === 'conflict') throw ApiError.conflict(err.message);
+    throw ApiError.badRequest(err.message);
+  }
+  throw err;
 }
 
 // =============================================================================
@@ -301,6 +340,516 @@ revistasRouter.get('/pending', async (req: Request, res: Response) => {
 });
 
 // =============================================================================
+// GET /v1/revistas/items
+//
+// Cross-magazine review-item list (powers /revistas/aprobados + control Excel).
+// MUST be registered before /:magazineId so "items" is not parsed as a UUID.
+// Backed by revista_items_enriched (migration 013).
+// =============================================================================
+const AllItemsQuery = PaginationQuery.extend({
+  status: z.enum(['pending', 'approved', 'rejected']).optional(),
+  supermarket_id: z.string().trim().min(1).optional(),
+  search: z.string().trim().min(1).optional(),
+});
+
+interface EnrichedItemRow {
+  id: string;
+  magazine_id: string;
+  supermarket_id: string;
+  supermarket_name: string;
+  magazine_label: string;
+  source_url: string | null;
+  page_number: number;
+  page_image_url: string | null;
+  extracted: Record<string, unknown> | null;
+  approved_override: {
+    price?: number | null;
+    promo_price?: number | null;
+    promo_text?: string | null;
+  } | null;
+  effective_price: number | null;
+  effective_promo_price: number | null;
+  effective_promo_text: string | null;
+  proposed_product_id: string | null;
+  match_name: string | null;
+  match_brand: string | null;
+  match_ean: string | null;
+  match_quantity: string | null;
+  confidence: number | string;
+  method: string;
+  reason: string | null;
+  candidates: unknown;
+  status: string;
+  note: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
+
+function enrichedItemResponse(i: EnrichedItemRow): object {
+  // Effective extracted blob: AI read + operator override for list display.
+  const extracted = { ...(i.extracted ?? {}) } as Record<string, unknown>;
+  if (i.effective_price != null) extracted.price = Number(i.effective_price);
+  if (i.effective_promo_price != null) extracted.promo_price = Number(i.effective_promo_price);
+  else if (i.approved_override && 'promo_price' in i.approved_override) {
+    extracted.promo_price = i.approved_override.promo_price;
+  }
+  if (i.effective_promo_text != null) extracted.promo_text = i.effective_promo_text;
+  else if (i.approved_override && 'promo_text' in i.approved_override) {
+    extracted.promo_text = i.approved_override.promo_text;
+  }
+
+  return {
+    id: i.id,
+    magazine_id: i.magazine_id,
+    supermarket_id: i.supermarket_id,
+    supermarket_name: i.supermarket_name,
+    magazine_label: i.magazine_label,
+    source_url: i.source_url,
+    page_number: i.page_number,
+    page_image_url: i.page_image_url,
+    extracted,
+    proposed_match: i.proposed_product_id
+      ? {
+          product_id: i.proposed_product_id,
+          name: i.match_name,
+          brand: i.match_brand,
+          ean: i.match_ean,
+          quantity: i.match_quantity,
+        }
+      : null,
+    confidence: typeof i.confidence === 'string' ? Number(i.confidence) : i.confidence,
+    method: i.method,
+    reason: i.reason,
+    candidates: Array.isArray(i.candidates)
+      ? (i.candidates as Array<Record<string, unknown>>).map((c) => ({
+          product_id: c.id ?? c.product_id ?? null,
+          name: c.name ?? null,
+          brand: c.brand ?? null,
+        }))
+      : [],
+    status: i.status,
+    note: i.note,
+    reviewed_by: i.reviewed_by,
+    reviewed_at: i.reviewed_at,
+  };
+}
+
+revistasRouter.get('/items', async (req: Request, res: Response) => {
+  const q = parseQuery(req, AllItemsQuery);
+  const page = req.pagination?.page ?? q.page;
+  const limit = req.pagination?.limit ?? q.limit;
+  const offset = req.pagination?.offset ?? (page - 1) * limit;
+
+  let query = db
+    .from('revista_items_enriched')
+    .select('*', { count: 'exact' })
+    .order('reviewed_at', { ascending: false, nullsFirst: false })
+    .order('page_number', { ascending: true })
+    .range(offset, offset + limit - 1);
+  if (q.status) query = query.eq('status', q.status);
+  if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
+  if (q.search) query = query.ilike('search_text', `%${q.search.toLowerCase()}%`);
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+  const out = ((data ?? []) as EnrichedItemRow[]).map(enrichedItemResponse);
+  res.json(paginated(out, count ?? 0, page, limit));
+});
+
+// =============================================================================
+// GET /v1/revistas/ean-collisions
+//
+// Family-B warnings: same EAN + same chain + same day, distinct product_ids.
+// Read-only — never deletes. Operators fix via rematch / EAN heal in the UI.
+// =============================================================================
+const CollisionsQuery = z.object({
+  supermarket_id: z.string().trim().min(1).optional(),
+  day: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
+revistasRouter.get('/ean-collisions', async (req: Request, res: Response) => {
+  const q = parseQuery(req, CollisionsQuery);
+  const day = q.day ?? buenosAiresDate();
+
+  // Active revista mappings → product EAN, then today's snapshots for those mappings.
+  let mappingsQuery = db
+    .from('supermarket_products')
+    .select('id, supermarket_id, product_id, products!inner(ean, name), metadata')
+    .eq('is_active', true)
+    .eq('metadata->>source', 'revista');
+  if (q.supermarket_id) mappingsQuery = mappingsQuery.eq('supermarket_id', q.supermarket_id);
+
+  const { data: mappings, error: mapErr } = await mappingsQuery.limit(5000);
+  if (mapErr) throw mapErr;
+
+  type MappingRow = {
+    id: string;
+    supermarket_id: string;
+    product_id: string;
+    products: { ean: string | null; name: string | null };
+  };
+  const maps = (mappings ?? []) as unknown as MappingRow[];
+  if (maps.length === 0) {
+    res.json(success({ day, count: 0, collisions: [] }));
+    return;
+  }
+
+  const spIds = maps.map((m) => m.id);
+  const mapById = new Map(maps.map((m) => [m.id, m]));
+
+  // Page snapshots for these mappings; filter to the requested BA day in JS
+  // so we work before/after the scraped_on migration.
+  const snapRows: Array<{
+    id: number;
+    supermarket_product_id: string;
+    scraped_at: string;
+    raw_data: { source?: string } | null;
+  }> = [];
+  const pageSize = 1000;
+  for (let offset = 0; offset < spIds.length; offset += 200) {
+    const chunk = spIds.slice(offset, offset + 200);
+    let from = 0;
+    for (;;) {
+      // scraped_on only exists after migration 013 — derive the BA day from scraped_at.
+      const { data, error } = await db
+        .from('price_snapshots')
+        .select('id, supermarket_product_id, scraped_at, raw_data')
+        .in('supermarket_product_id', chunk)
+        .is('scrape_run_id', null)
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const batch = (data ?? []) as typeof snapRows;
+      for (const row of batch) {
+        const src = row.raw_data?.source;
+        if (src && src !== 'revista' && src !== 'revista-carry-forward') continue;
+        if (buenosAiresDate(new Date(row.scraped_at)) === day) snapRows.push(row);
+      }
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+
+  const collisionInput = snapRows.map((s) => {
+    const m = mapById.get(s.supermarket_product_id);
+    return {
+      ean: m?.products.ean ?? '',
+      supermarket_id: m?.supermarket_id ?? '',
+      day,
+      product_id: m?.product_id ?? '',
+      name: m?.products.name ?? null,
+      snapshot_id: s.id,
+    };
+  });
+
+  const groups = findEanCollisions(collisionInput);
+  res.json(
+    success({
+      day,
+      count: groups.length,
+      collisions: groups.map((g) => ({
+        ean: g.ean,
+        supermarket_id: g.supermarket_id,
+        day: g.day,
+        product_ids: g.product_ids,
+        rows: g.rows.map((r) => ({
+          product_id: r.product_id,
+          name: r.name ?? null,
+          snapshot_id: r.snapshot_id ?? null,
+        })),
+      })),
+    }),
+  );
+});
+
+// =============================================================================
+// GET /v1/revistas/duplicates
+//
+// Family-A warnings: same mapping + same BA day with 2+ run-less revista
+// snapshots. Default window = last 3 BA days (does not resurface old noise like
+// a one-off Jul-14 batch). Operators resolve via POST /duplicates/resolve.
+// =============================================================================
+const DuplicatesQuery = z
+  .object({
+    supermarket_id: z.string().trim().min(1).optional(),
+    day: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    days: z.coerce.number().int().min(1).max(90).optional(),
+  })
+  .refine((q) => !(q.day && q.days != null), {
+    message: 'Use either day or days, not both',
+  });
+
+interface DupSnapRow extends DedupCandidate {
+  id: number;
+  supermarket_product_id: string;
+  scraped_at: string;
+  price: number | null;
+  promotion_1: string | null;
+  offer_price_1: number | null;
+  raw_data: { source?: string } | null;
+}
+
+interface DupMappingRow {
+  id: string;
+  supermarket_id: string;
+  product_id: string;
+  products: { ean: string | null; name: string | null };
+}
+
+/** Load active revista mappings (optionally filtered by chain). */
+async function loadRevistaMappingsForDupes(supermarketId?: string): Promise<DupMappingRow[]> {
+  let q = db
+    .from('supermarket_products')
+    .select('id, supermarket_id, product_id, products!inner(ean, name), metadata')
+    .eq('is_active', true)
+    .eq('metadata->>source', 'revista');
+  if (supermarketId) q = q.eq('supermarket_id', supermarketId);
+  const { data, error } = await q.limit(10000);
+  if (error) throw error;
+  return (data ?? []) as unknown as DupMappingRow[];
+}
+
+/** Page run-less revista snapshots for the given mappings. */
+async function loadRevistaSnapshotsForDupes(spIds: string[]): Promise<DupSnapRow[]> {
+  const out: DupSnapRow[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; offset < spIds.length; offset += 200) {
+    const chunk = spIds.slice(offset, offset + 200);
+    let from = 0;
+    for (;;) {
+      const { data, error } = await db
+        .from('price_snapshots')
+        .select(
+          'id, supermarket_product_id, scraped_at, price, promotion_1, offer_price_1, raw_data',
+        )
+        .in('supermarket_product_id', chunk)
+        .is('scrape_run_id', null)
+        .order('id', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const batch = (data ?? []) as DupSnapRow[];
+      for (const row of batch) {
+        const src = row.raw_data?.source;
+        if (src && !isRevistaSnapshotSource(src)) continue;
+        out.push(row);
+      }
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+  return out;
+}
+
+function snapDayBa(s: { scraped_at: string }): string {
+  return buenosAiresDate(new Date(s.scraped_at));
+}
+
+function duplicateGroupResponse(
+  spId: string,
+  day: string,
+  rows: DupSnapRow[],
+  mapById: Map<string, DupMappingRow>,
+): object {
+  const info = mapById.get(spId);
+  const winner = pickWinnerAmongDuplicates(rows);
+  const losers = losersAmongDuplicates(rows);
+  const snapShape = (r: DupSnapRow) => ({
+    snapshot_id: r.id,
+    price: r.price,
+    promotion_1: r.promotion_1,
+    offer_price_1: r.offer_price_1,
+    scraped_at: r.scraped_at,
+  });
+  return {
+    supermarket_product_id: spId,
+    supermarket_id: info?.supermarket_id ?? null,
+    product_id: info?.product_id ?? null,
+    ean: info?.products.ean ?? null,
+    name: info?.products.name ?? null,
+    day,
+    keep: winner ? snapShape(winner) : null,
+    drop: losers.map(snapShape),
+  };
+}
+
+revistasRouter.get('/duplicates', async (req: Request, res: Response) => {
+  const q = parseQuery(req, DuplicatesQuery);
+  const windowDays = q.day ? null : lastBaDays(q.days ?? 3);
+  const dayAllowed = (day: string): boolean => {
+    if (q.day) return day === q.day;
+    return windowDays!.has(day);
+  };
+
+  const maps = await loadRevistaMappingsForDupes(q.supermarket_id);
+  if (maps.length === 0) {
+    res.json(
+      success({
+        days: q.day ? [q.day] : [...(windowDays ?? [])].sort(),
+        count: 0,
+        duplicates: [],
+      }),
+    );
+    return;
+  }
+
+  const mapById = new Map(maps.map((m) => [m.id, m]));
+  const snaps = await loadRevistaSnapshotsForDupes(maps.map((m) => m.id));
+
+  const groups = new Map<string, DupSnapRow[]>();
+  for (const s of snaps) {
+    const day = snapDayBa(s);
+    if (!dayAllowed(day)) continue;
+    const key = `${s.supermarket_product_id}|${day}`;
+    const list = groups.get(key) ?? [];
+    list.push(s);
+    groups.set(key, list);
+  }
+
+  const duplicates = [...groups.entries()]
+    .filter(([, rows]) => rows.length > 1)
+    .map(([key, rows]) => {
+      const [spId, day] = key.split('|') as [string, string];
+      return duplicateGroupResponse(spId, day, rows, mapById);
+    });
+
+  res.json(
+    success({
+      days: q.day ? [q.day] : [...(windowDays ?? [])].sort(),
+      count: duplicates.length,
+      duplicates,
+    }),
+  );
+});
+
+// =============================================================================
+// POST /v1/revistas/duplicates/resolve
+//
+// Collapse ONE duplicate group (mapping + BA day): keep the offer (else newest),
+// delete the losers. One group per call — the control view clicks "resolver".
+// =============================================================================
+const ResolveDupBodySchema = z.object({
+  supermarket_product_id: z.string().uuid(),
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+revistasRouter.post('/duplicates/resolve', async (req: Request, res: Response) => {
+  const body = parseBody(req, ResolveDupBodySchema);
+
+  const mapping = await db
+    .from('supermarket_products')
+    .select('id, supermarket_id, product_id, metadata')
+    .eq('id', body.supermarket_product_id)
+    .maybeSingle();
+  if (mapping.error) throw mapping.error;
+  if (!mapping.data) throw ApiError.notFound('Supermarket product mapping');
+  const meta = mapping.data.metadata as { source?: string } | null;
+  if (meta?.source !== 'revista') {
+    throw ApiError.badRequest('Mapping is not a revista-sourced product');
+  }
+
+  const snaps = await loadRevistaSnapshotsForDupes([body.supermarket_product_id]);
+  const group = snaps.filter((s) => snapDayBa(s) === body.day);
+  if (group.length < 2) {
+    throw ApiError.conflict(
+      `No duplicate group for mapping ${body.supermarket_product_id} on ${body.day} (found ${group.length} snapshot(s)).`,
+    );
+  }
+
+  const winner = pickWinnerAmongDuplicates(group);
+  const losers = losersAmongDuplicates(group);
+  if (!winner || losers.length === 0) {
+    throw ApiError.conflict('Could not pick a winner among duplicate snapshots');
+  }
+
+  const deleteIds = losers.map((l) => l.id as number);
+  const { error: delErr } = await db.from('price_snapshots').delete().in('id', deleteIds);
+  if (delErr) throw delErr;
+
+  logger.info(
+    {
+      supermarketProductId: body.supermarket_product_id,
+      day: body.day,
+      kept: winner.id,
+      deleted: deleteIds,
+    },
+    'revista: duplicate group resolved',
+  );
+
+  res.json(
+    success({
+      supermarket_product_id: body.supermarket_product_id,
+      day: body.day,
+      kept_snapshot_id: winner.id,
+      deleted_snapshot_ids: deleteIds,
+    }),
+  );
+});
+
+// =============================================================================
+// PATCH /v1/revistas/items/:itemId  — edit an approved item
+// DELETE /v1/revistas/items/:itemId — undo approval → pending
+// (Registered before /:magazineId so "items" is never a magazine id.)
+// =============================================================================
+const UpdateBodySchema = z
+  .object({
+    product_id: z.string().uuid().optional(),
+    price: z.number().nonnegative().nullable().optional(),
+    promo_price: z.number().nonnegative().nullable().optional(),
+    promo_text: z.string().max(500).nullable().optional(),
+    note: z.string().max(1000).nullable().optional(),
+    reviewed_by: z.string().max(200).optional(),
+  })
+  .refine(
+    (b) =>
+      b.product_id !== undefined ||
+      b.price !== undefined ||
+      b.promo_price !== undefined ||
+      b.promo_text !== undefined ||
+      b.note !== undefined,
+    { message: 'At least one field is required' },
+  );
+
+revistasRouter.patch('/items/:itemId', async (req: Request, res: Response) => {
+  const body = parseBody(req, UpdateBodySchema);
+  const itemId = req.params.itemId as string;
+  try {
+    const result = await updateApprovedItem(itemId, {
+      productId: body.product_id,
+      price: body.price,
+      promoPrice: body.promo_price,
+      promoText: body.promo_text,
+      note: body.note,
+      reviewedBy: body.reviewed_by,
+    });
+    res.json(success(approveResultResponse(result)));
+  } catch (err) {
+    mapItemError(err);
+  }
+});
+
+revistasRouter.delete('/items/:itemId', async (req: Request, res: Response) => {
+  const itemId = req.params.itemId as string;
+  try {
+    const result = await undoApprovedItem(itemId);
+    res.json(
+      success({
+        item_id: result.itemId,
+        status: result.status,
+        snapshot_deleted: result.snapshotDeleted,
+      }),
+    );
+  } catch (err) {
+    mapItemError(err);
+  }
+});
+
+// =============================================================================
 // GET /v1/revistas/:magazineId
 // =============================================================================
 revistasRouter.get('/:magazineId', async (req: Request, res: Response) => {
@@ -385,7 +934,7 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
   let query = db
     .from('revista_review_items')
     .select(
-      'id, magazine_id, supermarket_id, page_number, page_image_url, extracted, proposed_product_id, confidence, method, reason, candidates, status, reviewed_by, reviewed_at',
+      'id, magazine_id, supermarket_id, page_number, page_image_url, extracted, approved_override, proposed_product_id, confidence, method, reason, candidates, status, reviewed_by, reviewed_at',
       { count: 'exact' },
     )
     .eq('magazine_id', magazineId)
@@ -414,28 +963,41 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
   const toMatch = (p: ProductRow | undefined): object | null =>
     p ? { product_id: p.id, name: p.name, brand: p.brand, ean: p.ean, quantity: p.unit ?? p.format ?? null } : null;
 
-  const out = items.map((i) => ({
-    id: i.id,
-    magazine_id: i.magazine_id,
-    supermarket_id: i.supermarket_id,
-    page_number: i.page_number,
-    page_image_url: i.page_image_url,
-    extracted: i.extracted,
-    proposed_match: i.proposed_product_id ? toMatch(products.get(i.proposed_product_id)) : null,
-    confidence: typeof i.confidence === 'string' ? Number(i.confidence) : i.confidence,
-    method: i.method,
-    reason: i.reason,
-    candidates: Array.isArray(i.candidates)
-      ? (i.candidates as Array<Record<string, unknown>>).map((c) => ({
-          product_id: c.id ?? c.product_id ?? null,
-          name: c.name ?? null,
-          brand: c.brand ?? null,
-        }))
-      : [],
-    status: i.status,
-    reviewed_by: i.reviewed_by,
-    reviewed_at: i.reviewed_at,
-  }));
+  const out = items.map((i) => {
+    const extracted = { ...((i.extracted as Record<string, unknown> | null) ?? {}) };
+    const override = i.approved_override as {
+      price?: number | null;
+      promo_price?: number | null;
+      promo_text?: string | null;
+    } | null;
+    if (override) {
+      if (override.price !== undefined) extracted.price = override.price;
+      if ('promo_price' in override) extracted.promo_price = override.promo_price;
+      if ('promo_text' in override) extracted.promo_text = override.promo_text;
+    }
+    return {
+      id: i.id,
+      magazine_id: i.magazine_id,
+      supermarket_id: i.supermarket_id,
+      page_number: i.page_number,
+      page_image_url: i.page_image_url,
+      extracted,
+      proposed_match: i.proposed_product_id ? toMatch(products.get(i.proposed_product_id)) : null,
+      confidence: typeof i.confidence === 'string' ? Number(i.confidence) : i.confidence,
+      method: i.method,
+      reason: i.reason,
+      candidates: Array.isArray(i.candidates)
+        ? (i.candidates as Array<Record<string, unknown>>).map((c) => ({
+            product_id: c.id ?? c.product_id ?? null,
+            name: c.name ?? null,
+            brand: c.brand ?? null,
+          }))
+        : [],
+      status: i.status,
+      reviewed_by: i.reviewed_by,
+      reviewed_at: i.reviewed_at,
+    };
+  });
 
   res.json(paginated(out, count ?? 0, page, limit));
 });
@@ -451,26 +1013,6 @@ const ApproveBodySchema = z.object({
   note: z.string().max(1000).optional(),
   reviewed_by: z.string().max(200).optional(),
 });
-
-function approveResultResponse(r: ApproveResult): object {
-  return {
-    item_id: r.itemId,
-    status: r.status,
-    supermarket_product_id: r.supermarketProductId,
-    snapshot_id: r.snapshotId,
-    product_id: r.productId,
-  };
-}
-
-/** Translate a domain ItemError into the matching ApiError. */
-function mapItemError(err: unknown): never {
-  if (err instanceof ItemError) {
-    if (err.kind === 'not_found') throw ApiError.notFound('Review item');
-    if (err.kind === 'conflict') throw ApiError.conflict(err.message);
-    throw ApiError.badRequest(err.message);
-  }
-  throw err;
-}
 
 revistasRouter.post('/items/:itemId/approve', async (req: Request, res: Response) => {
   const body = parseBody(req, ApproveBodySchema);

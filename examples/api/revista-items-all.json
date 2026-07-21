@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "id": "item_01HAPPROVED",
+      "magazine_id": "mag_01HROSENTAL",
+      "supermarket_id": "rosental",
+      "supermarket_name": "Rosental",
+      "magazine_label": "jul2mm.pdf",
+      "source_url": "https://example.com/folleto.pdf",
+      "page_number": 8,
+      "page_image_url": "https://example.supabase.co/storage/v1/object/public/revista-pages/rosental/mag/page-8.png",
+      "extracted": {
+        "name": "Esponja Mortimer",
+        "brand": "Mortimer",
+        "ean": null,
+        "price": 1129,
+        "promo_price": null,
+        "promo_text": "OFERTA",
+        "quantity": "1 u"
+      },
+      "proposed_match": {
+        "product_id": "50bb31b8-5b6d-4a37-8905-ff3de2c6ffb9",
+        "name": "Esponja Mortimer Cuadriculada",
+        "brand": "MORTIMER",
+        "ean": "7793253038106",
+        "quantity": "1 u"
+      },
+      "confidence": 0.9,
+      "method": "llm",
+      "reason": "Misma marca y tipo.",
+      "candidates": [],
+      "status": "approved",
+      "note": null,
+      "reviewed_by": "ana",
+      "reviewed_at": "2026-07-20T15:00:00.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 25, "total": 1, "totalPages": 1 },
+  "meta": { "ts": "2026-07-20T16:00:00.000Z" }
+}
