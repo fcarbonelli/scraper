@@ -1,0 +1,10 @@
+{
+  "data": {
+    "item_id": "item_01HAPPROVED",
+    "status": "approved",
+    "supermarket_product_id": "8e9bcc71-aaaa-bbbb-cccc-ddddeeeeffff",
+    "snapshot_id": 10231,
+    "product_id": "50bb31b8-5b6d-4a37-8905-ff3de2c6ffb9"
+  },
+  "meta": { "ts": "2026-07-20T16:05:00.000Z" }
+}

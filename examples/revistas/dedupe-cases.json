@@ -1,0 +1,122 @@
+[
+  {
+    "label": "Esponja Mortimer — oferta vs sin oferta (mismo product_id = duplicado real)",
+    "kind": "real_duplicate",
+    "rows": [
+      {
+        "id": 12,
+        "ean": "7793253038106",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-esponja",
+        "name": "Fibra esponja",
+        "price": 1129,
+        "promotion_1": null,
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T10:00:00.000Z"
+      },
+      {
+        "id": 51,
+        "ean": "7793253038106",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-esponja",
+        "name": "Esponja Mortimer",
+        "price": 1129,
+        "promotion_1": "OFERTA",
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "label": "Bolsas X30 — mismo producto, precios distintos, sin oferta (duplicado real)",
+    "kind": "real_duplicate",
+    "rows": [
+      {
+        "id": 40,
+        "ean": "7790117000071",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-bolsas-x30",
+        "name": "Bolsas Trick X30",
+        "price": 1249,
+        "promotion_1": null,
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T08:00:00.000Z"
+      },
+      {
+        "id": 41,
+        "ean": "7790117000071",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-bolsas-x30",
+        "name": "Bolsas Trick X30",
+        "price": 2649,
+        "promotion_1": null,
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "label": "Flexi cierre vs Cierra fácil — mismo EAN, product_id distinto (colisión; NO borrar)",
+    "kind": "ean_collision",
+    "rows": [
+      {
+        "id": 42,
+        "ean": "7790117061850",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-flexi",
+        "name": "Flexi, cierre",
+        "price": 7390,
+        "promotion_1": "OFERTA",
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T10:00:00.000Z"
+      },
+      {
+        "id": 43,
+        "ean": "7790117061850",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-cierra",
+        "name": "Cierra fácil",
+        "price": 6690,
+        "promotion_1": null,
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T10:05:00.000Z"
+      }
+    ]
+  },
+  {
+    "label": "CIF Desinfectante — oferta vs sin oferta (duplicado real)",
+    "kind": "real_duplicate",
+    "rows": [
+      {
+        "id": 24,
+        "ean": "7791290795778",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-cif-360",
+        "name": "Cif Desinfec",
+        "price": 3329,
+        "promotion_1": "OFERTA",
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T11:00:00.000Z"
+      },
+      {
+        "id": 81,
+        "ean": "7791290795778",
+        "supermarket_id": "rosental",
+        "day": "2026-07-20",
+        "product_id": "prod-cif-360",
+        "name": "Desinfecta",
+        "price": 3329,
+        "promotion_1": null,
+        "offer_price_1": null,
+        "scraped_at": "2026-07-20T12:00:00.000Z"
+      }
+    ]
+  }
+]

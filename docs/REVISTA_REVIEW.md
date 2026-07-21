@@ -280,6 +280,55 @@ Errors: `400 INVALID_REQUEST` (e.g. approving with neither a proposed match nor 
 { "data": { "item_id": "item_01H...", "status": "rejected" }, "meta": { "ts": "..." } }
 ```
 
+### `GET /v1/revistas/items`
+
+Cross-magazine review-item list (powers `/revistas/aprobados` and the control
+Excel). Register **before** `/:magazineId`. Query: `page`, `limit`, `status`,
+`supermarket_id`, `search`. Each row is a normal review item **plus**
+`supermarket_name`, `magazine_label`, `source_url`. `extracted` returns the
+**effective** prices (operator `approved_override` beats the AI read). See
+`examples/api/revista-items-all.json`.
+
+### `PATCH /v1/revistas/items/:itemId`
+
+Edit an **approved** item. Body (all optional; ≥1 required): `product_id`,
+`price`, `promo_price` (null clears), `promo_text` (null/`""` clears), `note`,
+`reviewed_by`. Corrections go into `approved_override` (AI `extracted` is
+preserved). The snapshot for **today** is updated in-place (never a second
+row). Rematch (`product_id` changed) = undo old mapping effects + re-approve.
+See `examples/api/revista-update.json`. Errors: `400`, `404`, `409` (not approved).
+
+### `DELETE /v1/revistas/items/:itemId`
+
+Undo an approval → item returns to `pending`. Deletes the approval snapshot +
+carry-forward chain (and today's revista row), pauses the mapping when no other
+approved item still points at it, and reopens a `reviewed` magazine to
+`in_review`. See `examples/api/revista-delete.json`.
+
+### `GET /v1/revistas/ean-collisions`
+
+Read-only warning list: same EAN + same chain + same day with **distinct**
+`product_id`s (mis-assigned barcodes — do **not** auto-delete). Query:
+`?day=YYYY-MM-DD` (default today BA), `?supermarket_id=`. See
+`examples/api/revista-ean-collisions.json`.
+
+### `GET /v1/revistas/duplicates`
+
+Family-A warning list: same mapping + same BA day with **2+** run-less revista
+snapshots. Default window = **last 3 Buenos Aires days** (does not resurface
+old one-off batches). Query: `?days=N` (1–90, default 3), `?day=YYYY-MM-DD`
+(exact day — mutually exclusive with `days`), `?supermarket_id=`. Each group
+includes `keep` (offer wins, else newest) and `drop` (losers). See
+`examples/api/revista-duplicates.json`.
+
+### `POST /v1/revistas/duplicates/resolve`
+
+Collapse **one** duplicate group. Body: `{ "supermarket_product_id": "uuid",
+"day": "YYYY-MM-DD" }`. Applies the same keep/drop rule and deletes the losers.
+Response: `{ supermarket_product_id, day, kept_snapshot_id, deleted_snapshot_ids }`.
+Errors: `404` (mapping missing), `400` (not a revista mapping), `409` (no
+duplicate group for that mapping/day).
+
 ### `POST /v1/revistas/:magazineId/items`
 
 Manually add a product the AI missed. Catalog‑only `product_id`.
@@ -414,6 +463,26 @@ rejectRevistaItem: (itemId: string, note?: string) =>
   request<ApiSuccess<{ item_id: string; status: RevistaItemStatus }>>(
     `/revistas/items/${itemId}/reject`, { method: 'POST', body: JSON.stringify({ note }) },
   ),
+listAllRevistaItems: (q: { status?: RevistaItemStatus; supermarket_id?: string; search?: string; page?: number; limit?: number } = {}) =>
+  request<ApiPaginated<RevistaReviewItem & { supermarket_name: string; magazine_label: string; source_url?: string | null }>>(
+    `/revistas/items?${new URLSearchParams(q as Record<string, string>)}`,
+  ),
+updateRevistaItem: (itemId: string, body: { product_id?: string; price?: number | null; promo_price?: number | null; promo_text?: string | null; note?: string | null }) =>
+  request<ApiSuccess<RevistaApproveResult>>(`/revistas/items/${itemId}`, {
+    method: 'PATCH', body: JSON.stringify(body),
+  }),
+deleteRevistaItem: (itemId: string) =>
+  request<ApiSuccess<{ item_id: string; status: 'pending'; snapshot_deleted: boolean }>>(
+    `/revistas/items/${itemId}`, { method: 'DELETE' },
+  ),
+listEanCollisions: (q: { day?: string; supermarket_id?: string } = {}) =>
+  request(`/revistas/ean-collisions?${new URLSearchParams(q as Record<string, string>)}`),
+listRevistaDuplicates: (q: { days?: number; day?: string; supermarket_id?: string } = {}) =>
+  request(`/revistas/duplicates?${new URLSearchParams(q as Record<string, string>)}`),
+resolveRevistaDuplicate: (body: { supermarket_product_id: string; day: string }) =>
+  request(`/revistas/duplicates/resolve`, {
+    method: 'POST', body: JSON.stringify(body),
+  }),
 addRevistaItem: (magazineId: string, body: { page_number: number; product_id: string; price: number; promo_price?: number; promo_text?: string; note?: string }) =>
   request<ApiSuccess<RevistaApproveResult>>(`/revistas/${magazineId}/items`, {
     method: 'POST', body: JSON.stringify(body),

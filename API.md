@@ -1541,6 +1541,38 @@ price), `404 NOT_FOUND`, `409 CONFLICT` (already reviewed).
 
 Discard an item. Body: `{ "note"?, "reviewed_by"? }`. Errors: `404`, `409`.
 
+### `GET /v1/revistas/items`
+
+Cross-magazine paginated list (`status`, `supermarket_id`, `search`). Includes
+`supermarket_name`, `magazine_label`, `source_url`. Effective prices in
+`extracted`. Fixture: `revista-items-all.json`.
+
+### `PATCH /v1/revistas/items/:itemId`
+
+Edit an approved item (`product_id` / `price` / `promo_price` / `promo_text` /
+`note`). Updates today's snapshot in-place. Rematch = undo + re-approve.
+Fixture: `revista-update.json`.
+
+### `DELETE /v1/revistas/items/:itemId`
+
+Undo approval → `pending`; deletes snapshot + carry chain. Fixture:
+`revista-delete.json`.
+
+### `GET /v1/revistas/ean-collisions`
+
+Same-EAN / distinct-product warnings for a day (default today BA). Fixture:
+`revista-ean-collisions.json`.
+
+### `GET /v1/revistas/duplicates`
+
+Same-mapping / same-day snapshot duplicates (default last 3 BA days). Fixture:
+`revista-duplicates.json`.
+
+### `POST /v1/revistas/duplicates/resolve`
+
+Collapse one duplicate group (`supermarket_product_id` + `day`). Keeps offer
+(else newest), deletes losers.
+
 ### `POST /v1/revistas/:magazineId/items`
 
 Manually add a product the AI missed. Body: `page_number` (int, required),
