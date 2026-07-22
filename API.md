@@ -1510,6 +1510,11 @@ are fully reviewed are omitted so the banner isn't raised on an empty queue — 
 `GET /v1/revistas` to see every magazine regardless of state. Pass
 `?include_empty=true` to bypass the filter (returns all `in_review` magazines).
 
+Every magazine header also includes `superseded_by` / `superseded_at` (null while
+the issue is still current for its chain). When a newer issue arrives, older
+magazines get `superseded_by` set to the new magazine id — carry-forward of their
+approved prices stops until a human approves the new queue.
+
 ### `GET /v1/revistas/:magazineId`
 
 A single magazine header + counts (same item shape as `pending`).

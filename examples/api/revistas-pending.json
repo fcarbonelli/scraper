@@ -11,7 +11,9 @@
       "page_count": 57,
       "status": "in_review",
       "counts": { "total": 8, "pending": 8, "approved": 0, "rejected": 0 },
-      "detected_at": "2026-06-29T09:05:00.000Z"
+      "detected_at": "2026-06-29T09:05:00.000Z",
+      "superseded_by": null,
+      "superseded_at": null
     }
   ],
   "meta": { "ts": "2026-06-29T09:06:11.221Z" }
