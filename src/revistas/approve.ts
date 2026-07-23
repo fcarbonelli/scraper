@@ -641,6 +641,68 @@ async function undoApprovalEffects(item: ReviewItemRow): Promise<boolean> {
   return deleted;
 }
 
+/**
+ * Same-day reset when a new magazine supersedes the previous one: delete
+ * today's run-less revista snapshots for mappings of this chain that are NOT
+ * yet approved on `newMagazineId`. Needed because carry-forward runs BEFORE
+ * discovery in the orchestrator, so A may already have been carried today.
+ * History on prior days is kept.
+ */
+export async function purgeTodayRevistaSnapshotsNotApprovedOn(
+  supermarketId: string,
+  newMagazineId: string,
+): Promise<number> {
+  const approvedRes = await db
+    .from('revista_review_items')
+    .select('resulting_supermarket_product_id')
+    .eq('magazine_id', newMagazineId)
+    .eq('status', 'approved')
+    .not('resulting_supermarket_product_id', 'is', null);
+  if (approvedRes.error) throw approvedRes.error;
+
+  const keep = new Set(
+    (approvedRes.data ?? [])
+      .map((r) => r.resulting_supermarket_product_id as string | null)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  const mappingsRes = await db
+    .from('supermarket_products')
+    .select('id')
+    .eq('supermarket_id', supermarketId)
+    .eq('is_active', true);
+  if (mappingsRes.error) throw mappingsRes.error;
+
+  const today = buenosAiresDate();
+  const toDelete: number[] = [];
+
+  for (const row of mappingsRes.data ?? []) {
+    const spId = row.id as string;
+    if (keep.has(spId)) continue;
+
+    const { data, error } = await db
+      .from('price_snapshots')
+      .select('id, scraped_at, raw_data')
+      .eq('supermarket_product_id', spId)
+      .is('scrape_run_id', null);
+    if (error) throw error;
+
+    for (const snap of data ?? []) {
+      const src = (snap.raw_data as { source?: string } | null)?.source;
+      if (src && src !== 'revista' && src !== 'revista-carry-forward') continue;
+      if (buenosAiresDate(new Date(snap.scraped_at as string)) === today) {
+        toDelete.push(snap.id as number);
+      }
+    }
+  }
+
+  if (toDelete.length === 0) return 0;
+
+  const { error: delErr } = await db.from('price_snapshots').delete().in('id', toDelete);
+  if (delErr) throw delErr;
+  return toDelete.length;
+}
+
 /** Domain error with a coarse kind the route maps to an HTTP status. */
 export class ItemError extends Error {
   readonly kind: 'not_found' | 'conflict' | 'invalid';

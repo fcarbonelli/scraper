@@ -170,7 +170,9 @@ Drives the modal/badge. Magazines with unreviewed items.
       "page_count": 57,
       "status": "in_review",
       "counts": { "total": 8, "pending": 8, "approved": 0, "rejected": 0 },
-      "detected_at": "2026-06-29T09:05:00.000Z"
+      "detected_at": "2026-06-29T09:05:00.000Z",
+      "superseded_by": null,
+      "superseded_at": null
     }
   ],
   "meta": { "ts": "..." }
@@ -390,6 +392,9 @@ export interface RevistaMagazine {
   status: RevistaMagazineStatus;
   counts: { total: number; pending: number; approved: number; rejected: number };
   detected_at: string; // ISO 8601 UTC
+  /** Newer issue that replaced this one; null = still current for the chain. */
+  superseded_by: string | null;
+  superseded_at: string | null;
 }
 
 export interface RevistaExtracted {
@@ -540,16 +545,24 @@ show.
 - **Price persistence (carry‑forward).** A regular product gets a fresh snapshot
   every day from the daily scrape, but a magazine product only gets one **when you
   approve it**. So the backend runs a daily **carry‑forward** step
-  (`src/revistas/carryForward.ts`, in the orchestrator): it re‑emits each active
-  magazine product's **latest approved price** as a fresh **run-less** snapshot
-  dated today. Run-less = always client-visible, so it does **not** depend on any
-  daily run being published (a day left in `pending_review` would otherwise hide
-  it). That's why an approved magazine price keeps appearing in the daily
-  export/compare **every day until the next revista supersedes it** (policy:
-  carry the latest price forward until a newer approval replaces it). Revista
-  chains are excluded from the scraper queue (they have no adapter). **Frontend
-  impact: none** — the data flows through the same snapshots the
+  (`src/revistas/carryForward.ts`, in the orchestrator): it re‑emits each product
+  **approved on the current (non‑superseded) magazine** as a fresh **run-less**
+  snapshot dated today. Run-less = always client-visible, so it does **not**
+  depend on any daily run being published (a day left in `pending_review` would
+  otherwise hide it). That's why an approved magazine price keeps appearing in
+  the daily export/compare **every day until the next revista supersedes it**.
+  Revista chains are excluded from the scraper queue (they have no adapter).
+  **Frontend impact: none** — the data flows through the same snapshots the
   export/compare/history already read.
+  > **Supersede on new issue:** when the pipeline finishes ingesting magazine
+  > **B** for a chain, every prior magazine **A** is marked `superseded_by = B`
+  > (`superseded_at` set). Carry-forward then only sources approvals on B; A's
+  > prices stop appearing in today's export until a human approves B's queue.
+  > Same-day: today's run-less revista snapshots for mappings not yet approved
+  > on B are purged (carry-forward runs *before* discovery in the orchestrator,
+  > so A may already have been carried that morning). History on prior days is
+  > kept. Magazines expose `superseded_by` / `superseded_at` so the UI can show
+  > "Folleto superado" without date heuristics.
   > **Reliability:** carry-forward runs **first and independently** of the AI
   > magazine check in the orchestrator's daily cycle. Earlier it ran *after* the
   > check, so a slow/hung discovery (Playwright, network) could block it and make

@@ -34,8 +34,10 @@ import {
   findMagazineByHash,
   insertReviewItems,
   setMagazineStatus,
+  supersedePreviousMagazines,
   type ReviewItemInput,
 } from './store.js';
+import { purgeTodayRevistaSnapshotsNotApprovedOn } from './approve.js';
 
 const StrategySchema = z.object({
   strategy: z.enum(['html-pdf-links', 'pubhtml5', 'publuu']),
@@ -179,6 +181,17 @@ async function processCandidate(
       .eq('id', magazineId);
 
     await setMagazineStatus(magazineId, 'in_review');
+
+    // New issue supersedes prior magazines for this chain: stop carrying A's
+    // prices and clear today's export until a human approves B.
+    const superseded = await supersedePreviousMagazines(sm.id, magazineId);
+    if (superseded.length > 0) {
+      const purged = await purgeTodayRevistaSnapshotsNotApprovedOn(sm.id, magazineId);
+      log.info(
+        { superseded: superseded.length, purgedToday: purged },
+        'revista: previous magazines superseded',
+      );
+    }
 
     await createAlert({
       severity: 'info',

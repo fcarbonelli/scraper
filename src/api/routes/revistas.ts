@@ -60,6 +60,8 @@ interface MagazineRow {
   page_count: number;
   status: string;
   detected_at: string;
+  superseded_by: string | null;
+  superseded_at: string | null;
 }
 
 interface Counts {
@@ -99,11 +101,13 @@ function magazineResponse(m: MagazineRow, supermarketName: string, counts: Count
     status: m.status,
     counts,
     detected_at: m.detected_at,
+    superseded_by: m.superseded_by ?? null,
+    superseded_at: m.superseded_at ?? null,
   };
 }
 
 const MAGAZINE_COLS =
-  'id, supermarket_id, label, scrape_run_id, source_strategy, source_url, page_count, status, detected_at';
+  'id, supermarket_id, label, scrape_run_id, source_strategy, source_url, page_count, status, detected_at, superseded_by, superseded_at';
 
 async function loadMagazine(id: string): Promise<MagazineRow> {
   const { data, error } = await db

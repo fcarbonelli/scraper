@@ -11,7 +11,9 @@
       "page_count": 16,
       "status": "in_review",
       "counts": { "total": 3, "pending": 3, "approved": 0, "rejected": 0 },
-      "detected_at": "2026-07-12T09:00:38.029Z"
+      "detected_at": "2026-07-12T09:00:38.029Z",
+      "superseded_by": null,
+      "superseded_at": null
     },
     "page_images": [
       { "page": 1, "url": "https://xyzcompany.supabase.co/storage/v1/object/public/revista-pages/0dd31be0-a94e-4587-93ff-1c3ffff30800/page-001.png" },

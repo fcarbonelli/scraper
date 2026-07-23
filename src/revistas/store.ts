@@ -19,6 +19,9 @@ export interface MagazineRow {
   scrape_run_id: string | null;
   detected_at: string;
   reviewed_at: string | null;
+  /** Newer magazine that replaced this issue (NULL = still current). */
+  superseded_by: string | null;
+  superseded_at: string | null;
 }
 
 /** Look up a magazine by its dedup hash (the "did it change?" check). */
@@ -89,6 +92,64 @@ export async function setMagazineStatus(
   if (status === 'reviewed') patch.reviewed_at = new Date().toISOString();
   const { error } = await db.from('revista_magazines').update(patch).eq('id', magazineId);
   if (error) throw error;
+}
+
+/**
+ * Mark every older (non-superseded) magazine for this chain as superseded by
+ * `newMagazineId`. Called when a new issue reaches `in_review`. Only magazines
+ * with `detected_at` strictly before the new one are marked — so a `--force`
+ * reprocess of an old hash cannot demote a newer current issue. Returns the
+ * ids that were marked (empty when this is the first / oldest issue).
+ */
+export async function supersedePreviousMagazines(
+  supermarketId: string,
+  newMagazineId: string,
+): Promise<string[]> {
+  const { data: neu, error: neuErr } = await db
+    .from('revista_magazines')
+    .select('id, detected_at')
+    .eq('id', newMagazineId)
+    .single();
+  if (neuErr) throw neuErr;
+
+  const { data, error } = await db
+    .from('revista_magazines')
+    .select('id')
+    .eq('supermarket_id', supermarketId)
+    .is('superseded_by', null)
+    .neq('id', newMagazineId)
+    .lt('detected_at', neu.detected_at as string);
+  if (error) throw error;
+
+  const ids = (data ?? []).map((r) => r.id as string);
+  if (ids.length === 0) return [];
+
+  const { error: updErr } = await db
+    .from('revista_magazines')
+    .update({
+      superseded_by: newMagazineId,
+      superseded_at: new Date().toISOString(),
+    })
+    .in('id', ids);
+  if (updErr) throw updErr;
+  return ids;
+}
+
+/**
+ * Current magazine for a chain = the one with superseded_by IS NULL
+ * (newest wins if somehow more than one; should be at most one after supersede).
+ */
+export async function getCurrentMagazineId(supermarketId: string): Promise<string | null> {
+  const { data, error } = await db
+    .from('revista_magazines')
+    .select('id')
+    .eq('supermarket_id', supermarketId)
+    .is('superseded_by', null)
+    .order('detected_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.id as string | undefined) ?? null;
 }
 
 /** Replace any existing review items for a magazine (idempotent reprocessing). */
