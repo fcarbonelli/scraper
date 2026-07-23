@@ -26,7 +26,10 @@ import { ProxyAgent, type Dispatcher } from 'undici';
 
 const PROXY_URL = process.env.AR_PROXY_URL?.trim();
 
-const DEFAULT_PROXIED = ['mami', 'maxiconsumo', 'mercadolibre', 'la-anonima', 'atomo'];
+// NOTE: MercadoLibre is intentionally NOT here — the Ecomodico adapter reads
+// prices from the official API (api.mercadolibre.com), which works from the
+// datacenter IP, so it needs no residential proxy (and burns no proxy data).
+const DEFAULT_PROXIED = ['mami', 'maxiconsumo', 'la-anonima', 'atomo'];
 
 /** Supermarket ids whose traffic should egress through the AR proxy. */
 const proxiedIds = new Set(

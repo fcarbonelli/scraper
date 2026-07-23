@@ -335,10 +335,10 @@ const SUPERMARKETS: SupermarketSeed[] = [
     base_url: 'https://www.mercadolibre.com.ar',
     rate_limit_ms: 500,
     concurrency: 3,
-    // Temporarily paused: too many scrape errors. Flip back to true once the
-    // mercadolibre adapter errors are fixed. Keeps the row (and its products)
-    // in the DB, just stops the orchestrator enqueueing + worker scraping it.
-    is_active: false,
+    // Active: tracks ONLY the ECOMODICO seller's offers via the official API
+    // (no browser/proxy). Run `npm run prune-ecomodico -- --apply` after
+    // deploying to deactivate any products Ecomodico doesn't sell.
+    is_active: true,
     provincia: 'BUENOS AIRES',
     zona: 'CAPITAL Y GBA',
     canal: 'SPM NACIONAL',
