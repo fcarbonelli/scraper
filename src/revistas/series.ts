@@ -41,6 +41,7 @@ export function seriesKeyFromMakroFilename(filename: string): string | null {
   if (/\bmm\b/i.test(base) || /(?:^|-)mm(?:-|$)/i.test(base)) return 'mm';
   if (/\bgt\b/i.test(base) || /(?:^|-)gt(?:-|$)/i.test(base)) return 'gt';
   if (/sponsor/i.test(base)) return 'sponsor';
+  if (/\bprov\b/i.test(base) || /(?:^|-)prov(?:-|$)/i.test(base)) return 'prov';
   if (/makronet|neta/i.test(base)) return 'makroneta';
   if (/especial|dia.?del.?amigo/i.test(base)) return 'especial';
   return null;

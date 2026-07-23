@@ -15,7 +15,7 @@ export interface MagazineRow {
   content_hash: string;
   file_size: number | null;
   page_count: number;
-  status: 'processing' | 'in_review' | 'reviewed';
+  status: 'processing' | 'in_review' | 'reviewed' | 'failed';
   scrape_run_id: string | null;
   detected_at: string;
   reviewed_at: string | null;

@@ -157,7 +157,7 @@ function mapItemError(err: unknown): never {
 // pipeline has ever detected. Optional ?status filter.
 // =============================================================================
 const ListQuery = z.object({
-  status: z.enum(['processing', 'in_review', 'reviewed']).optional(),
+  status: z.enum(['processing', 'in_review', 'reviewed', 'failed']).optional(),
   supermarket_id: z.string().trim().min(1).optional(),
 });
 
