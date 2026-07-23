@@ -183,9 +183,6 @@ Drives the modal/badge. Magazines with unreviewed items.
 `series_key` (e.g. `"mm"`, `"folder-resto"`, `"default"`) scopes supersede /
 carry-forward when a chain publishes several concurrent flyer series.
 
-`series_key` (e.g. `"mm"`, `"folder-resto"`, `"default"`) scopes supersede /
-carry-forward when a chain publishes several concurrent flyer series.
-
 ### `GET /v1/revistas/:magazineId`
 
 Single magazine header + counts (same fields as a `pending` item).
@@ -293,10 +290,12 @@ Errors: `400 INVALID_REQUEST` (e.g. approving with neither a proposed match nor 
 
 Cross-magazine review-item list (powers `/revistas/aprobados` and the control
 Excel). Register **before** `/:magazineId`. Query: `page`, `limit`, `status`,
-`supermarket_id`, `search`. Each row is a normal review item **plus**
-`supermarket_name`, `magazine_label`, `source_url`. `extracted` returns the
-**effective** prices (operator `approved_override` beats the AI read). See
-`examples/api/revista-items-all.json`.
+`supermarket_id`, `search`, **`current_only`** (default `true` — only items on
+magazines with `superseded_by IS NULL`; pass `current_only=false` for history).
+Each row is a normal review item **plus** `supermarket_name`, `magazine_label`,
+`source_url`, `magazine_status`, `series_key`, `superseded_by`. `extracted`
+returns the **effective** prices (operator `approved_override` beats the AI
+read). See `examples/api/revista-items-all.json`.
 
 ### `PATCH /v1/revistas/items/:itemId`
 
@@ -477,8 +476,8 @@ rejectRevistaItem: (itemId: string, note?: string) =>
   request<ApiSuccess<{ item_id: string; status: RevistaItemStatus }>>(
     `/revistas/items/${itemId}/reject`, { method: 'POST', body: JSON.stringify({ note }) },
   ),
-listAllRevistaItems: (q: { status?: RevistaItemStatus; supermarket_id?: string; search?: string; page?: number; limit?: number } = {}) =>
-  request<ApiPaginated<RevistaReviewItem & { supermarket_name: string; magazine_label: string; source_url?: string | null }>>(
+listAllRevistaItems: (q: { status?: RevistaItemStatus; supermarket_id?: string; search?: string; page?: number; limit?: number; current_only?: boolean } = {}) =>
+  request<ApiPaginated<RevistaReviewItem & { supermarket_name: string; magazine_label: string; source_url?: string | null; magazine_status?: string | null; series_key?: string; superseded_by?: string | null }>>(
     `/revistas/items?${new URLSearchParams(q as Record<string, string>)}`,
   ),
 updateRevistaItem: (itemId: string, body: { product_id?: string; price?: number | null; promo_price?: number | null; promo_text?: string | null; note?: string | null }) =>
@@ -574,7 +573,11 @@ show.
   > today's run-less revista snapshots for mappings approved on the superseded
   > magazines of that series (and not yet on B) are purged (carry-forward runs
   > *before* discovery in the orchestrator, so A may already have been carried
-  > that morning). History on prior days is kept. Magazines expose `series_key`,
+  > that morning). **Mappings** whose only approvals lived on the superseded
+  > magazines (and that are not also approved on another CURRENT magazine of
+  > the chain) are **paused** (`is_active=false`) so `client_base` drops them
+  > immediately — not only via the snapshot purge. Approving on B reactivates
+  > the mapping. History on prior days is kept. Magazines expose `series_key`,
   > `superseded_by` / `superseded_at` so the UI can show "Folleto superado"
   > without date heuristics.
   > **Reliability:** carry-forward runs **first and independently** of the AI
@@ -586,7 +589,10 @@ show.
   > runs its daily cycle. If magazine prices stop appearing on new days, the
   > orchestrator isn't running the current build — redeploy/restart it, or run
   > `npm run revistas:run -- --carry-forward` to backfill today by hand (no AI
-  > cost).
+  > cost). After deploying pause-on-supersede, also run
+  > `npm run revistas:reconcile -- --dry-run` once against prod to pause
+  > leftover mappings from flyers that were already superseded before this
+  > change existed; then drop `--dry-run` to apply.
 - **Idempotency.** Re‑approving/rejecting an already‑reviewed item returns
   `409 CONFLICT`. Re‑running the same unchanged magazine never creates a new one
   (dedup by content hash), so the queue is stable. The carry‑forward step is

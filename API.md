@@ -1551,9 +1551,13 @@ Discard an item. Body: `{ "note"?, "reviewed_by"? }`. Errors: `404`, `409`.
 
 ### `GET /v1/revistas/items`
 
-Cross-magazine paginated list (`status`, `supermarket_id`, `search`). Includes
-`supermarket_name`, `magazine_label`, `source_url`. Effective prices in
-`extracted`. Fixture: `revista-items-all.json`.
+Cross-magazine paginated list (`status`, `supermarket_id`, `search`,
+`current_only`). **`current_only` defaults to `true`**: only items whose
+magazine has `superseded_by IS NULL` (approvals on superseded flyers are
+hidden). Pass `current_only=false` for full history. Each row includes
+`supermarket_name`, `magazine_label`, `source_url`, `magazine_status`,
+`series_key`, `superseded_by`. Effective prices in `extracted`. Fixture:
+`revista-items-all.json`.
 
 ### `PATCH /v1/revistas/items/:itemId`
 

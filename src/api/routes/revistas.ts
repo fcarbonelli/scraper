@@ -357,6 +357,14 @@ const AllItemsQuery = PaginationQuery.extend({
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
   supermarket_id: z.string().trim().min(1).optional(),
   search: z.string().trim().min(1).optional(),
+  /**
+   * Default true: only items on CURRENT magazines (superseded_by IS NULL).
+   * Pass current_only=false to include historical / superseded flyers.
+   */
+  current_only: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? true : v === 'true')),
 });
 
 interface EnrichedItemRow {
@@ -366,6 +374,9 @@ interface EnrichedItemRow {
   supermarket_name: string;
   magazine_label: string;
   source_url: string | null;
+  magazine_status: string | null;
+  series_key: string | null;
+  superseded_by: string | null;
   page_number: number;
   page_image_url: string | null;
   extracted: Record<string, unknown> | null;
@@ -412,6 +423,9 @@ function enrichedItemResponse(i: EnrichedItemRow): object {
     supermarket_name: i.supermarket_name,
     magazine_label: i.magazine_label,
     source_url: i.source_url,
+    magazine_status: i.magazine_status ?? null,
+    series_key: i.series_key ?? 'default',
+    superseded_by: i.superseded_by ?? null,
     page_number: i.page_number,
     page_image_url: i.page_image_url,
     extracted,
@@ -456,6 +470,9 @@ revistasRouter.get('/items', async (req: Request, res: Response) => {
   if (q.status) query = query.eq('status', q.status);
   if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
   if (q.search) query = query.ilike('search_text', `%${q.search.toLowerCase()}%`);
+  // Default: hide approvals on superseded flyers (control / aprobados screens).
+  // q.current_only is always boolean after zod transform (defaults to true).
+  if (q.current_only) query = query.is('superseded_by', null);
 
   const { data, error, count } = await query;
   if (error) throw error;
