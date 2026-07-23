@@ -171,6 +171,7 @@ Drives the modal/badge. Magazines with unreviewed items.
       "status": "in_review",
       "counts": { "total": 8, "pending": 8, "approved": 0, "rejected": 0 },
       "detected_at": "2026-06-29T09:05:00.000Z",
+      "series_key": "mm",
       "superseded_by": null,
       "superseded_at": null
     }
@@ -178,6 +179,12 @@ Drives the modal/badge. Magazines with unreviewed items.
   "meta": { "ts": "..." }
 }
 ```
+
+`series_key` (e.g. `"mm"`, `"folder-resto"`, `"default"`) scopes supersede /
+carry-forward when a chain publishes several concurrent flyer series.
+
+`series_key` (e.g. `"mm"`, `"folder-resto"`, `"default"`) scopes supersede /
+carry-forward when a chain publishes several concurrent flyer series.
 
 ### `GET /v1/revistas/:magazineId`
 
@@ -392,7 +399,9 @@ export interface RevistaMagazine {
   status: RevistaMagazineStatus;
   counts: { total: number; pending: number; approved: number; rejected: number };
   detected_at: string; // ISO 8601 UTC
-  /** Newer issue that replaced this one; null = still current for the chain. */
+  /** Flyer series within the chain (e.g. 'mm', 'gt', 'folder-resto'). */
+  series_key: string;
+  /** Newer issue that replaced this one within the same series; null = still current. */
   superseded_by: string | null;
   superseded_at: string | null;
 }
@@ -554,15 +563,20 @@ show.
   Revista chains are excluded from the scraper queue (they have no adapter).
   **Frontend impact: none** — the data flows through the same snapshots the
   export/compare/history already read.
-  > **Supersede on new issue:** when the pipeline finishes ingesting magazine
-  > **B** for a chain, every prior magazine **A** is marked `superseded_by = B`
-  > (`superseded_at` set). Carry-forward then only sources approvals on B; A's
-  > prices stop appearing in today's export until a human approves B's queue.
-  > Same-day: today's run-less revista snapshots for mappings not yet approved
-  > on B are purged (carry-forward runs *before* discovery in the orchestrator,
-  > so A may already have been carried that morning). History on prior days is
-  > kept. Magazines expose `superseded_by` / `superseded_at` so the UI can show
-  > "Folleto superado" without date heuristics.
+  > **Supersede on new issue (per SERIES):** Makro/Vital publish several
+  > concurrent flyer series (MM weekly, GT gastronomic, Folder, Nonfood, …).
+  > Each magazine has a `series_key`. When the pipeline finishes ingesting
+  > magazine **B**, only prior magazines **A of the same series** are marked
+  > `superseded_by = B` (`superseded_at` set). Concurrent series stay current
+  > and keep carrying. Carry-forward sources approvals on every current
+  > (non-superseded) magazine — one per series. A's prices for that series stop
+  > appearing in today's export until a human approves B's queue. Same-day:
+  > today's run-less revista snapshots for mappings approved on the superseded
+  > magazines of that series (and not yet on B) are purged (carry-forward runs
+  > *before* discovery in the orchestrator, so A may already have been carried
+  > that morning). History on prior days is kept. Magazines expose `series_key`,
+  > `superseded_by` / `superseded_at` so the UI can show "Folleto superado"
+  > without date heuristics.
   > **Reliability:** carry-forward runs **first and independently** of the AI
   > magazine check in the orchestrator's daily cycle. Earlier it ran *after* the
   > check, so a slow/hung discovery (Playwright, network) could block it and make
@@ -577,9 +591,11 @@ show.
   `409 CONFLICT`. Re‑running the same unchanged magazine never creates a new one
   (dedup by content hash), so the queue is stable. The carry‑forward step is
   idempotent per day (skips a product that already has a snapshot dated today).
-- **One magazine, many pages.** A chain can publish several folletos at once
-  (e.g. Makro had 5). They're grouped under one magazine entry; `page_number` and
-  `page_image_url` keep them straight.
+- **One chain, many concurrent series.** A chain can publish several folletos at
+  once (e.g. Makro MM + GT + Sponsor). Each becomes its own magazine row with a
+  distinct `series_key`. Supersede / carry-forward are per series, so a new MM
+  does not kill GT prices. Within one magazine, `page_number` and
+  `page_image_url` keep pages straight.
 - **Refresh cadence.** Poll `GET /v1/revistas/pending` on the same cadence as
   alerts (~30 s while the Daily Review screen is open). Items rarely change
   outside of the reviewer's own actions, so optimistic updates are fine —

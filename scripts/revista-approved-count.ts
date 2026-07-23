@@ -41,12 +41,16 @@ async function main(): Promise<void> {
   // 1. Magazines: which are current (superseded_by NULL) vs superseded.
   const { data: mags, error: magErr } = await db
     .from('revista_magazines')
-    .select('id, supermarket_id, label, status, superseded_by, detected_at');
+    .select('id, supermarket_id, label, status, series_key, superseded_by, detected_at');
   if (magErr) throw magErr;
   const magById = new Map((mags ?? []).map((m) => [m.id as string, m]));
-  const currentByChain = new Map<string, string>();
+  // Current magazines: one per (chain, series) with superseded_by NULL.
+  const currentByChainSeries = new Map<string, string>();
   for (const m of mags ?? []) {
-    if (m.superseded_by === null) currentByChain.set(m.supermarket_id as string, m.id as string);
+    if (m.superseded_by === null) {
+      const key = `${m.supermarket_id}|${(m.series_key as string | null) ?? 'default'}`;
+      currentByChainSeries.set(key, m.id as string);
+    }
   }
 
   // 2. All approved review items.
@@ -145,7 +149,7 @@ async function main(): Promise<void> {
     console.log('  (esos aparecerian recien tras correr el carry-forward de hoy)');
   }
 
-  // 6. Per-chain breakdown of approved (current vs superseded).
+  // 6. Per-chain breakdown of approved (current vs superseded), listing series.
   console.log('\n== POR CADENA (aprobados: actual / superado) ==');
   const perChain = new Map<string, { cur: number; sup: number }>();
   for (const it of approved) {
@@ -157,9 +161,16 @@ async function main(): Promise<void> {
     perChain.set(chain, e);
   }
   for (const [c, e] of [...perChain.entries()].sort((a, b) => b[1].cur + b[1].sup - (a[1].cur + a[1].sup))) {
-    const cur = currentByChain.get(c);
-    const curLabel = cur ? magById.get(cur)?.label ?? cur : '(sin folleto actual)';
-    console.log(`  ${c.padEnd(14)} actual=${String(e.cur).padStart(3)} superado=${String(e.sup).padStart(3)}   [folleto actual: ${curLabel}]`);
+    const currentLabels = [...currentByChainSeries.entries()]
+      .filter(([k]) => k.startsWith(`${c}|`))
+      .map(([k, id]) => {
+        const series = k.slice(c.length + 1);
+        const lab = magById.get(id)?.label ?? id;
+        return `${series}:${lab}`;
+      });
+    console.log(
+      `  ${c.padEnd(14)} actual=${String(e.cur).padStart(3)} superado=${String(e.sup).padStart(3)}   [actuales: ${currentLabels.join(' | ') || '(ninguno)'}]`,
+    );
   }
 
   console.log('\nRESUMEN:');

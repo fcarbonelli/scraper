@@ -642,16 +642,42 @@ async function undoApprovalEffects(item: ReviewItemRow): Promise<boolean> {
 }
 
 /**
- * Same-day reset when a new magazine supersedes the previous one: delete
- * today's run-less revista snapshots for mappings of this chain that are NOT
- * yet approved on `newMagazineId`. Needed because carry-forward runs BEFORE
- * discovery in the orchestrator, so A may already have been carried today.
- * History on prior days is kept.
+ * Same-day reset when a new magazine supersedes the previous one of the SAME
+ * SERIES: delete today's run-less revista snapshots for mappings that were
+ * approved on the superseded magazines of that series and are NOT yet approved
+ * on `newMagazineId`.
+ *
+ * Scoped by series so a new Makro MM issue does not wipe GT / Folder prices
+ * that were carried forward this morning. Needed because carry-forward runs
+ * BEFORE discovery in the orchestrator, so A may already have been carried
+ * today. History on prior days is kept.
  */
 export async function purgeTodayRevistaSnapshotsNotApprovedOn(
   supermarketId: string,
   newMagazineId: string,
 ): Promise<number> {
+  // Series of the new magazine — only purge within this series.
+  const magRes = await db
+    .from('revista_magazines')
+    .select('id, series_key')
+    .eq('id', newMagazineId)
+    .single();
+  if (magRes.error) throw magRes.error;
+  const seriesKey = (magRes.data.series_key as string | null) ?? 'default';
+
+  // Magazines of this series that this new issue just superseded (or any older
+  // ones already pointing at it).
+  const oldMagsRes = await db
+    .from('revista_magazines')
+    .select('id')
+    .eq('supermarket_id', supermarketId)
+    .eq('series_key', seriesKey)
+    .eq('superseded_by', newMagazineId);
+  if (oldMagsRes.error) throw oldMagsRes.error;
+  const oldMagazineIds = (oldMagsRes.data ?? []).map((r) => r.id as string);
+  if (oldMagazineIds.length === 0) return 0;
+
+  // Mappings approved on the NEW magazine stay (keep).
   const approvedRes = await db
     .from('revista_review_items')
     .select('resulting_supermarket_product_id')
@@ -666,20 +692,28 @@ export async function purgeTodayRevistaSnapshotsNotApprovedOn(
       .filter((id): id is string => Boolean(id)),
   );
 
-  const mappingsRes = await db
-    .from('supermarket_products')
-    .select('id')
-    .eq('supermarket_id', supermarketId)
-    .eq('is_active', true);
-  if (mappingsRes.error) throw mappingsRes.error;
+  // Mappings that had an approval on a superseded magazine of THIS series.
+  const oldItemsRes = await db
+    .from('revista_review_items')
+    .select('resulting_supermarket_product_id')
+    .in('magazine_id', oldMagazineIds)
+    .eq('status', 'approved')
+    .not('resulting_supermarket_product_id', 'is', null);
+  if (oldItemsRes.error) throw oldItemsRes.error;
+
+  const candidateSpIds = [
+    ...new Set(
+      (oldItemsRes.data ?? [])
+        .map((r) => r.resulting_supermarket_product_id as string | null)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0 && !keep.has(id)),
+    ),
+  ];
+  if (candidateSpIds.length === 0) return 0;
 
   const today = buenosAiresDate();
   const toDelete: number[] = [];
 
-  for (const row of mappingsRes.data ?? []) {
-    const spId = row.id as string;
-    if (keep.has(spId)) continue;
-
+  for (const spId of candidateSpIds) {
     const { data, error } = await db
       .from('price_snapshots')
       .select('id, scraped_at, raw_data')

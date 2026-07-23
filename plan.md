@@ -246,7 +246,9 @@ api_keys (
 -- block it (that regression made prices vanish the day after approval). Because
 -- of that order, supersede also purges today's run-less revista snapshots for
 -- mappings not yet approved on B (same-day reset).
---
+-- Migration 015: supersede / carry-forward scope to (supermarket_id, series_key).
+-- Makro/Vital publish several concurrent flyer series (MM, GT, Folder, …);
+-- a new MM must not kill GT / Folder prices.
 -- revista_check_log (migration 011): one row per (chain, daily check), written
 -- whether or not a new issue was found, so the operator can SEE the probe ran on
 -- the (common) days nothing changed (GET /v1/revistas/checks). The AI check is
@@ -267,8 +269,9 @@ revista_magazines (
                                -- Powers the debug/analyze view (GET /v1/revistas/:id/analysis, docs/REVISTA_DEBUG.md).
   detected_at      timestamptz
   reviewed_at      timestamptz
-  superseded_by    uuid FK     -- migration 014: points at the newer issue that replaced this one (NULL = current)
+  superseded_by    uuid FK     -- migration 014: points at the newer issue that replaced this one within the same series (NULL = current)
   superseded_at    timestamptz -- when the mark was applied
+  series_key       text        -- migration 015: flyer series within the chain (e.g. 'mm', 'gt', 'folder-resto'; 'default' for single-series)
   UNIQUE (supermarket_id, content_hash)
 )
 

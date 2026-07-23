@@ -171,6 +171,7 @@ scraper/
 | `npx tsx --env-file=.env scripts/heal-eans.ts [--judge] [--auto] [--apply=<csv>]` | Backfill catalog EANs onto EAN-less products (fixes blank export columns); `--judge` adds an LLM adjudication pass | One-time backlog cleanup: report → (judge) → confirm CSV → apply. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
 | `npm run revistas:run -- [--super=<id>] [--pages=1-8] [--force]` | Run the magazine (revista) pipeline manually | Test/backfill a magazine chain; needs `OPENAI_API_KEY` |
 | `npm run revistas:doctor` | Diagnose the revista pipeline (config, live discovery, DB state, catalog stats) — **no AI cost** | First stop when "no magazines show up in the frontend" |
+| `npm run revistas:reset -- --super=<id> [--dry-run]` | Soft-reset a chain: approved items → pending, delete run-less revista snapshots (keeps scanned magazine) | Re-test review UI without re-scanning (e.g. Rosental) |
 | `npm run revistas:run -- --carry-forward` | Re-emit today's magazine prices (latest approved price → fresh snapshot dated today) — no AI, no scraping | Backfill today's export; the orchestrator does this daily automatically |
 | `npm run instore:carry-forward`   | Re-emit today's in-store prices (latest hand-entered price → fresh snapshot dated today) — no AI, no scraping | Backfill today's export; the orchestrator does this daily automatically |
 | `npm run orchestrator:run-now`    | Run a one-shot daily scrape immediately (needs Redis) | Manual trigger, e.g., backfill                         |

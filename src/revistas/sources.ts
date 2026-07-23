@@ -13,6 +13,9 @@
  *
  *   html-pdf-links — Makro/Vital: direct .pdf links on the offers page.
  *   pubhtml5       — Rosental: PubHTML5 flipbook, page images from config.js.
+ *                    Dedup hashes config.js content (page file list), not just
+ *                    the book URL — Rosental often reuses the same URL across
+ *                    quincenas.
  *   publuu         — Comodín: Publuu flipbook on CloudFront; Playwright finds
  *                    the image URL pattern, then plain fetch grabs the pages.
  */
@@ -36,6 +39,11 @@ export interface MagazineCandidate {
   hash: string;
   label: string;
   sourceUrl: string;
+  /**
+   * Stable flyer-series key for supersede / carry-forward
+   * (e.g. 'mm', 'gt', 'folder-resto'). Single-series chains use 'default'.
+   */
+  seriesKey: string;
   /** Download + render the pages (the expensive part). */
   fetch: () => Promise<MagazineSource>;
 }
@@ -82,13 +90,21 @@ async function pdfLinkCandidates(
       const h = hash(link.url, fingerprint);
       return {
         hash: h,
-        label: link.filename,
+        label: link.label,
         sourceUrl: link.url,
+        seriesKey: link.seriesKey,
         fetch: async (): Promise<MagazineSource> => {
           const buf = await downloadPdf(link);
           const all = await renderPdfToImages(buf);
           const { items: pages, firstPage } = applySelection(all, sel);
-          return { id: h, label: link.filename, sourceUrl: link.url, pages, firstPage, fileSize: buf.length };
+          return {
+            id: h,
+            label: link.label,
+            sourceUrl: link.url,
+            pages,
+            firstPage,
+            fileSize: buf.length,
+          };
         },
       };
     }),
@@ -118,17 +134,7 @@ async function discoverPubhtml5Url(offersUrl: string, fallback?: string): Promis
 }
 
 async function fetchPubhtml5Pages(bookUrl: string, sel?: PageSelection): Promise<MagazineSource> {
-  const cfgUrl = new URL('javascript/config.js', bookUrl).href;
-  const res = await fetchRetry(cfgUrl, { headers: { 'User-Agent': UA } }, cfgUrl);
-  if (!res.ok) throw new Error(`Could not read PubHTML5 config (${cfgUrl}): HTTP ${res.status}`);
-  const cfg = await res.text();
-
-  const title = cfg.match(/"title":"([^"]*)"/)?.[1] ?? 'Revista';
-  const allFiles = [...cfg.matchAll(/"n":\[([^\]]*)\]/g)]
-    .map((m) => (m[1] ?? '').match(/[a-f0-9]{32}\.webp/i)?.[0])
-    .filter((f): f is string => Boolean(f));
-  if (allFiles.length === 0) throw new Error('No page images in the PubHTML5 config.');
-
+  const { title, files: allFiles } = await readPubhtml5Config(bookUrl);
   const { items: files, firstPage } = applySelection(allFiles, sel);
   if (files.length === 0) throw new Error(`Requested range falls outside ${allFiles.length} pages.`);
 
@@ -139,7 +145,46 @@ async function fetchPubhtml5Pages(bookUrl: string, sel?: PageSelection): Promise
     if (!r.ok) throw new Error(`Could not download page ${f}: HTTP ${r.status}`);
     pages.push(Buffer.from(await r.arrayBuffer()));
   }
-  return { id: hash(bookUrl), label: title, sourceUrl: bookUrl, pages, firstPage, fileSize: totalBytes(pages) };
+  // Content-based id (same as discovery hash) so a republished book on the
+  // same URL is treated as a new issue.
+  const contentHash = hash(bookUrl, title, String(allFiles.length), allFiles.join(','));
+  return {
+    id: contentHash,
+    label: title,
+    sourceUrl: bookUrl,
+    pages,
+    firstPage,
+    fileSize: totalBytes(pages),
+  };
+}
+
+/**
+ * Cheap PubHTML5 fingerprint: read javascript/config.js for title + page
+ * filenames. If Rosental reuses the same book URL for a new quincena, the
+ * page hashes in config.js change → we detect a new issue without downloading
+ * every page.
+ */
+async function readPubhtml5Config(
+  bookUrl: string,
+): Promise<{ title: string; files: string[]; fingerprint: string }> {
+  const cfgUrl = new URL('javascript/config.js', bookUrl).href;
+  const res = await fetchRetry(cfgUrl, { headers: { 'User-Agent': UA } }, cfgUrl);
+  if (!res.ok) throw new Error(`Could not read PubHTML5 config (${cfgUrl}): HTTP ${res.status}`);
+  const cfg = await res.text();
+
+  const title = cfg.match(/"title":"([^"]*)"/)?.[1] ?? 'Revista';
+  const files = [...cfg.matchAll(/"n":\[([^\]]*)\]/g)]
+    .map((m) => (m[1] ?? '').match(/[a-f0-9]{32}\.webp/i)?.[0])
+    .filter((f): f is string => Boolean(f));
+  if (files.length === 0) throw new Error('No page images in the PubHTML5 config.');
+
+  // Prefer ETag / Last-Modified / length from the config response when present;
+  // always include the page-file list so a silent republish is still caught.
+  const etag = res.headers.get('etag') ?? '';
+  const lastModified = res.headers.get('last-modified') ?? '';
+  const len = res.headers.get('content-length') ?? String(cfg.length);
+  const fingerprint = [len, etag, lastModified, title, String(files.length), files.join(',')].join('|');
+  return { title, files, fingerprint };
 }
 
 async function pubhtml5Candidates(
@@ -150,12 +195,18 @@ async function pubhtml5Candidates(
     ? await discoverPubhtml5Url(cfg.offersUrl, cfg.pubhtml5Url)
     : cfg.pubhtml5Url;
   if (!bookUrl) throw new Error('pubhtml5 strategy requires offersUrl or pubhtml5Url');
-  // The book URL rotates per issue, so it's a sufficient dedup key on its own.
+
+  // Content fingerprint (not URL alone): Rosental often keeps the same
+  // pubhtml5.com/... path across quincenas and only swaps config.js pages.
+  const { title, fingerprint } = await readPubhtml5Config(bookUrl);
+  const h = hash(bookUrl, fingerprint);
+
   return [
     {
-      hash: hash(bookUrl),
-      label: 'PubHTML5 flipbook',
+      hash: h,
+      label: title,
       sourceUrl: bookUrl,
+      seriesKey: 'default',
       fetch: () => fetchPubhtml5Pages(bookUrl, sel),
     },
   ];
@@ -209,11 +260,13 @@ async function publuuCandidates(
 ): Promise<MagazineCandidate[]> {
   if (!cfg.offersUrl) throw new Error('publuu strategy requires offersUrl');
   const { embed, bookId } = await discoverPubluuEmbed(cfg.offersUrl);
+  // Single-series chain → seriesKey 'default'.
   return [
     {
       hash: hash(embed),
       label: `Comodín revista ${bookId}`,
       sourceUrl: embed,
+      seriesKey: 'default',
       fetch: () => fetchPubluuPages(embed, bookId, sel),
     },
   ];

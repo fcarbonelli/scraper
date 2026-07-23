@@ -1510,10 +1510,13 @@ are fully reviewed are omitted so the banner isn't raised on an empty queue — 
 `GET /v1/revistas` to see every magazine regardless of state. Pass
 `?include_empty=true` to bypass the filter (returns all `in_review` magazines).
 
-Every magazine header also includes `superseded_by` / `superseded_at` (null while
-the issue is still current for its chain). When a newer issue arrives, older
-magazines get `superseded_by` set to the new magazine id — carry-forward of their
-approved prices stops until a human approves the new queue.
+Every magazine header also includes `series_key` (flyer series within the chain,
+e.g. `mm` / `gt` / `folder-resto` / `default`) and `superseded_by` /
+`superseded_at` (null while the issue is still current **for its series**). When
+a newer issue of the **same series** arrives, older magazines of that series get
+`superseded_by` set to the new magazine id — carry-forward of their approved
+prices stops until a human approves the new queue. Concurrent series
+(Makro MM vs GT, Vital Folder vs Nonfood) stay current independently.
 
 ### `GET /v1/revistas/:magazineId`
 
