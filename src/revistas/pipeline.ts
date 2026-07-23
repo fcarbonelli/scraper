@@ -37,7 +37,7 @@ import {
   supersedePreviousMagazines,
   type ReviewItemInput,
 } from './store.js';
-import { purgeTodayRevistaSnapshotsNotApprovedOn } from './approve.js';
+import { purgeTodayRevistaSnapshotsNotApprovedOn, pauseSupersededSeriesMappings } from './approve.js';
 
 const StrategySchema = z.object({
   strategy: z.enum(['html-pdf-links', 'pubhtml5', 'publuu']),
@@ -189,11 +189,13 @@ async function processCandidate(
     const superseded = await supersedePreviousMagazines(sm.id, magazineId);
     if (superseded.length > 0) {
       const purged = await purgeTodayRevistaSnapshotsNotApprovedOn(sm.id, magazineId);
+      const paused = await pauseSupersededSeriesMappings(sm.id, magazineId);
       log.info(
         {
           seriesKey: candidate.seriesKey,
           superseded: superseded.length,
           purgedToday: purged,
+          pausedMappings: paused,
         },
         'revista: previous magazines superseded (same series)',
       );

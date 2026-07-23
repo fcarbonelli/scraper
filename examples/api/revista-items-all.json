@@ -5,8 +5,11 @@
       "magazine_id": "mag_01HROSENTAL",
       "supermarket_id": "rosental",
       "supermarket_name": "Rosental",
-      "magazine_label": "jul2mm.pdf",
+      "magazine_label": "Julio segunda quincena",
       "source_url": "https://example.com/folleto.pdf",
+      "magazine_status": "in_review",
+      "series_key": "default",
+      "superseded_by": null,
       "page_number": 8,
       "page_image_url": "https://example.supabase.co/storage/v1/object/public/revista-pages/rosental/mag/page-8.png",
       "extracted": {

@@ -737,6 +737,174 @@ export async function purgeTodayRevistaSnapshotsNotApprovedOn(
   return toDelete.length;
 }
 
+/**
+ * After magazine B supersedes A (same series): pause mappings that were only
+ * approved on the superseded magazines and have NO approval on any CURRENT
+ * magazine of this chain. client_base already hides is_active=false, so the
+ * export drops them immediately (not just via today's snapshot purge).
+ *
+ * A product also approved on another concurrent series (e.g. GT while MM just
+ * arrived) is kept active.
+ */
+export async function pauseSupersededSeriesMappings(
+  supermarketId: string,
+  newMagazineId: string,
+): Promise<number> {
+  const magRes = await db
+    .from('revista_magazines')
+    .select('id, series_key')
+    .eq('id', newMagazineId)
+    .single();
+  if (magRes.error) throw magRes.error;
+  const seriesKey = (magRes.data.series_key as string | null) ?? 'default';
+
+  const oldMagsRes = await db
+    .from('revista_magazines')
+    .select('id')
+    .eq('supermarket_id', supermarketId)
+    .eq('series_key', seriesKey)
+    .eq('superseded_by', newMagazineId);
+  if (oldMagsRes.error) throw oldMagsRes.error;
+  const oldMagazineIds = (oldMagsRes.data ?? []).map((r) => r.id as string);
+  if (oldMagazineIds.length === 0) return 0;
+
+  const oldItemsRes = await db
+    .from('revista_review_items')
+    .select('resulting_supermarket_product_id')
+    .in('magazine_id', oldMagazineIds)
+    .eq('status', 'approved')
+    .not('resulting_supermarket_product_id', 'is', null);
+  if (oldItemsRes.error) throw oldItemsRes.error;
+
+  const candidateSpIds = [
+    ...new Set(
+      (oldItemsRes.data ?? [])
+        .map((r) => r.resulting_supermarket_product_id as string | null)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  ];
+  if (candidateSpIds.length === 0) return 0;
+
+  return pauseRevistaMappingsNotOnCurrent(supermarketId, candidateSpIds);
+}
+
+/**
+ * Pause the given revista mappings unless they still have an approved review
+ * item on a CURRENT (non-superseded) magazine of `supermarketId`.
+ * Returns how many mappings were paused. Shared by supersede + reconcile.
+ */
+export async function pauseRevistaMappingsNotOnCurrent(
+  supermarketId: string,
+  candidateSpIds: string[],
+): Promise<number> {
+  if (candidateSpIds.length === 0) return 0;
+
+  const currentMagsRes = await db
+    .from('revista_magazines')
+    .select('id')
+    .eq('supermarket_id', supermarketId)
+    .is('superseded_by', null);
+  if (currentMagsRes.error) throw currentMagsRes.error;
+  const currentMagazineIds = (currentMagsRes.data ?? []).map((r) => r.id as string);
+
+  const keep = new Set<string>();
+  if (currentMagazineIds.length > 0) {
+    const keepRes = await db
+      .from('revista_review_items')
+      .select('resulting_supermarket_product_id')
+      .in('magazine_id', currentMagazineIds)
+      .eq('status', 'approved')
+      .not('resulting_supermarket_product_id', 'is', null);
+    if (keepRes.error) throw keepRes.error;
+    for (const r of keepRes.data ?? []) {
+      const id = r.resulting_supermarket_product_id as string | null;
+      if (id) keep.add(id);
+    }
+  }
+
+  const toPause = candidateSpIds.filter((id) => !keep.has(id));
+  if (toPause.length === 0) return 0;
+
+  const { error } = await db
+    .from('supermarket_products')
+    .update({ is_active: false })
+    .in('id', toPause)
+    .eq('is_active', true);
+  if (error) throw error;
+
+  logger.info(
+    { supermarketId, paused: toPause.length, kept: candidateSpIds.length - toPause.length },
+    'revista: paused mappings not approved on a current magazine',
+  );
+  return toPause.length;
+}
+
+/**
+ * One-shot / ops reconcile: pause every active revista mapping of a chain
+ * (or all revista chains) whose only approvals live on superseded magazines.
+ *
+ * When `dryRun` is true, no writes — returns how many would be paused.
+ */
+export async function reconcileRevistaActiveMappings(
+  supermarketId?: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ considered: number; paused: number }> {
+  let smIds: string[];
+  if (supermarketId) {
+    smIds = [supermarketId];
+  } else {
+    const { data, error } = await db.from('supermarkets').select('id, config').eq('is_active', true);
+    if (error) throw error;
+    smIds = (data ?? [])
+      .filter((s) => (s.config as { source_type?: string } | null)?.source_type === 'revista')
+      .map((s) => s.id as string);
+  }
+
+  let considered = 0;
+  let paused = 0;
+  for (const smId of smIds) {
+    const { data: mappings, error } = await db
+      .from('supermarket_products')
+      .select('id')
+      .eq('supermarket_id', smId)
+      .eq('is_active', true)
+      .eq('metadata->>source', 'revista');
+    if (error) throw error;
+    const ids = (mappings ?? []).map((m) => m.id as string);
+    considered += ids.length;
+
+    if (opts.dryRun) {
+      // Count what would pause without writing.
+      const currentMagsRes = await db
+        .from('revista_magazines')
+        .select('id')
+        .eq('supermarket_id', smId)
+        .is('superseded_by', null);
+      if (currentMagsRes.error) throw currentMagsRes.error;
+      const currentMagazineIds = (currentMagsRes.data ?? []).map((r) => r.id as string);
+      const keep = new Set<string>();
+      if (currentMagazineIds.length > 0) {
+        const keepRes = await db
+          .from('revista_review_items')
+          .select('resulting_supermarket_product_id')
+          .in('magazine_id', currentMagazineIds)
+          .eq('status', 'approved')
+          .not('resulting_supermarket_product_id', 'is', null);
+        if (keepRes.error) throw keepRes.error;
+        for (const r of keepRes.data ?? []) {
+          const id = r.resulting_supermarket_product_id as string | null;
+          if (id) keep.add(id);
+        }
+      }
+      paused += ids.filter((id) => !keep.has(id)).length;
+      continue;
+    }
+
+    paused += await pauseRevistaMappingsNotOnCurrent(smId, ids);
+  }
+  return { considered, paused };
+}
+
 /** Domain error with a coarse kind the route maps to an HTTP status. */
 export class ItemError extends Error {
   readonly kind: 'not_found' | 'conflict' | 'invalid';
