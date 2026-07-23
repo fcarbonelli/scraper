@@ -21,10 +21,12 @@
  */
 
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 import { logger } from '../shared/logger.js';
 import { fetchRetry } from './retry.js';
-import { findPdfLinks, downloadPdf } from './download.js';
+import { findPdfLinks, downloadPdf, type PdfLink } from './download.js';
 import { renderPdfToImages } from './render.js';
+import { deriveSeriesKey } from './series.js';
 import {
   UA,
   applySelection,
@@ -287,4 +289,60 @@ export async function discoverCandidates(
     default:
       throw new Error(`Unsupported revista strategy: ${String(cfg.strategy)}`);
   }
+}
+
+/**
+ * Build a MagazineCandidate from an explicit PDF URL (bypasses discovery).
+ * Used when the offers-page HTML is stale/cached and a known PDF must be
+ * ingested by hand (e.g. Makro `4-PROV-JUL4.pdf`).
+ */
+export async function candidateFromPdfUrl(
+  pdfUrl: string,
+  opts: {
+    pageSelection?: PageSelection;
+    /** Override the human label (defaults to filename). */
+    label?: string;
+    /** Override the derived series_key. */
+    seriesKey?: string;
+  } = {},
+): Promise<MagazineCandidate> {
+  let parsed: URL;
+  try {
+    parsed = new URL(pdfUrl);
+  } catch {
+    throw new Error(`Invalid PDF URL: ${pdfUrl}`);
+  }
+  if (!parsed.pathname.toLowerCase().endsWith('.pdf')) {
+    throw new Error(`URL does not look like a PDF: ${pdfUrl}`);
+  }
+
+  const filename = decodeURIComponent(path.basename(parsed.pathname));
+  const label = opts.label?.trim() || filename;
+  const seriesKey =
+    opts.seriesKey?.trim() ||
+    deriveSeriesKey({ filename, label, strategy: 'html-pdf-links' });
+
+  const link: PdfLink = { url: pdfUrl, filename, label, seriesKey };
+  const fingerprint = await headFingerprint(pdfUrl);
+  const h = hash(pdfUrl, fingerprint);
+
+  return {
+    hash: h,
+    label,
+    sourceUrl: pdfUrl,
+    seriesKey,
+    fetch: async (): Promise<MagazineSource> => {
+      const buf = await downloadPdf(link);
+      const all = await renderPdfToImages(buf);
+      const { items: pages, firstPage } = applySelection(all, opts.pageSelection);
+      return {
+        id: h,
+        label,
+        sourceUrl: pdfUrl,
+        pages,
+        firstPage,
+        fileSize: buf.length,
+      };
+    },
+  };
 }

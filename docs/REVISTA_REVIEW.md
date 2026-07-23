@@ -585,6 +585,11 @@ show.
   > check, so a slow/hung discovery (Playwright, network) could block it and make
   > magazine prices vanish the day after approval — that's fixed. The check
   > itself is now timeout-guarded and each site's probe is logged.
+  > **Rosental silent republish:** Rosental reuses the same PubHTML5 URL across
+  > quincenas; discovery hashes `config.js` (page file list). If they swap prices
+  > *without* changing those page hashes, the issue looks "already known". Force
+  > a reprocess with `npm run revistas:run -- --super=rosental --force` when you
+  > know content changed but doctor still shows the same hash.
   > **Operational note:** carry-forward still only fires when the **orchestrator**
   > runs its daily cycle. If magazine prices stop appearing on new days, the
   > orchestrator isn't running the current build — redeploy/restart it, or run
@@ -602,6 +607,26 @@ show.
   distinct `series_key`. Supersede / carry-forward are per series, so a new MM
   does not kill GT prices. Within one magazine, `page_number` and
   `page_image_url` keep pages straight.
+- **Skipping irrelevant series.** Discovery can ignore whole flyer series so we
+  never download/render/vision them. Configure per chain in
+  `supermarkets.config.revista.skipSeries` (e.g. `["gt"]` to ignore Makro's
+  gastronomic flyer). Empty / omitted = process every series (default). Manual
+  overrides: `npm run revistas:run -- --super=makro --skip-series=gt,sponsor`
+  or `--only-series=mm,prov`. **Nothing is skipped until you set a list.**
+  Known Makro keys: `mm` (semanal), `gt` (gastronómica), `sponsor` (especiales),
+  `prov` (soluciones/proveedores), `especial` (día del amigo), `makroneta`.
+  Vital keys come from `data-name` slugs (e.g. `folder-resto`,
+  `folder-nonfood-resto`, `especial-frescos-todas`).
+- **Manual PDF ingest (`--url`).** When the offers-page HTML is stale (BunnyCDN
+  cache) and a known PDF is missing from discovery, ingest it directly:
+  `npm run revistas:run -- --super=makro --url=https://…/4-PROV-JUL4.pdf`
+  (optional `--label=…` / `--series=prov` / `--pages=1-3`). Same pipeline as a
+  discovered issue → review queue + alert. Discovery itself union-fetches the
+  plain offers URL **and** a cache-busted copy so future editions usually land
+  without `--url`.
+- **Failed scans.** If processing dies after the magazine row is created, status
+  becomes `failed` (not stuck `processing`) and a `revista_failed` alert fires.
+  The next daily check retries `failed` / `processing` hashes without `--force`.
 - **Refresh cadence.** Poll `GET /v1/revistas/pending` on the same cadence as
   alerts (~30 s while the Daily Review screen is open). Items rarely change
   outside of the reviewer's own actions, so optimistic updates are fine —

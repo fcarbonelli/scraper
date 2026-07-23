@@ -20,7 +20,7 @@ import { logger, type Logger } from '../shared/logger.js';
 import { captureError } from '../shared/sentry.js';
 import { createAlert } from '../alerts/createAlert.js';
 import { revistaConfig } from './config.js';
-import { discoverCandidates, type MagazineCandidate } from './sources.js';
+import { discoverCandidates, candidateFromPdfUrl, type MagazineCandidate } from './sources.js';
 import type { PageSelection, RevistaStrategyConfig } from './sources-shared.js';
 import { extractProductsFromPage, type ExtractedProduct } from './extract.js';
 import { loadCatalog } from './catalog.js';
@@ -43,6 +43,8 @@ const StrategySchema = z.object({
   strategy: z.enum(['html-pdf-links', 'pubhtml5', 'publuu']),
   offersUrl: z.string().url().optional(),
   pubhtml5Url: z.string().url().optional(),
+  /** Flyer series to ignore at discovery (e.g. ['gt']). Empty = process all. */
+  skipSeries: z.array(z.string().min(1)).optional(),
 });
 
 const RevistaConfigSchema = z.object({
@@ -54,6 +56,8 @@ export interface RevistaSupermarket {
   id: string;
   name: string;
   strategy: RevistaStrategyConfig;
+  /** From config.revista.skipSeries — never process these series keys. */
+  skipSeries: string[];
 }
 
 /** Active supermarkets flagged as magazine-sourced (config.source_type='revista'). */
@@ -68,7 +72,12 @@ export async function loadRevistaSupermarkets(): Promise<RevistaSupermarket[]> {
   for (const row of data ?? []) {
     const parsed = RevistaConfigSchema.safeParse(row.config);
     if (!parsed.success) continue; // not a revista supermarket → skip
-    out.push({ id: row.id as string, name: row.name as string, strategy: parsed.data.revista });
+    out.push({
+      id: row.id as string,
+      name: row.name as string,
+      strategy: parsed.data.revista,
+      skipSeries: parsed.data.revista.skipSeries ?? [],
+    });
   }
   return out;
 }
@@ -79,6 +88,13 @@ export interface ProcessOptions {
   pageSelection?: PageSelection;
   /** Reprocess even if the issue's hash already exists. */
   force?: boolean;
+  /**
+   * Extra series keys to skip (CLI). Merged with config.revista.skipSeries.
+   * Ignored when `onlySeries` is set.
+   */
+  skipSeries?: string[];
+  /** If set, ONLY these series keys are processed (CLI override). */
+  onlySeries?: string[];
 }
 
 export interface MagazineSummary {
@@ -220,16 +236,34 @@ async function processCandidate(
       magazineId,
     };
   } catch (err) {
-    // Leave the magazine row (if created) in 'processing' so a later run retries.
+    // If we already created the magazine row, flip it to 'failed' so it does
+    // not sit forever in 'processing' (which would look like an in-flight run
+    // and block --force-less retries of the same hash in some UIs).
+    const detail = err instanceof Error ? err.message : String(err);
     log.error({ err }, 'revista: processing failed');
     captureError(err, { supermarket: sm.id, magazine: candidate.label });
+    if (magazineId) {
+      try {
+        await setMagazineStatus(magazineId, 'failed');
+        await createAlert({
+          severity: 'warning',
+          type: 'revista_failed',
+          supermarketId: sm.id,
+          title: `Falló el escaneo de una revista de ${sm.name}`,
+          message: `La revista "${candidate.label}" no pudo procesarse: ${detail}`,
+          context: { magazine_id: magazineId, error: detail },
+        });
+      } catch (markErr) {
+        log.warn({ err: markErr, magazineId }, 'revista: could not mark magazine failed');
+      }
+    }
     return {
       supermarketId: sm.id,
       label: candidate.label,
       status: 'failed',
       hash: candidate.hash,
       ...(magazineId ? { magazineId } : {}),
-      error: err instanceof Error ? err.message : String(err),
+      error: detail,
     };
   }
 }
@@ -268,6 +302,19 @@ async function uploadAllPages(
     else log.warn({ page }, 'revista: page image upload returned no URL');
   }
   return urls;
+}
+
+/** Decide whether a discovered candidate should be processed given skip/only filters. */
+function shouldProcessSeries(
+  seriesKey: string,
+  sm: RevistaSupermarket,
+  opts: ProcessOptions,
+): boolean {
+  if (opts.onlySeries && opts.onlySeries.length > 0) {
+    return opts.onlySeries.includes(seriesKey);
+  }
+  const skip = new Set([...(sm.skipSeries ?? []), ...(opts.skipSeries ?? [])]);
+  return !skip.has(seriesKey);
 }
 
 /** Process one supermarket: discover, dedup, and process any new issues. */
@@ -309,9 +356,37 @@ export async function processSupermarket(
   const toProcess: MagazineCandidate[] = [];
   const summaries: MagazineSummary[] = [];
   for (const c of candidates) {
+    // Series filter runs BEFORE download/render — saves the whole flyer cost.
+    if (!shouldProcessSeries(c.seriesKey, sm, opts)) {
+      log.info(
+        { label: c.label, seriesKey: c.seriesKey },
+        'revista: skipping series (skipSeries / onlySeries)',
+      );
+      summaries.push({
+        supermarketId: sm.id,
+        label: c.label,
+        status: 'skipped',
+        hash: c.hash,
+      });
+      continue;
+    }
+
     const existing = await findMagazineByHash(sm.id, c.hash);
-    if (existing && existing.status !== 'processing' && !opts.force) {
-      summaries.push({ supermarketId: sm.id, label: c.label, status: 'skipped', hash: c.hash, magazineId: existing.id });
+    // Treat 'failed' like 'processing': allow a retry without --force so a
+    // one-off render/vision glitch self-heals on the next daily check.
+    if (
+      existing &&
+      existing.status !== 'processing' &&
+      existing.status !== 'failed' &&
+      !opts.force
+    ) {
+      summaries.push({
+        supermarketId: sm.id,
+        label: c.label,
+        status: 'skipped',
+        hash: c.hash,
+        magazineId: existing.id,
+      });
       continue;
     }
     toProcess.push(c);
@@ -351,6 +426,48 @@ export async function processSupermarket(
     scrapeRunId: opts.scrapeRunId ?? null,
   });
   return summaries;
+}
+
+/**
+ * Ingest one PDF URL for a revista chain, bypassing discovery.
+ * Used when the offers-page HTML is stale (CDN cache) and a known PDF must be
+ * scanned so operators can review it.
+ */
+export async function ingestPdfUrl(
+  supermarketId: string,
+  pdfUrl: string,
+  opts: ProcessOptions & { label?: string; seriesKey?: string } = {},
+): Promise<MagazineSummary> {
+  const supers = await loadRevistaSupermarkets();
+  const sm = supers.find((s) => s.id === supermarketId);
+  if (!sm) {
+    throw new Error(
+      `No revista supermarket "${supermarketId}" (is config.source_type=revista and is_active=true?)`,
+    );
+  }
+
+  const candidate = await candidateFromPdfUrl(pdfUrl, {
+    pageSelection: opts.pageSelection,
+    label: opts.label,
+    seriesKey: opts.seriesKey,
+  });
+
+  // Dedup unless --force / prior failed|processing.
+  if (!opts.force) {
+    const existing = await findMagazineByHash(sm.id, candidate.hash);
+    if (existing && existing.status !== 'processing' && existing.status !== 'failed') {
+      return {
+        supermarketId: sm.id,
+        label: candidate.label,
+        status: 'skipped',
+        hash: candidate.hash,
+        magazineId: existing.id,
+      };
+    }
+  }
+
+  const indexPromise = loadCatalog().then(buildCatalogIndex);
+  return processCandidate(sm, candidate, opts, indexPromise);
 }
 
 /**

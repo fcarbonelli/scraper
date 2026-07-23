@@ -89,21 +89,17 @@ function findTitledPdfLinks(html: string, base: string): PdfLink[] {
   return [...byUrl.values()];
 }
 
-/** Fetch the offers page HTML and extract the PDF links. */
-export async function findPdfLinks(offersUrl: string): Promise<PdfLink[]> {
-  const res = await fetchRetry(offersUrl, { headers: { 'User-Agent': UA } }, offersUrl);
-  if (!res.ok) throw new Error(`Could not read ${offersUrl}: HTTP ${res.status}`);
-  const html = await res.text();
-
-  // 1) If the page marks displayed folletos with data-name (Vital), use only those.
-  const displayed = findDisplayedFolletos(html, offersUrl);
+/**
+ * Parse PDF links out of one offers-page HTML body.
+ * Prefer Vital data-name anchors → Makro titled anchors → bare .pdf URLs.
+ */
+function parsePdfLinksFromHtml(html: string, baseUrl: string): PdfLink[] {
+  const displayed = findDisplayedFolletos(html, baseUrl);
   if (displayed.length > 0) return displayed;
 
-  // 2) Makro: anchors with title= give us a readable label + series hint.
-  const titled = findTitledPdfLinks(html, offersUrl);
+  const titled = findTitledPdfLinks(html, baseUrl);
   if (titled.length > 0) return titled;
 
-  // 3) Fallback: every bare .pdf URL in the HTML (filename-only series key).
   const found = new Set<string>();
   const re = /['"(]([^'"()\s]+?\.pdf)(?:\?[^'"()\s]*)?['")]/gi;
   let m: RegExpExecArray | null;
@@ -111,12 +107,58 @@ export async function findPdfLinks(offersUrl: string): Promise<PdfLink[]> {
     const href = m[1];
     if (!href) continue;
     try {
-      found.add(new URL(href, offersUrl).href);
+      found.add(new URL(href, baseUrl).href);
     } catch {
       /* invalid URL → skip */
     }
   }
   return [...found].map((url) => toPdfLink(url));
+}
+
+/**
+ * Fetch offers-page HTML. BunnyCDN (Makro) often serves a stale cached copy of
+ * `/ofertas/` that is missing newly uploaded PDFs. We therefore:
+ *   1. fetch the plain URL, and
+ *   2. fetch a cache-busted URL (`?v=<random>` + Cache-Control: no-cache),
+ * then UNION the PDF links (dedupe by URL). That way neither the stale nor the
+ * fresh page alone can hide an issue.
+ */
+export async function findPdfLinks(offersUrl: string): Promise<PdfLink[]> {
+  const headers = {
+    'User-Agent': UA,
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+  };
+
+  const bustedUrl = (() => {
+    const u = new URL(offersUrl);
+    u.searchParams.set('v', String(Date.now()));
+    return u.href;
+  })();
+
+  const [plainRes, bustedRes] = await Promise.all([
+    fetchRetry(offersUrl, { headers }, offersUrl),
+    fetchRetry(bustedUrl, { headers }, bustedUrl),
+  ]);
+
+  if (!plainRes.ok && !bustedRes.ok) {
+    throw new Error(
+      `Could not read ${offersUrl}: HTTP ${plainRes.status} / cache-bust HTTP ${bustedRes.status}`,
+    );
+  }
+
+  const byUrl = new Map<string, PdfLink>();
+  if (plainRes.ok) {
+    for (const link of parsePdfLinksFromHtml(await plainRes.text(), offersUrl)) {
+      byUrl.set(link.url, link);
+    }
+  }
+  if (bustedRes.ok) {
+    for (const link of parsePdfLinksFromHtml(await bustedRes.text(), offersUrl)) {
+      byUrl.set(link.url, link);
+    }
+  }
+  return [...byUrl.values()];
 }
 
 /** Download a PDF into memory. */

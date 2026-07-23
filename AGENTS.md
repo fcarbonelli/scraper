@@ -169,7 +169,7 @@ scraper/
 | `npm run scrape:url -- <url>`     | Full pipeline test for a single URL (bypasses queue)  | Verify a supermarket works end-to-end without Redis    |
 | `npm run scrape:bulk -- <file>`   | Bulk-import URLs from a text file (one per line)      | Add many products at once; idempotent, safe to re-run  |
 | `npx tsx --env-file=.env scripts/heal-eans.ts [--judge] [--auto] [--apply=<csv>]` | Backfill catalog EANs onto EAN-less products (fixes blank export columns); `--judge` adds an LLM adjudication pass | One-time backlog cleanup: report → (judge) → confirm CSV → apply. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
-| `npm run revistas:run -- [--super=<id>] [--pages=1-8] [--force]` | Run the magazine (revista) pipeline manually | Test/backfill a magazine chain; needs `OPENAI_API_KEY` |
+| `npm run revistas:run -- [--super=<id>] [--pages=1-8] [--force] [--url=<pdf>] [--skip-series=a,b] [--only-series=a,b]` | Run the magazine (revista) pipeline manually (`--url` ingests one PDF bypassing discovery) | Test/backfill a magazine chain; needs `OPENAI_API_KEY` |
 | `npm run revistas:doctor` | Diagnose the revista pipeline (config, live discovery, DB state, catalog stats) — **no AI cost** | First stop when "no magazines show up in the frontend" |
 | `npm run revistas:reset -- --super=<id> [--dry-run]` | Soft-reset a chain: approved items → pending, delete run-less revista snapshots (keeps scanned magazine) | Re-test review UI without re-scanning (e.g. Rosental) |
 | `npm run revistas:reconcile -- [--super=<id>] [--dry-run]` | Pause revista mappings whose only approvals are on superseded magazines | One-shot cleanup so client_base stops emitting old flyer prices |

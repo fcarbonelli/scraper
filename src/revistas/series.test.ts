@@ -11,10 +11,11 @@ import {
 } from './series.js';
 
 describe('seriesKeyFromMakroFilename', () => {
-  it('detects MM / GT / SPONSOR / MAKRONETA / ESPECIAL', () => {
+  it('detects MM / GT / SPONSOR / PROV / MAKRONETA / ESPECIAL', () => {
     expect(seriesKeyFromMakroFilename('1-MM-JUL4.pdf')).toBe('mm');
     expect(seriesKeyFromMakroFilename('1-GT-V5-1.pdf')).toBe('gt');
     expect(seriesKeyFromMakroFilename('SPONSOR-JUL-3.pdf')).toBe('sponsor');
+    expect(seriesKeyFromMakroFilename('4-PROV-JUL4.pdf')).toBe('prov');
     expect(seriesKeyFromMakroFilename('MAKRONETTA-V6-17al19.pdf')).toBe('makroneta');
     expect(seriesKeyFromMakroFilename('ESPECIAL-dia-del-amigo-MK-V4-16al26.pdf')).toBe('especial');
     expect(seriesKeyFromMakroFilename('Flyer-MM-CORREGIDO-JUNIO-4.pdf')).toBe('mm');
