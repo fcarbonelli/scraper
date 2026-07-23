@@ -22,6 +22,11 @@ Each file is a complete response body — `data` + `meta` (and `pagination` for 
 | `alerts-list.json`          | `GET /v1/alerts`                          | 4 alerts: one critical, one warning, one info, one resolved           |
 | `error-401.json`            | (any auth-required endpoint with bad key) | Missing/invalid API key                                               |
 | `error-404.json`            | `GET /v1/products/<bogus-uuid>`           | Resource not found                                                    |
+| `revista-items-all.json`    | `GET /v1/revistas/items`                  | Cross-magazine approved item with chain/magazine context              |
+| `revista-update.json`       | `PATCH /v1/revistas/items/:id`            | Edit-approved result                                                  |
+| `revista-delete.json`       | `DELETE /v1/revistas/items/:id`           | Undo approval → pending                                               |
+| `revista-ean-collisions.json` | `GET /v1/revistas/ean-collisions`       | Same-EAN / distinct-product warning group                             |
+| `revista-duplicates.json`   | `GET /v1/revistas/duplicates`             | Same-mapping / same-day snapshot duplicate group (last 3 BA days)     |
 
 
 ## How to use during development

@@ -170,12 +170,18 @@ Drives the modal/badge. Magazines with unreviewed items.
       "page_count": 57,
       "status": "in_review",
       "counts": { "total": 8, "pending": 8, "approved": 0, "rejected": 0 },
-      "detected_at": "2026-06-29T09:05:00.000Z"
+      "detected_at": "2026-06-29T09:05:00.000Z",
+      "series_key": "mm",
+      "superseded_by": null,
+      "superseded_at": null
     }
   ],
   "meta": { "ts": "..." }
 }
 ```
+
+`series_key` (e.g. `"mm"`, `"folder-resto"`, `"default"`) scopes supersede /
+carry-forward when a chain publishes several concurrent flyer series.
 
 ### `GET /v1/revistas/:magazineId`
 
@@ -280,6 +286,57 @@ Errors: `400 INVALID_REQUEST` (e.g. approving with neither a proposed match nor 
 { "data": { "item_id": "item_01H...", "status": "rejected" }, "meta": { "ts": "..." } }
 ```
 
+### `GET /v1/revistas/items`
+
+Cross-magazine review-item list (powers `/revistas/aprobados` and the control
+Excel). Register **before** `/:magazineId`. Query: `page`, `limit`, `status`,
+`supermarket_id`, `search`, **`current_only`** (default `true` — only items on
+magazines with `superseded_by IS NULL`; pass `current_only=false` for history).
+Each row is a normal review item **plus** `supermarket_name`, `magazine_label`,
+`source_url`, `magazine_status`, `series_key`, `superseded_by`. `extracted`
+returns the **effective** prices (operator `approved_override` beats the AI
+read). See `examples/api/revista-items-all.json`.
+
+### `PATCH /v1/revistas/items/:itemId`
+
+Edit an **approved** item. Body (all optional; ≥1 required): `product_id`,
+`price`, `promo_price` (null clears), `promo_text` (null/`""` clears), `note`,
+`reviewed_by`. Corrections go into `approved_override` (AI `extracted` is
+preserved). The snapshot for **today** is updated in-place (never a second
+row). Rematch (`product_id` changed) = undo old mapping effects + re-approve.
+See `examples/api/revista-update.json`. Errors: `400`, `404`, `409` (not approved).
+
+### `DELETE /v1/revistas/items/:itemId`
+
+Undo an approval → item returns to `pending`. Deletes the approval snapshot +
+carry-forward chain (and today's revista row), pauses the mapping when no other
+approved item still points at it, and reopens a `reviewed` magazine to
+`in_review`. See `examples/api/revista-delete.json`.
+
+### `GET /v1/revistas/ean-collisions`
+
+Read-only warning list: same EAN + same chain + same day with **distinct**
+`product_id`s (mis-assigned barcodes — do **not** auto-delete). Query:
+`?day=YYYY-MM-DD` (default today BA), `?supermarket_id=`. See
+`examples/api/revista-ean-collisions.json`.
+
+### `GET /v1/revistas/duplicates`
+
+Family-A warning list: same mapping + same BA day with **2+** run-less revista
+snapshots. Default window = **last 3 Buenos Aires days** (does not resurface
+old one-off batches). Query: `?days=N` (1–90, default 3), `?day=YYYY-MM-DD`
+(exact day — mutually exclusive with `days`), `?supermarket_id=`. Each group
+includes `keep` (offer wins, else newest) and `drop` (losers). See
+`examples/api/revista-duplicates.json`.
+
+### `POST /v1/revistas/duplicates/resolve`
+
+Collapse **one** duplicate group. Body: `{ "supermarket_product_id": "uuid",
+"day": "YYYY-MM-DD" }`. Applies the same keep/drop rule and deletes the losers.
+Response: `{ supermarket_product_id, day, kept_snapshot_id, deleted_snapshot_ids }`.
+Errors: `404` (mapping missing), `400` (not a revista mapping), `409` (no
+duplicate group for that mapping/day).
+
 ### `POST /v1/revistas/:magazineId/items`
 
 Manually add a product the AI missed. Catalog‑only `product_id`.
@@ -341,6 +398,11 @@ export interface RevistaMagazine {
   status: RevistaMagazineStatus;
   counts: { total: number; pending: number; approved: number; rejected: number };
   detected_at: string; // ISO 8601 UTC
+  /** Flyer series within the chain (e.g. 'mm', 'gt', 'folder-resto'). */
+  series_key: string;
+  /** Newer issue that replaced this one within the same series; null = still current. */
+  superseded_by: string | null;
+  superseded_at: string | null;
 }
 
 export interface RevistaExtracted {
@@ -414,6 +476,26 @@ rejectRevistaItem: (itemId: string, note?: string) =>
   request<ApiSuccess<{ item_id: string; status: RevistaItemStatus }>>(
     `/revistas/items/${itemId}/reject`, { method: 'POST', body: JSON.stringify({ note }) },
   ),
+listAllRevistaItems: (q: { status?: RevistaItemStatus; supermarket_id?: string; search?: string; page?: number; limit?: number; current_only?: boolean } = {}) =>
+  request<ApiPaginated<RevistaReviewItem & { supermarket_name: string; magazine_label: string; source_url?: string | null; magazine_status?: string | null; series_key?: string; superseded_by?: string | null }>>(
+    `/revistas/items?${new URLSearchParams(q as Record<string, string>)}`,
+  ),
+updateRevistaItem: (itemId: string, body: { product_id?: string; price?: number | null; promo_price?: number | null; promo_text?: string | null; note?: string | null }) =>
+  request<ApiSuccess<RevistaApproveResult>>(`/revistas/items/${itemId}`, {
+    method: 'PATCH', body: JSON.stringify(body),
+  }),
+deleteRevistaItem: (itemId: string) =>
+  request<ApiSuccess<{ item_id: string; status: 'pending'; snapshot_deleted: boolean }>>(
+    `/revistas/items/${itemId}`, { method: 'DELETE' },
+  ),
+listEanCollisions: (q: { day?: string; supermarket_id?: string } = {}) =>
+  request(`/revistas/ean-collisions?${new URLSearchParams(q as Record<string, string>)}`),
+listRevistaDuplicates: (q: { days?: number; day?: string; supermarket_id?: string } = {}) =>
+  request(`/revistas/duplicates?${new URLSearchParams(q as Record<string, string>)}`),
+resolveRevistaDuplicate: (body: { supermarket_product_id: string; day: string }) =>
+  request(`/revistas/duplicates/resolve`, {
+    method: 'POST', body: JSON.stringify(body),
+  }),
 addRevistaItem: (magazineId: string, body: { page_number: number; product_id: string; price: number; promo_price?: number; promo_text?: string; note?: string }) =>
   request<ApiSuccess<RevistaApproveResult>>(`/revistas/${magazineId}/items`, {
     method: 'POST', body: JSON.stringify(body),
@@ -471,16 +553,33 @@ show.
 - **Price persistence (carry‑forward).** A regular product gets a fresh snapshot
   every day from the daily scrape, but a magazine product only gets one **when you
   approve it**. So the backend runs a daily **carry‑forward** step
-  (`src/revistas/carryForward.ts`, in the orchestrator): it re‑emits each active
-  magazine product's **latest approved price** as a fresh **run-less** snapshot
-  dated today. Run-less = always client-visible, so it does **not** depend on any
-  daily run being published (a day left in `pending_review` would otherwise hide
-  it). That's why an approved magazine price keeps appearing in the daily
-  export/compare **every day until the next revista supersedes it** (policy:
-  carry the latest price forward until a newer approval replaces it). Revista
-  chains are excluded from the scraper queue (they have no adapter). **Frontend
-  impact: none** — the data flows through the same snapshots the
+  (`src/revistas/carryForward.ts`, in the orchestrator): it re‑emits each product
+  **approved on the current (non‑superseded) magazine** as a fresh **run-less**
+  snapshot dated today. Run-less = always client-visible, so it does **not**
+  depend on any daily run being published (a day left in `pending_review` would
+  otherwise hide it). That's why an approved magazine price keeps appearing in
+  the daily export/compare **every day until the next revista supersedes it**.
+  Revista chains are excluded from the scraper queue (they have no adapter).
+  **Frontend impact: none** — the data flows through the same snapshots the
   export/compare/history already read.
+  > **Supersede on new issue (per SERIES):** Makro/Vital publish several
+  > concurrent flyer series (MM weekly, GT gastronomic, Folder, Nonfood, …).
+  > Each magazine has a `series_key`. When the pipeline finishes ingesting
+  > magazine **B**, only prior magazines **A of the same series** are marked
+  > `superseded_by = B` (`superseded_at` set). Concurrent series stay current
+  > and keep carrying. Carry-forward sources approvals on every current
+  > (non-superseded) magazine — one per series. A's prices for that series stop
+  > appearing in today's export until a human approves B's queue. Same-day:
+  > today's run-less revista snapshots for mappings approved on the superseded
+  > magazines of that series (and not yet on B) are purged (carry-forward runs
+  > *before* discovery in the orchestrator, so A may already have been carried
+  > that morning). **Mappings** whose only approvals lived on the superseded
+  > magazines (and that are not also approved on another CURRENT magazine of
+  > the chain) are **paused** (`is_active=false`) so `client_base` drops them
+  > immediately — not only via the snapshot purge. Approving on B reactivates
+  > the mapping. History on prior days is kept. Magazines expose `series_key`,
+  > `superseded_by` / `superseded_at` so the UI can show "Folleto superado"
+  > without date heuristics.
   > **Reliability:** carry-forward runs **first and independently** of the AI
   > magazine check in the orchestrator's daily cycle. Earlier it ran *after* the
   > check, so a slow/hung discovery (Playwright, network) could block it and make
@@ -490,14 +589,19 @@ show.
   > runs its daily cycle. If magazine prices stop appearing on new days, the
   > orchestrator isn't running the current build — redeploy/restart it, or run
   > `npm run revistas:run -- --carry-forward` to backfill today by hand (no AI
-  > cost).
+  > cost). After deploying pause-on-supersede, also run
+  > `npm run revistas:reconcile -- --dry-run` once against prod to pause
+  > leftover mappings from flyers that were already superseded before this
+  > change existed; then drop `--dry-run` to apply.
 - **Idempotency.** Re‑approving/rejecting an already‑reviewed item returns
   `409 CONFLICT`. Re‑running the same unchanged magazine never creates a new one
   (dedup by content hash), so the queue is stable. The carry‑forward step is
   idempotent per day (skips a product that already has a snapshot dated today).
-- **One magazine, many pages.** A chain can publish several folletos at once
-  (e.g. Makro had 5). They're grouped under one magazine entry; `page_number` and
-  `page_image_url` keep them straight.
+- **One chain, many concurrent series.** A chain can publish several folletos at
+  once (e.g. Makro MM + GT + Sponsor). Each becomes its own magazine row with a
+  distinct `series_key`. Supersede / carry-forward are per series, so a new MM
+  does not kill GT prices. Within one magazine, `page_number` and
+  `page_image_url` keep pages straight.
 - **Refresh cadence.** Poll `GET /v1/revistas/pending` on the same cadence as
   alerts (~30 s while the Daily Review screen is open). Items rarely change
   outside of the reviewer's own actions, so optimistic updates are fine —

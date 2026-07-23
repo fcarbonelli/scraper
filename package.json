@@ -40,6 +40,10 @@
     "scrape:bulk": "tsx --env-file=.env scripts/import-urls.ts",
     "revistas:run": "tsx --env-file=.env scripts/scrape-revistas.ts",
     "revistas:doctor": "tsx --env-file=.env scripts/revistas-doctor.ts",
+    "revistas:reset": "tsx --env-file=.env scripts/reset-revista-chain.ts",
+    "revistas:reconcile": "tsx --env-file=.env scripts/revistas-reconcile-active.ts",
+    "revistas:dedupe-simulate": "tsx scripts/revistas-dedupe-simulate.ts",
+    "revistas:dedupe-report": "tsx --env-file=.env scripts/revistas-dedupe-cleanup.ts",
     "instore:carry-forward": "tsx --env-file=.env scripts/instore-carry-forward.ts",
     "lp:import": "tsx --env-file=.env scripts/import-price-list.ts",
     "apikey:create": "tsx --env-file=.env scripts/create-api-key.ts"

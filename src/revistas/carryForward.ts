@@ -1,37 +1,23 @@
 /**
  * Revista price carry-forward.
  *
- * Magazine ("revista") chains don't have a scraper adapter — their prices only
- * enter the system when a human approves a reviewed magazine item, which writes
- * ONE `price_snapshots` row on approval day. The daily scrape re-snapshots every
- * *regular* product every day, but a magazine product would otherwise have no
- * snapshot on the days between issues — so it would drop out of the daily client
- * export the day after approval.
+ * Magazine chains don't have a scraper adapter — their prices only enter when
+ * a human approves a reviewed magazine item. This step re-emits each product
+ * approved on every **current** (non-superseded) magazine — one per flyer
+ * SERIES — as a fresh RUN-LESS snapshot dated today, via the shared
+ * idempotent writer.
  *
- * This step fixes that: once per day it re-emits each active revista product's
- * latest known price as a fresh RUN-LESS snapshot dated today. Run-less
- * (`scrape_run_id = null`) means always client-visible — exactly like the
- * approval snapshot it copies — so magazine prices never depend on a daily run
- * being published (several days sit in `pending_review` for a while). Semantics:
- * **carry each product's latest approved price forward until a newer approved
- * price replaces it** (the `carry_latest` policy). A new issue's approvals
- * simply become the new latest price and carry forward from then; products
- * dropped from a new issue keep their last price until re-approved.
- *
- * Idempotent per day: a product that already has a snapshot dated today (either
- * approved today, or already carried today) is skipped, so re-running is safe
- * and a same-day approval is never duplicated.
+ * When a newer magazine B supersedes A within the same series, carry-forward
+ * of A's prices stops until items on B are approved. Concurrent series
+ * (Makro MM vs GT, Vital Folder vs Nonfood) keep emitting independently.
+ * See docs/REVISTA_REVIEW.md.
  */
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
-
-/** YYYY-MM-DD for a date in Argentina time (the business day the export uses). */
-function buenosAiresDate(d: Date): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Argentina/Buenos_Aires',
-  }).format(d);
-}
+import { buenosAiresDate } from './pricing.js';
+import { ensureTodayRevistaSnapshot } from './approve.js';
+import { getCurrentMagazineIds } from './store.js';
 
 /** Active supermarket ids flagged as magazine-sourced (config.source_type='revista'). */
 async function activeRevistaSupermarketIds(): Promise<string[]> {
@@ -47,72 +33,91 @@ async function activeRevistaSupermarketIds(): Promise<string[]> {
     .map((s) => s.id as string);
 }
 
-/** The subset of a snapshot we copy forward. */
 interface CarrySnapshot {
   id: number;
   price: number | null;
   list_price: number | null;
-  unit_price: number | null;
-  unit_price_per: string | null;
   offer_price_1: number | null;
-  offer_price_2: number | null;
   promotion_1: string | null;
-  promotion_2: string | null;
-  unit_discount: number | null;
   promotions: unknown;
-  in_stock: boolean | null;
-  currency: string | null;
   site_product_name: string | null;
   scraped_at: string;
 }
 
 const SNAPSHOT_COLS =
-  'id, price, list_price, unit_price, unit_price_per, offer_price_1, offer_price_2, ' +
-  'promotion_1, promotion_2, unit_discount, promotions, in_stock, currency, site_product_name, scraped_at';
+  'id, price, list_price, offer_price_1, promotion_1, promotions, site_product_name, scraped_at';
 
 export interface CarryForwardResult {
   supermarkets: number;
+  magazines: number;
   productsConsidered: number;
   carried: number;
   skippedAlreadyToday: number;
   skippedNoPrice: number;
+  skippedNoCurrentMagazine: number;
 }
 
 /**
- * Re-emit the latest known price for every active revista product as a fresh
- * run-less snapshot dated today (always client-visible; decoupled from the daily
- * publish gate).
+ * Re-emit the latest known price for every product approved on every current
+ * magazine (one per series) of each revista chain as today's run-less snapshot.
  */
 export async function carryForwardRevistaPrices(): Promise<CarryForwardResult> {
   const log = logger.child({ phase: 'revista-carry-forward' });
   const smIds = await activeRevistaSupermarketIds();
   const result: CarryForwardResult = {
     supermarkets: smIds.length,
+    magazines: 0,
     productsConsidered: 0,
     carried: 0,
     skippedAlreadyToday: 0,
     skippedNoPrice: 0,
+    skippedNoCurrentMagazine: 0,
   };
   if (smIds.length === 0) {
     log.debug('no active revista supermarkets — nothing to carry forward');
     return result;
   }
 
-  const today = buenosAiresDate(new Date());
+  const today = buenosAiresDate();
 
   for (const smId of smIds) {
-    const productsRes = await db
-      .from('supermarket_products')
-      .select('id')
-      .eq('supermarket_id', smId)
-      .eq('is_active', true);
-    if (productsRes.error) throw productsRes.error;
+    const currentMagazineIds = await getCurrentMagazineIds(smId);
+    if (currentMagazineIds.length === 0) {
+      result.skippedNoCurrentMagazine++;
+      continue;
+    }
+    result.magazines += currentMagazineIds.length;
 
-    for (const p of productsRes.data ?? []) {
+    // Only mappings with an approved review item on a CURRENT magazine
+    // (any active series for this chain).
+    const itemsRes = await db
+      .from('revista_review_items')
+      .select('resulting_supermarket_product_id')
+      .in('magazine_id', currentMagazineIds)
+      .eq('status', 'approved')
+      .not('resulting_supermarket_product_id', 'is', null);
+    if (itemsRes.error) throw itemsRes.error;
+
+    const productIds = [
+      ...new Set(
+        (itemsRes.data ?? [])
+          .map((r) => r.resulting_supermarket_product_id as string | null)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+
+    for (const productId of productIds) {
+      // Skip paused mappings (e.g. undone approvals).
+      const spRes = await db
+        .from('supermarket_products')
+        .select('id, is_active')
+        .eq('id', productId)
+        .maybeSingle();
+      if (spRes.error) throw spRes.error;
+      if (!spRes.data || spRes.data.is_active === false) continue;
+
       result.productsConsidered++;
-      const productId = p.id as string;
 
-      // Latest snapshot for this product (the price we carry forward).
       const snapRes = await db
         .from('price_snapshots')
         .select(SNAPSHOT_COLS)
@@ -123,45 +128,31 @@ export async function carryForwardRevistaPrices(): Promise<CarryForwardResult> {
       if (snapRes.error) throw snapRes.error;
       const snap = snapRes.data as CarrySnapshot | null;
 
-      // No usable price yet (never approved, or a price-less marker) → nothing
-      // to carry. Once the operator approves an item this fills in.
       if (!snap || snap.price == null) {
         result.skippedNoPrice++;
         continue;
       }
 
-      // Already has a snapshot dated today (approved today, or carried earlier
-      // today) → don't duplicate.
-      if (buenosAiresDate(new Date(snap.scraped_at)) === today) {
+      const snapDay = buenosAiresDate(new Date(snap.scraped_at));
+      if (snapDay === today) {
         result.skippedAlreadyToday++;
         continue;
       }
 
-      const insErr = (
-        await db.from('price_snapshots').insert({
-          supermarket_product_id: productId,
-          // Run-less: always client-visible, never gated on a daily run publish.
-          scrape_run_id: null,
-          scraped_at: new Date().toISOString(),
-          price: snap.price,
-          list_price: snap.list_price,
-          unit_price: snap.unit_price,
-          unit_price_per: snap.unit_price_per,
-          offer_price_1: snap.offer_price_1,
-          offer_price_2: snap.offer_price_2,
-          promotion_1: snap.promotion_1,
-          promotion_2: snap.promotion_2,
-          unit_discount: snap.unit_discount,
-          promotions: snap.promotions ?? [],
-          in_stock: snap.in_stock ?? true,
-          currency: snap.currency ?? 'ARS',
-          tier_used: 'ai',
-          status: 'ok',
-          raw_data: { source: 'revista-carry-forward', from_snapshot_id: snap.id },
-          site_product_name: snap.site_product_name,
-        })
-      ).error;
-      if (insErr) throw insErr;
+      // Re-emit via the shared writer so we never create a second row for today
+      // if something else wrote one between the check and the insert.
+      await ensureTodayRevistaSnapshot({
+        supermarketProductId: productId,
+        prices: {
+          price: snap.list_price ?? snap.price,
+          promoPrice: snap.offer_price_1,
+          promoText: snap.promotion_1,
+        },
+        siteProductName: snap.site_product_name,
+        tierUsed: 'ai',
+        rawSource: 'revista-carry-forward',
+        fromSnapshotId: snap.id,
+      });
       result.carried++;
     }
   }

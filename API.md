@@ -1510,6 +1510,14 @@ are fully reviewed are omitted so the banner isn't raised on an empty queue — 
 `GET /v1/revistas` to see every magazine regardless of state. Pass
 `?include_empty=true` to bypass the filter (returns all `in_review` magazines).
 
+Every magazine header also includes `series_key` (flyer series within the chain,
+e.g. `mm` / `gt` / `folder-resto` / `default`) and `superseded_by` /
+`superseded_at` (null while the issue is still current **for its series**). When
+a newer issue of the **same series** arrives, older magazines of that series get
+`superseded_by` set to the new magazine id — carry-forward of their approved
+prices stops until a human approves the new queue. Concurrent series
+(Makro MM vs GT, Vital Folder vs Nonfood) stay current independently.
+
 ### `GET /v1/revistas/:magazineId`
 
 A single magazine header + counts (same item shape as `pending`).
@@ -1540,6 +1548,42 @@ price), `404 NOT_FOUND`, `409 CONFLICT` (already reviewed).
 ### `POST /v1/revistas/items/:itemId/reject`
 
 Discard an item. Body: `{ "note"?, "reviewed_by"? }`. Errors: `404`, `409`.
+
+### `GET /v1/revistas/items`
+
+Cross-magazine paginated list (`status`, `supermarket_id`, `search`,
+`current_only`). **`current_only` defaults to `true`**: only items whose
+magazine has `superseded_by IS NULL` (approvals on superseded flyers are
+hidden). Pass `current_only=false` for full history. Each row includes
+`supermarket_name`, `magazine_label`, `source_url`, `magazine_status`,
+`series_key`, `superseded_by`. Effective prices in `extracted`. Fixture:
+`revista-items-all.json`.
+
+### `PATCH /v1/revistas/items/:itemId`
+
+Edit an approved item (`product_id` / `price` / `promo_price` / `promo_text` /
+`note`). Updates today's snapshot in-place. Rematch = undo + re-approve.
+Fixture: `revista-update.json`.
+
+### `DELETE /v1/revistas/items/:itemId`
+
+Undo approval → `pending`; deletes snapshot + carry chain. Fixture:
+`revista-delete.json`.
+
+### `GET /v1/revistas/ean-collisions`
+
+Same-EAN / distinct-product warnings for a day (default today BA). Fixture:
+`revista-ean-collisions.json`.
+
+### `GET /v1/revistas/duplicates`
+
+Same-mapping / same-day snapshot duplicates (default last 3 BA days). Fixture:
+`revista-duplicates.json`.
+
+### `POST /v1/revistas/duplicates/resolve`
+
+Collapse one duplicate group (`supermarket_product_id` + `day`). Keeps offer
+(else newest), deletes losers.
 
 ### `POST /v1/revistas/:magazineId/items`
 

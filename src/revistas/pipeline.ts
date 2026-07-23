@@ -34,8 +34,10 @@ import {
   findMagazineByHash,
   insertReviewItems,
   setMagazineStatus,
+  supersedePreviousMagazines,
   type ReviewItemInput,
 } from './store.js';
+import { purgeTodayRevistaSnapshotsNotApprovedOn, pauseSupersededSeriesMappings } from './approve.js';
 
 const StrategySchema = z.object({
   strategy: z.enum(['html-pdf-links', 'pubhtml5', 'publuu']),
@@ -115,6 +117,7 @@ async function processCandidate(
       fileSize: source.fileSize,
       pageCount: source.pages.length,
       scrapeRunId: opts.scrapeRunId ?? null,
+      seriesKey: candidate.seriesKey,
     });
 
     // 1. Vision: read every page (bounded concurrency).
@@ -179,6 +182,24 @@ async function processCandidate(
       .eq('id', magazineId);
 
     await setMagazineStatus(magazineId, 'in_review');
+
+    // New issue supersedes prior magazines of the SAME SERIES: stop carrying
+    // that series' old prices and clear today's export until a human approves B.
+    // Other concurrent series (e.g. Makro GT while MM just arrived) are untouched.
+    const superseded = await supersedePreviousMagazines(sm.id, magazineId);
+    if (superseded.length > 0) {
+      const purged = await purgeTodayRevistaSnapshotsNotApprovedOn(sm.id, magazineId);
+      const paused = await pauseSupersededSeriesMappings(sm.id, magazineId);
+      log.info(
+        {
+          seriesKey: candidate.seriesKey,
+          superseded: superseded.length,
+          purgedToday: purged,
+          pausedMappings: paused,
+        },
+        'revista: previous magazines superseded (same series)',
+      );
+    }
 
     await createAlert({
       severity: 'info',

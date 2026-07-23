@@ -4,14 +4,17 @@
       "id": "f1a2b3c4-d5e6-4789-9abc-def012345678",
       "supermarket_id": "makro",
       "supermarket_name": "Makro",
-      "label": "Makro Ofertas 2da quincena Junio",
+      "label": "Ofertas semanales del 23/07 al 29/07",
       "scrape_run_id": "8b1c5e30-3c8a-4933-8c11-eeff99887766",
       "source_strategy": "html-pdf-links",
-      "source_url": "https://makro-com-ar.b-cdn.net/wp-content/uploads/jun2mm.pdf",
+      "source_url": "https://makro-com-ar.b-cdn.net/wp-content/uploads/1-MM-JUL4.pdf",
       "page_count": 57,
       "status": "in_review",
       "counts": { "total": 8, "pending": 8, "approved": 0, "rejected": 0 },
-      "detected_at": "2026-06-29T09:05:00.000Z"
+      "detected_at": "2026-06-29T09:05:00.000Z",
+      "series_key": "mm",
+      "superseded_by": null,
+      "superseded_at": null
     }
   ],
   "meta": { "ts": "2026-06-29T09:06:11.221Z" }
