@@ -117,6 +117,7 @@ async function processCandidate(
       fileSize: source.fileSize,
       pageCount: source.pages.length,
       scrapeRunId: opts.scrapeRunId ?? null,
+      seriesKey: candidate.seriesKey,
     });
 
     // 1. Vision: read every page (bounded concurrency).
@@ -182,14 +183,19 @@ async function processCandidate(
 
     await setMagazineStatus(magazineId, 'in_review');
 
-    // New issue supersedes prior magazines for this chain: stop carrying A's
-    // prices and clear today's export until a human approves B.
+    // New issue supersedes prior magazines of the SAME SERIES: stop carrying
+    // that series' old prices and clear today's export until a human approves B.
+    // Other concurrent series (e.g. Makro GT while MM just arrived) are untouched.
     const superseded = await supersedePreviousMagazines(sm.id, magazineId);
     if (superseded.length > 0) {
       const purged = await purgeTodayRevistaSnapshotsNotApprovedOn(sm.id, magazineId);
       log.info(
-        { superseded: superseded.length, purgedToday: purged },
-        'revista: previous magazines superseded',
+        {
+          seriesKey: candidate.seriesKey,
+          superseded: superseded.length,
+          purgedToday: purged,
+        },
+        'revista: previous magazines superseded (same series)',
       );
     }
 

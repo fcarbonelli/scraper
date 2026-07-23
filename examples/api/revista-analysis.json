@@ -12,6 +12,7 @@
       "status": "in_review",
       "counts": { "total": 3, "pending": 3, "approved": 0, "rejected": 0 },
       "detected_at": "2026-07-12T09:00:38.029Z",
+      "series_key": "mm",
       "superseded_by": null,
       "superseded_at": null
     },

@@ -36,7 +36,7 @@ function line(): void {
 async function magazineTally(): Promise<void> {
   const { data, error } = await db
     .from('revista_magazines')
-    .select('id, supermarket_id, label, status, page_count, scrape_run_id, detected_at, metadata')
+    .select('id, supermarket_id, label, status, page_count, scrape_run_id, detected_at, series_key, superseded_by, metadata')
     .order('detected_at', { ascending: false });
   if (error) throw error;
   const mags = data ?? [];
@@ -58,8 +58,10 @@ async function magazineTally(): Promise<void> {
       page_images?: Array<{ page: number; url: string }>;
     };
     const imgs = meta.page_images?.length ?? 0;
+    const series = (m as { series_key?: string | null }).series_key ?? '?';
+    const sup = m.superseded_by ? 'SUPERSEDED' : 'CURRENT';
     console.log(
-      `  • [${m.status}] ${m.supermarket_id} — "${m.label}" — pages=${m.page_count} ` +
+      `  • [${m.status}/${sup}] ${m.supermarket_id} series=${series} — "${m.label}" — pages=${m.page_count} ` +
         `items=${count ?? 0} matched=${meta.matched ?? '?'}/${meta.total ?? '?'} imgs=${imgs} ` +
         `detected=${m.detected_at} id=${m.id}`,
     );
@@ -83,7 +85,7 @@ async function checkSupermarket(sm: RevistaSupermarket): Promise<void> {
       const state = existing ? `DB row status='${existing.status}'` : 'NOT in DB yet (never processed)';
       console.log(`    - "${c.label}"`);
       console.log(`      url=${c.sourceUrl}`);
-      console.log(`      hash=${c.hash} → ${state}`);
+      console.log(`      series=${c.seriesKey} hash=${c.hash} → ${state}`);
     }
   } catch (err) {
     console.log(`  ❌ DISCOVERY THREW: ${err instanceof Error ? err.message : String(err)}`);

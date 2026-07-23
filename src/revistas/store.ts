@@ -22,6 +22,11 @@ export interface MagazineRow {
   /** Newer magazine that replaced this issue (NULL = still current). */
   superseded_by: string | null;
   superseded_at: string | null;
+  /**
+   * Flyer series within the chain (e.g. 'mm', 'gt', 'folder-resto').
+   * Supersede / carry-forward scope to (supermarket_id, series_key).
+   */
+  series_key: string;
 }
 
 /** Look up a magazine by its dedup hash (the "did it change?" check). */
@@ -48,6 +53,8 @@ export interface CreateMagazineArgs {
   fileSize: number;
   pageCount: number;
   scrapeRunId: string | null;
+  /** Flyer series key; defaults to 'default' for single-series chains. */
+  seriesKey?: string;
 }
 
 /**
@@ -75,6 +82,11 @@ export async function createMagazine(args: CreateMagazineArgs): Promise<string> 
         status: 'processing',
         scrape_run_id: args.scrapeRunId,
         reviewed_at: null,
+        series_key: args.seriesKey ?? 'default',
+        // A --force reprocess of the current issue must clear any stale
+        // supersede pointer so it becomes "current" again for its series.
+        superseded_by: null,
+        superseded_at: null,
       },
       { onConflict: 'supermarket_id,content_hash' },
     )
@@ -95,11 +107,16 @@ export async function setMagazineStatus(
 }
 
 /**
- * Mark every older (non-superseded) magazine for this chain as superseded by
- * `newMagazineId`. Called when a new issue reaches `in_review`. Only magazines
- * with `detected_at` strictly before the new one are marked — so a `--force`
- * reprocess of an old hash cannot demote a newer current issue. Returns the
- * ids that were marked (empty when this is the first / oldest issue).
+ * Mark every older (non-superseded) magazine of the SAME SERIES for this chain
+ * as superseded by `newMagazineId`. Called when a new issue reaches `in_review`.
+ *
+ * Scoping by series_key is required: Makro/Vital publish several concurrent
+ * flyer series, and a new MM must not kill GT / Folder prices.
+ *
+ * Only magazines with `detected_at` strictly before the new one are marked —
+ * so a `--force` reprocess of an old hash cannot demote a newer current issue.
+ * Returns the ids that were marked (empty when this is the first / oldest
+ * issue of that series).
  */
 export async function supersedePreviousMagazines(
   supermarketId: string,
@@ -107,15 +124,18 @@ export async function supersedePreviousMagazines(
 ): Promise<string[]> {
   const { data: neu, error: neuErr } = await db
     .from('revista_magazines')
-    .select('id, detected_at')
+    .select('id, detected_at, series_key')
     .eq('id', newMagazineId)
     .single();
   if (neuErr) throw neuErr;
+
+  const seriesKey = (neu.series_key as string | null) ?? 'default';
 
   const { data, error } = await db
     .from('revista_magazines')
     .select('id')
     .eq('supermarket_id', supermarketId)
+    .eq('series_key', seriesKey)
     .is('superseded_by', null)
     .neq('id', newMagazineId)
     .lt('detected_at', neu.detected_at as string);
@@ -136,20 +156,27 @@ export async function supersedePreviousMagazines(
 }
 
 /**
- * Current magazine for a chain = the one with superseded_by IS NULL
- * (newest wins if somehow more than one; should be at most one after supersede).
+ * Current magazines for a chain = every row with superseded_by IS NULL
+ * (one per series after supersede). Prefer {@link getCurrentMagazineIds}.
  */
 export async function getCurrentMagazineId(supermarketId: string): Promise<string | null> {
+  const ids = await getCurrentMagazineIds(supermarketId);
+  return ids[0] ?? null;
+}
+
+/**
+ * All current (non-superseded) magazines for a chain — one per flyer series.
+ * Carry-forward iterates these so every active series keeps emitting prices.
+ */
+export async function getCurrentMagazineIds(supermarketId: string): Promise<string[]> {
   const { data, error } = await db
     .from('revista_magazines')
     .select('id')
     .eq('supermarket_id', supermarketId)
     .is('superseded_by', null)
-    .order('detected_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('detected_at', { ascending: false });
   if (error) throw error;
-  return (data?.id as string | undefined) ?? null;
+  return (data ?? []).map((r) => r.id as string);
 }
 
 /** Replace any existing review items for a magazine (idempotent reprocessing). */

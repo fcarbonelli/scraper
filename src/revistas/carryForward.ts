@@ -3,18 +3,21 @@
  *
  * Magazine chains don't have a scraper adapter — their prices only enter when
  * a human approves a reviewed magazine item. This step re-emits each product
- * approved on the **current** (non-superseded) magazine as a fresh RUN-LESS
- * snapshot dated today, via the shared idempotent writer.
+ * approved on every **current** (non-superseded) magazine — one per flyer
+ * SERIES — as a fresh RUN-LESS snapshot dated today, via the shared
+ * idempotent writer.
  *
- * When a newer magazine B supersedes A, carry-forward of A's prices stops
- * until items on B are approved. See docs/REVISTA_REVIEW.md.
+ * When a newer magazine B supersedes A within the same series, carry-forward
+ * of A's prices stops until items on B are approved. Concurrent series
+ * (Makro MM vs GT, Vital Folder vs Nonfood) keep emitting independently.
+ * See docs/REVISTA_REVIEW.md.
  */
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { buenosAiresDate } from './pricing.js';
 import { ensureTodayRevistaSnapshot } from './approve.js';
-import { getCurrentMagazineId } from './store.js';
+import { getCurrentMagazineIds } from './store.js';
 
 /** Active supermarket ids flagged as magazine-sourced (config.source_type='revista'). */
 async function activeRevistaSupermarketIds(): Promise<string[]> {
@@ -46,6 +49,7 @@ const SNAPSHOT_COLS =
 
 export interface CarryForwardResult {
   supermarkets: number;
+  magazines: number;
   productsConsidered: number;
   carried: number;
   skippedAlreadyToday: number;
@@ -54,14 +58,15 @@ export interface CarryForwardResult {
 }
 
 /**
- * Re-emit the latest known price for every product approved on the current
- * magazine of each revista chain as today's run-less snapshot.
+ * Re-emit the latest known price for every product approved on every current
+ * magazine (one per series) of each revista chain as today's run-less snapshot.
  */
 export async function carryForwardRevistaPrices(): Promise<CarryForwardResult> {
   const log = logger.child({ phase: 'revista-carry-forward' });
   const smIds = await activeRevistaSupermarketIds();
   const result: CarryForwardResult = {
     supermarkets: smIds.length,
+    magazines: 0,
     productsConsidered: 0,
     carried: 0,
     skippedAlreadyToday: 0,
@@ -76,17 +81,19 @@ export async function carryForwardRevistaPrices(): Promise<CarryForwardResult> {
   const today = buenosAiresDate();
 
   for (const smId of smIds) {
-    const currentMagazineId = await getCurrentMagazineId(smId);
-    if (!currentMagazineId) {
+    const currentMagazineIds = await getCurrentMagazineIds(smId);
+    if (currentMagazineIds.length === 0) {
       result.skippedNoCurrentMagazine++;
       continue;
     }
+    result.magazines += currentMagazineIds.length;
 
-    // Only mappings with an approved review item on the CURRENT magazine.
+    // Only mappings with an approved review item on a CURRENT magazine
+    // (any active series for this chain).
     const itemsRes = await db
       .from('revista_review_items')
       .select('resulting_supermarket_product_id')
-      .eq('magazine_id', currentMagazineId)
+      .in('magazine_id', currentMagazineIds)
       .eq('status', 'approved')
       .not('resulting_supermarket_product_id', 'is', null);
     if (itemsRes.error) throw itemsRes.error;

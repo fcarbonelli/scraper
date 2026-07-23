@@ -3,12 +3,62 @@
 ## Offline (no DB) — start here
 
 ```bash
-npm test -- src/revistas/pricing.test.ts
+npm test -- src/revistas/pricing.test.ts src/revistas/series.test.ts
 npm run revistas:dedupe-simulate
 ```
 
 The simulator walks `examples/revistas/dedupe-cases.json` (copied from real
 Rosental export screenshots) and prints keep/drop/collision decisions.
+
+## Series-scoped carry-forward (migration 015)
+
+Apply **`migrations/015_revista_series.sql`** in the Supabase SQL editor first
+(adds `series_key`, re-supersedes per series). Then:
+
+```bash
+# 1. Soft-reset Rosental for UI re-test (keeps scanned items; clears client export)
+npm run revistas:reset -- --super=rosental --dry-run
+npm run revistas:reset -- --super=rosental
+
+# 2. Cheap discovery (no AI): confirm series keys + new Makro/Vital PDFs
+npm run revistas:doctor
+
+# 3. Process new Vital/Makro issues (use --pages to cap AI cost)
+npx tsx --env-file=.env scripts/scrape-revistas.ts --super=makro --pages=1-3
+npx tsx --env-file=.env scripts/scrape-revistas.ts --super=vital --pages=1-3
+
+# Expect: one CURRENT magazine per series (not one-per-chain).
+# 4. After approving items on 2 series, carry-forward must emit BOTH:
+npx tsx --env-file=.env scripts/scrape-revistas.ts --carry-forward
+npx tsx --env-file=.env scripts/revista-approved-count.ts
+
+# 5. Client view parity (same day BA):
+npx tsx --env-file=.env scripts/client-preview-count.ts --date=YYYY-MM-DD --chain=ROSENTAL
+```
+
+### Rosental UI smoke (after soft-reset)
+
+With `npm run dev:api` + dashboard pointing at it:
+
+1. `GET /v1/revistas/pending` → Rosental with pending items.
+2. Approve / reject / pick other product / edit (`PATCH`) / undo (`DELETE`).
+3. Confirm run-less snapshot (`scrape_run_id` null, `raw_data.source` =
+   `revista`) and that the row appears in `client_base` / vista cliente.
+
+Do **not** `--force` re-scan Rosental unless `config.js` actually changed (new
+quincena). Dedup now fingerprints PubHTML5 `config.js` page list, not just URL.
+
+### EC2 gap diagnosis (why new PDFs stop landing)
+
+If `revistas:doctor` shows live PDFs as `NOT in DB yet` for several days:
+
+1. SSH → `pm2 describe orchestrator` / `pm2 logs orchestrator --lines 200`
+2. Confirm deploy is current (`git log -1` on the server, or last Actions deploy)
+3. Look for `revista check` / `revista discovery` timeouts or errors
+4. Magazines stuck in `status=processing` retry on the next run; or
+   `--force` that hash once
+5. Manual backfill: `npm run revistas:run` (or `--super=makro`) on the box /
+   locally against the same DB
 
 ## Against a shared / prod-like Supabase (read-only first)
 
@@ -32,10 +82,11 @@ Rosental export screenshots) and prints keep/drop/collision decisions.
 
 ## Deploy order
 
-1. Apply migration 013 in Supabase SQL editor.
+1. Apply migrations **013 + 014 + 015** in Supabase SQL editor (015 = `series_key`).
 2. Merge this backend to `main` → EC2 auto-deploys via GitHub Actions.
-3. Deploy scraper-dashboard after the API is live (so PATCH/DELETE/duplicates
-   don't 404).
+3. Deploy scraper-dashboard after the API is live (so PATCH/DELETE/duplicates /
+   `series_key` don't 404 / look stale).
+4. Soft-reset Rosental + QA carry-forward per series (commands above).
 
 ## Out of scope for this pass
 
