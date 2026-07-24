@@ -1,29 +1,34 @@
 /**
- * MercadoLibre (Supermercado) adapter — official Products API.
+ * MercadoLibre adapter — Ecomodico seller only, via the official Products API.
  *
- * The public site is aggressively anti-bot, so we go through ML's official
- * REST API (api.mercadolibre.com) using OAuth tokens managed by
- * `mercadolibre-auth.ts`. Two endpoints do everything we need:
+ * Per client instructions we track ONLY the products sold by the seller
+ * "ECOMODICO" (seller_id 179907718 — the store at
+ * listado.mercadolibre.com.ar/tienda/ecomodico). A MercadoLibre catalog page
+ * aggregates many sellers, and the headline/buy-box price is whoever is winning
+ * — which is usually NOT Ecomodico. So we never read the catalog buy-box; we
+ * read Ecomodico's OWN offer.
+ *
+ * All of this comes from ML's official REST API (api.mercadolibre.com) using
+ * OAuth tokens from `mercadolibre-auth.ts` — no headless browser, no proxy
+ * (the API is not the anti-bot storefront and works fine from the datacenter):
  *
  *   - Discovery by EAN:
  *       GET /products/search?status=active&site_id=MLA&product_identifier=<ean>
- *     Returns the matching *catalog product* (PDP), e.g. id "MLA14719808".
- *     Catalog products are unique per GTIN, so an EAN maps to at most one.
+ *     Maps a GTIN to at most one *catalog product* (PDP), e.g. "MLA14719808".
+ *     We then keep it ONLY if Ecomodico offers it (see below).
  *
- *   - Price/stock for a catalog product:
- *       GET /products/<id>
- *     The `buy_box_winner` object holds the currently-winning offer's price,
- *     currency and stock. When no offer is competing it's null (we then fall
- *     back to the `buy_box_winner_price_range` min, and otherwise report the
- *     product as out of stock).
+ *   - Ecomodico's price/stock for a catalog product:
+ *       GET /products/<catalogId>/items?seller_id=179907718
+ *     Returns Ecomodico's single offer (item_id, price, currency) when they
+ *     sell it, or HTTP 404 when they don't — an exact, one-call check that
+ *     needs no pagination even on 100-seller catalog products.
  *
- * The stable `external_id` we persist is the catalog product id (MLA…). The
+ * The stable `external_id` we persist is the catalog product id (MLA…); the
  * canonical URL is the catalog PDP `https://www.mercadolibre.com.ar/p/<id>`.
  */
 
 import { ScrapeError } from '../shared/errors.js';
 import { getAccessToken } from './mercadolibre-auth.js';
-import { fetchMlPdp } from './mercadolibre-browser.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -36,6 +41,14 @@ import type {
 const API_BASE = 'https://api.mercadolibre.com';
 const SITE_ID = 'MLA'; // Argentina
 const SITE_HOST = 'www.mercadolibre.com.ar';
+
+/**
+ * The only seller we track on MercadoLibre. Nickname "ECOMODICO"
+ * (listado.mercadolibre.com.ar/tienda/ecomodico). To re-derive it, resolve any
+ * of their listings' seller via `GET /users/<seller_id>` and confirm the
+ * nickname, or read `seller_id` off `GET /products/<catalogId>/items`.
+ */
+const ECOMODICO_SELLER_ID = 179907718;
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const SEARCH_TIMEOUT_MS = 20_000;
@@ -55,17 +68,19 @@ interface SearchResponse {
   results?: SearchResultItem[];
 }
 
-interface BuyBoxWinner {
+/** One seller's offer on a catalog product (`/products/<id>/items`). */
+interface ProductItemOffer {
   item_id?: string;
   seller_id?: number;
   price?: number;
   currency_id?: string;
+  original_price?: number;
   available_quantity?: number;
-  condition?: string;
 }
 
-interface PriceRangeEntry {
-  price?: number;
+interface ProductItemsResponse {
+  paging?: { total?: number };
+  results?: ProductItemOffer[];
 }
 
 interface ProductAttribute {
@@ -78,19 +93,22 @@ interface ProductPicture {
   secure_url?: string;
 }
 
+/** Catalog product detail (`/products/<id>`) — used for metadata only. */
 interface ProductDetail {
   id?: string;
   name?: string;
   status?: string;
   permalink?: string;
   domain_id?: string;
-  buy_box_winner?: BuyBoxWinner | null;
-  buy_box_winner_price_range?: {
-    min?: PriceRangeEntry;
-    max?: PriceRangeEntry;
-  } | null;
   attributes?: ProductAttribute[];
   pictures?: ProductPicture[];
+}
+
+/** Ecomodico's resolved offer for a catalog product. */
+interface EcomodicoOffer {
+  itemId: string | undefined;
+  price: number;
+  currency: string;
 }
 
 // =============================================================================
@@ -250,6 +268,44 @@ function extractProductInfo(product: ProductDetail): ProductInfo {
   return productInfo;
 }
 
+/**
+ * Fetch Ecomodico's own offer for a catalog product, or null when Ecomodico
+ * doesn't sell it. The `seller_id` filter returns exactly Ecomodico's offer
+ * (never other sellers) and 404s when they have none — so we map that 404 to
+ * `null` instead of letting it bubble as an error.
+ */
+export async function fetchEcomodicoOffer(
+  catalogId: string,
+  signal: AbortSignal | undefined,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<EcomodicoOffer | null> {
+  let json: unknown;
+  try {
+    json = await fetchMlJson(
+      `/products/${encodeURIComponent(catalogId)}/items?seller_id=${ECOMODICO_SELLER_ID}`,
+      signal,
+      timeoutMs,
+    );
+  } catch (err) {
+    // 404 → Ecomodico has no offer (or the catalog product is gone). Both mean
+    // "no Ecomodico price"; the caller decides how to classify it.
+    if (err instanceof ScrapeError && err.type === 'product_not_found') return null;
+    throw err;
+  }
+
+  const offer = (json as ProductItemsResponse)?.results?.[0];
+  if (!offer || offer.seller_id !== ECOMODICO_SELLER_ID) return null;
+
+  const price = typeof offer.price === 'number' ? offer.price : NaN;
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  return {
+    itemId: offer.item_id,
+    price,
+    currency: offer.currency_id || 'ARS',
+  };
+}
+
 // =============================================================================
 // Adapter methods
 // =============================================================================
@@ -263,11 +319,12 @@ async function resolveExternalId(canonicalUrl: string): Promise<string> {
 }
 
 /**
- * Daily scrape: read the price from the public product page via a real browser.
+ * Daily scrape: read ECOMODICO's own price for the catalog product via the API.
  *
- * The catalog API doesn't expose a price for this product category (buy-box is
- * null and the listings search is 403-gated), so pricing comes from the PDP.
- * We enrich it with catalog metadata from the API (one cheap GET) when possible.
+ * We do NOT use the catalog buy-box (that's whatever seller is winning). If
+ * Ecomodico no longer offers the product, we surface `product_not_found` — the
+ * daily list is pruned to Ecomodico-sold products, so a disappearance means
+ * they stopped selling it (or it went out of stock).
  */
 async function scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
   const id = ctx.externalId?.trim();
@@ -275,18 +332,22 @@ async function scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     throw new ScrapeError('product_not_found', 'MercadoLibre scrape called without an external_id');
   }
 
-  const pdp = await fetchMlPdp(id, ctx.logger, ctx.signal);
+  const offer = await fetchEcomodicoOffer(id, ctx.signal, REQUEST_TIMEOUT_MS);
+  if (!offer) {
+    throw new ScrapeError(
+      'product_not_found',
+      `MercadoLibre: Ecomodico has no active offer for catalog product ${id}`,
+    );
+  }
 
-  // Best-effort metadata enrichment from the API (brand/EAN/image). Never let a
-  // metadata hiccup fail a scrape that already has a valid price.
+  // Best-effort metadata enrichment from the catalog API (name/brand/EAN/image).
+  // Never let a metadata hiccup fail a scrape that already has a valid price.
   let productInfo: ProductInfo = {};
-  if (pdp.name) productInfo.name = pdp.name;
-  if (pdp.imageUrl) productInfo.imageUrl = pdp.imageUrl;
   try {
     const json = await fetchMlJson(`/products/${encodeURIComponent(id)}`, ctx.signal, REQUEST_TIMEOUT_MS);
     const product = json as ProductDetail;
     if (product && typeof product === 'object' && product.id) {
-      productInfo = { ...extractProductInfo(product), ...productInfo };
+      productInfo = extractProductInfo(product);
     }
   } catch {
     /* metadata is optional — price already in hand */
@@ -294,13 +355,14 @@ async function scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
 
   const promotions: Promotion[] = [];
   return {
-    price: pdp.price,
-    inStock: pdp.inStock,
-    currency: pdp.currency,
-    tierUsed: 'html',
+    price: offer.price,
+    // A returned offer is a live, buyable listing → in stock.
+    inStock: true,
+    currency: offer.currency,
+    tierUsed: 'api',
     promotions,
     productInfo,
-    rawData: { source: 'pdp', productId: id },
+    rawData: { source: 'ecomodico_offer', productId: id, itemId: offer.itemId },
   };
 }
 
@@ -324,8 +386,9 @@ async function probe(ctx: ScrapeContext): Promise<ProductInfo> {
 
 /**
  * EAN discovery via the catalog `product_identifier` search. A GTIN maps to at
- * most one active catalog product, so we take the first result. Returns its
- * canonical PDP URL plus the pre-resolved external_id (the catalog id).
+ * most one active catalog product. We only return it when ECOMODICO actually
+ * sells that product — otherwise we'd re-pollute the list with non-Ecomodico
+ * catalog products (e.g. via the weekly coverage sweep) right after pruning.
  */
 async function searchByEan(ean: string, signal?: AbortSignal): Promise<EanSearchResult | null> {
   const digits = ean.replace(/\D/g, '');
@@ -348,6 +411,10 @@ async function searchByEan(ean: string, signal?: AbortSignal): Promise<EanSearch
   const results = (json as SearchResponse)?.results ?? [];
   const match = results.find((r) => r.id) ?? undefined;
   if (!match?.id) return null;
+
+  // Keep the mapping only if Ecomodico offers this catalog product.
+  const offer = await fetchEcomodicoOffer(match.id, signal, SEARCH_TIMEOUT_MS);
+  if (!offer) return null;
 
   return { url: urlForId(match.id), externalId: match.id };
 }
