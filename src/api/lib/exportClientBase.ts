@@ -19,6 +19,7 @@ import type { Response } from 'express';
 import { db } from '../../shared/db.js';
 import { ApiError } from './apiError.js';
 import { suplenciaFor } from '../../shared/suplencias.js';
+import { pesoEnCategoriaFor } from '../../shared/pesoEnCategoria.js';
 
 /** Filters shared by the pricing and export endpoints. */
 export interface ClientBaseFilters {
@@ -70,6 +71,9 @@ const COLUMNS: { key: string; header: string }[] = [
   { key: 'PRECIO_TGT_MAY', header: 'PRECIO_TGT_MAY' },
   { key: 'IDX_VS_COMPETENCIA', header: 'IDX_VS_COMPETENCIA' },
   { key: 'PRECIO_PRODUCTO_EN_CATEGORIA', header: 'PRECIO_PRODUCTO_EN_CATEGORIA' },
+  // Hardcoded client reference (category weight 0..1), stamped by EAN in
+  // fetchAllClientBase — not a real column of the client_base view.
+  { key: 'PESO_PRODUCTO_EN_CATEGORIA', header: 'PESO_PRODUCTO_EN_CATEGORIA' },
 ];
 
 type ClientBaseRow = Record<string, unknown>;
@@ -122,10 +126,13 @@ export async function fetchAllClientBase(
     if (error) throw error;
     if (!data || data.length === 0) break;
 
-    // Stamp the hardcoded SUPLENCIAS flag onto each row by EAN so both the
-    // xlsx and csv writers (which read row[c.key]) pick it up like any column.
+    // Stamp the hardcoded reference columns onto each row by EAN so both the
+    // xlsx and csv writers (which read row[c.key]) pick them up like any column.
+    // PESO stays a number (or null) so the xlsx writes a real numeric cell.
     for (const row of data as ClientBaseRow[]) {
-      row['SUPLENCIAS'] = suplenciaFor(row['EAN'] == null ? '' : String(row['EAN']));
+      const ean = row['EAN'] == null ? '' : String(row['EAN']);
+      row['SUPLENCIAS'] = suplenciaFor(ean);
+      row['PESO_PRODUCTO_EN_CATEGORIA'] = pesoEnCategoriaFor(ean);
     }
 
     all.push(...(data as ClientBaseRow[]));

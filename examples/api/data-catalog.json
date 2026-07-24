@@ -1,0 +1,119 @@
+{
+  "data": [
+    {
+      "productId": "50bb31b8-5b6d-4a37-8905-ff3de2c6ffb9",
+      "ean": "7793253006709",
+      "name": "Lavandina Original Ayudin 2L",
+      "descriptionForms": "LAVANDINA AYUDIN ORIGINAL 2L",
+      "category": "Lavandinas Liquidas",
+      "subcategory": "REGULAR",
+      "brand": "AYUDIN",
+      "manufacturer": "GRUPO AYUDIN",
+      "format": "2L",
+      "variety": "ORIGINAL",
+      "unit": "2 Litro",
+      "imageUrl": "https://static.cotodigital.com.ar/sitios/cdigi/productos/00591050.jpg",
+      "chainsActive": 6,
+      "chainsPaused": 1,
+      "chainsTotal": 7,
+      "chains": [
+        {
+          "id": "carrefour",
+          "name": "Carrefour Argentina",
+          "cadenaDisplayName": "CARREFOUR",
+          "canal": "SPM NACIONAL",
+          "status": "active",
+          "url": "https://www.carrefour.com.ar/lavandina-ayudin-original-2l/p"
+        },
+        {
+          "id": "coto",
+          "name": "Coto Digital",
+          "cadenaDisplayName": "COTO",
+          "canal": "SPM NACIONAL",
+          "status": "active",
+          "url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/lavandina-ayudin/_/A-00591050"
+        },
+        {
+          "id": "jumbo",
+          "name": "Jumbo",
+          "cadenaDisplayName": "JUMBO",
+          "canal": "SPM NACIONAL",
+          "status": "paused",
+          "url": "https://www.jumbo.com.ar/lavandina-ayudin-original-2-l/p"
+        }
+      ],
+      "inLatestExport": true,
+      "latestExportChains": 6,
+      "priceMin": 2450.0,
+      "priceMax": 3120.5
+    },
+    {
+      "productId": "11d2cabb-0e87-49ad-bf86-c0c87a8b2a91",
+      "ean": "7790895000478",
+      "name": "Coca Cola Original 2.25 L",
+      "descriptionForms": "GASEOSA COCA COLA 2.25L",
+      "category": "Gaseosas",
+      "subcategory": "COLAS",
+      "brand": "Coca-Cola",
+      "manufacturer": "COCA-COLA",
+      "format": "2.25L",
+      "variety": "ORIGINAL",
+      "unit": "2.25 L",
+      "imageUrl": "https://static.cotodigital.com.ar/sitios/cdigi/productos/00012345.jpg",
+      "chainsActive": 4,
+      "chainsPaused": 0,
+      "chainsTotal": 4,
+      "chains": [
+        {
+          "id": "carrefour",
+          "name": "Carrefour Argentina",
+          "cadenaDisplayName": "CARREFOUR",
+          "canal": "SPM NACIONAL",
+          "status": "active",
+          "url": "https://www.carrefour.com.ar/coca-cola-original-2-25-l/p"
+        }
+      ],
+      "inLatestExport": true,
+      "latestExportChains": 4,
+      "priceMin": 2890.0,
+      "priceMax": 3350.0
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 238, "totalPages": 5 },
+  "meta": {
+    "ts": "2026-07-24T18:30:14.679Z",
+    "summary": {
+      "totalProducts": 238,
+      "totalActiveMappings": 1204,
+      "totalPausedMappings": 63,
+      "activeChains": 14,
+      "totalChains": 31,
+      "catalogEans": 217,
+      "lastExportDate": "2026-07-24",
+      "rowsInLastExport": 1187,
+      "productsInLastExport": 231,
+      "bySupermarket": [
+        {
+          "id": "carrefour",
+          "name": "Carrefour Argentina",
+          "canal": "SPM NACIONAL",
+          "cadenaDisplayName": "CARREFOUR",
+          "isActive": true,
+          "active": 198,
+          "paused": 6,
+          "total": 204
+        },
+        {
+          "id": "coto",
+          "name": "Coto Digital",
+          "canal": "SPM NACIONAL",
+          "cadenaDisplayName": "COTO",
+          "isActive": true,
+          "active": 176,
+          "paused": 12,
+          "total": 188
+        }
+      ]
+    }
+  }
+}

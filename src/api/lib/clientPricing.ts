@@ -17,6 +17,7 @@
  */
 
 import { suplenciaFor } from '../../shared/suplencias.js';
+import { pesoEnCategoriaFor } from '../../shared/pesoEnCategoria.js';
 
 /** Path of the client pricing endpoint, used to route error formatting. */
 export const CLIENT_PRICING_PATH = '/v1/data/pricing';
@@ -85,6 +86,12 @@ export interface PriceDataItem {
   IDX_VS_COMPETENCIA: string;
   /** Campo pendiente de definición (cálculo a definir). Vacío por ahora. */
   PRECIO_PRODUCTO_EN_CATEGORIA: string;
+  /**
+   * Peso (participación) del producto dentro de su categoría (ratio 0..1).
+   * Dato de referencia del cliente, hardcodeado y matcheado por EAN
+   * (ver src/shared/pesoEnCategoria.ts). Vacío para EANs no clasificados.
+   */
+  PESO_PRODUCTO_EN_CATEGORIA: string;
   /** Legacy — reemplazado por IDX_VS_COMPETENCIA. Se mantiene vacío por compatibilidad. */
   Index_Competencia: string;
   /** Legacy — pendiente de definición. Se mantiene vacío por compatibilidad. */
@@ -148,6 +155,11 @@ export function toPriceData(row: Record<string, unknown>): PriceDataItem {
     PRECIO_TGT_MAY: str(row['PRECIO_TGT_MAY']),
     IDX_VS_COMPETENCIA: str(row['IDX_VS_COMPETENCIA']),
     PRECIO_PRODUCTO_EN_CATEGORIA: str(row['PRECIO_PRODUCTO_EN_CATEGORIA']),
+    // Hardcoded client reference data, matched by EAN (not a view column).
+    PESO_PRODUCTO_EN_CATEGORIA: ((): string => {
+      const p = pesoEnCategoriaFor(str(row['EAN']));
+      return p === null ? '' : String(p);
+    })(),
     // Legacy fields kept for backward compatibility; always empty.
     Index_Competencia: '',
     Marca_Competencia: '',
