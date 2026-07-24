@@ -16,6 +16,8 @@
  *                                         and unexpected errors keep the same shape)
  */
 
+import { suplenciaFor } from '../../shared/suplencias.js';
+
 /** Path of the client pricing endpoint, used to route error formatting. */
 export const CLIENT_PRICING_PATH = '/v1/data/pricing';
 
@@ -46,6 +48,12 @@ export interface PriceDataItem {
   Marca: string;
   Formato: string;
   Variedad: string;
+  /**
+   * Client "SUPLENCIAS" flag for this EAN: 'TITULAR' (primary/reference item),
+   * 'SUPLENTE' (stand-in), or '' when the client didn't tag the product.
+   * Hardcoded reference data keyed by EAN (see src/shared/suplencias.ts).
+   */
+  Suplencias: string;
   Descripcion_Para_Forms: string;
   EAN: string;
   Desc_Sku_Sitio: string;
@@ -120,6 +128,8 @@ export function toPriceData(row: Record<string, unknown>): PriceDataItem {
     Marca: str(row['Marca']),
     Formato: str(row['Formato']),
     Variedad: str(row['Variedad']),
+    // Hardcoded client reference data, matched by EAN (not a view column).
+    Suplencias: suplenciaFor(str(row['EAN'])),
     Descripcion_Para_Forms: str(row['Descripcion_para_Forms']),
     EAN: str(row['EAN']),
     Desc_Sku_Sitio: str(row['Desc_Sku_Sitio']),

@@ -1,7 +1,8 @@
 # Client Data API
 
 How the client pulls the official pricing data (the `client_base` view, the flat
-31-column structure their reporting tools expect).
+32-column structure their reporting tools expect — including the hardcoded
+`SUPLENCIAS` flag matched by EAN).
 
 There are two ways to get the exact same data:
 
@@ -123,6 +124,13 @@ List** (`price_targets`, loaded via `npm run lp:import <file.xlsx>` — migratio
 012). Each row shows only the target for its own channel: supermarket rows
 (`Canal` `SPM ...`) carry `PRECIO_TGT_SPM`, mayorista rows (`MAY ...`) carry
 `PRECIO_TGT_MAY`; the other stays empty, as does any EAN not in the list.
+
+`SUPLENCIAS` is hardcoded client reference data (from the "Productos (EAN)"
+Setup sheet), stamped onto each row by EAN: `TITULAR` (primary/reference item),
+`SUPLENTE` (stand-in), or empty for EANs the client didn't tag. It sits right
+after `Variedad` in both the JSON (`Suplencias`) and the file export
+(`SUPLENCIAS` column) and is not a real column of the `client_base` view — see
+`src/shared/suplencias.ts`.
 
 Two columns remain intentionally empty until their logic is defined:
 `IDX_VS_COMPETENCIA` and `PRECIO_PRODUCTO_EN_CATEGORIA`. All columns appear in

@@ -18,6 +18,7 @@
 import type { Response } from 'express';
 import { db } from '../../shared/db.js';
 import { ApiError } from './apiError.js';
+import { suplenciaFor } from '../../shared/suplencias.js';
 
 /** Filters shared by the pricing and export endpoints. */
 export interface ClientBaseFilters {
@@ -50,6 +51,9 @@ const COLUMNS: { key: string; header: string }[] = [
   { key: 'Marca', header: 'Marca' },
   { key: 'Formato', header: 'Formato' },
   { key: 'Variedad', header: 'Variedad' },
+  // Hardcoded client reference (TITULAR/SUPLENTE/blank), stamped by EAN in
+  // fetchAllClientBase — not a real column of the client_base view.
+  { key: 'SUPLENCIAS', header: 'SUPLENCIAS' },
   { key: 'Descripcion_para_Forms', header: 'Descripcion_para_Forms' },
   { key: 'EAN', header: 'EAN' },
   { key: 'Desc_Sku_Sitio', header: 'Desc_Sku_Sitio' },
@@ -117,6 +121,12 @@ export async function fetchAllClientBase(
     const { data, error } = await query;
     if (error) throw error;
     if (!data || data.length === 0) break;
+
+    // Stamp the hardcoded SUPLENCIAS flag onto each row by EAN so both the
+    // xlsx and csv writers (which read row[c.key]) pick it up like any column.
+    for (const row of data as ClientBaseRow[]) {
+      row['SUPLENCIAS'] = suplenciaFor(row['EAN'] == null ? '' : String(row['EAN']));
+    }
 
     all.push(...(data as ClientBaseRow[]));
     if (data.length < pageSize) break;

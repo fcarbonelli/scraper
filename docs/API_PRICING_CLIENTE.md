@@ -133,6 +133,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Marca": "LYSOFORM",
       "Formato": "360",
       "Variedad": "OR",
+      "Suplencias": "TITULAR",
       "Descripcion_Para_Forms": "AERO DESINF LYSOFORM 360 OR",
       "EAN": "7790520995285",
       "Desc_Sku_Sitio": "DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML.",
@@ -169,6 +170,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Marca": "GLADE",
       "Formato": "360",
       "Variedad": "OR",
+      "Suplencias": "",
       "Descripcion_Para_Forms": "AERO DESINF GLADE 360 OR",
       "EAN": "7794000123456",
       "Desc_Sku_Sitio": "DESINF.AMBIENTE GLADE ORIGINAL 360 ML.",
@@ -232,6 +234,7 @@ La respuesta es un objeto con la siguiente estructura:
 | `Marca` | Sí | Marca del producto. | `"LYSOFORM"` |
 | `Formato` | Sí | Formato/medida del producto. | `"360"` |
 | `Variedad` | Sí | Variedad del producto. | `"OR"` |
+| `Suplencias` | Sí | Marca de suplencia del producto según la lista del cliente: `"TITULAR"` (ítem de referencia), `"SUPLENTE"` (reemplazo) o `""` (vacío) para los productos que el cliente no clasificó. | `"TITULAR"` |
 | `Descripcion_Para_Forms` | Sí | Descripción normalizada del producto. | `"AERO DESINF LYSOFORM 360 OR"` |
 | `EAN` | Sí | Código de barras (EAN-13). | `"7790520995285"` |
 | `Desc_Sku_Sitio` | Sí | Descripción del producto tal como figura en el sitio relevado. | `"DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML."` |
