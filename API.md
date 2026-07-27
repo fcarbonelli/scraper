@@ -1681,11 +1681,15 @@ Errors: `404 NOT_FOUND` (unknown magazine).
 ## In-store (manual price entry)
 
 A mobile-web tool for field workers who visit physical (mostly wholesale) stores,
-scan a product barcode, and type the price. Submissions are trusted (the operator
-on-site is the gate): each writes a **run-less** `price_snapshots` row (always
-client-visible, no publish gate) and is **carried forward daily** until a newer
-entry replaces it — so a price checked on Monday keeps exporting every day until
-the next visit.
+scan a product barcode, and type the price.
+
+**Daily review gate.** A submission is **not** immediately client-visible — it's
+logged as a **pending** entry. A back-office operator reviews each finished PDV
+**visit** and approves it (per-visit, with inline edits); only then are the prices
+materialized into the client base. This mirrors the online scraper's daily review.
+Once approved, a price is written as a **run-less** snapshot and **carried forward
+daily** until a newer entry replaces it — so a price checked on Monday keeps
+exporting every day until the next visit.
 
 **Visit model (PDV relevamiento).** Work is organized as a **visit**: one worker
 at one store branch on one occasion. The worker starts a visit (picking the chain
@@ -1698,7 +1702,9 @@ photos live on the visit, not on each product.
 > [`docs/IN_STORE_PRICE_ENTRY.md`](./docs/IN_STORE_PRICE_ENTRY.md). Fixtures:
 > `examples/api/in-store-supermarkets.json`, `in-store-lookup.json`,
 > `in-store-visit.json`, `in-store-visits.json`, `in-store-photo.json`,
-> `in-store-entry.json`, `in-store-entries.json`.
+> `in-store-entry.json`, `in-store-entries.json`,
+> `in-store-review-pending.json`, `in-store-review-visit.json`,
+> `in-store-review-approve.json`.
 
 **Auth.** These routes accept the platform-standard `X-API-Key`. The mobile app
 embeds a key **scoped to `in-store`** (created with
@@ -1824,11 +1830,11 @@ List a visit's photos (newest first), same item shape as the upload response.
 
 ### `POST /v1/in-store/entries`
 
-Submit one scanned price. Resolves the EAN to a master product (creating one from
-catalog taxonomy if needed), ensures the in-store mapping, writes the snapshot,
-and logs the submission. Normally called **inside a visit** — pass `visit_id` and
-the store/worker/location are inherited from it. (For one-off use you may instead
-pass `supermarket_id` + `entered_by`.) Body:
+Submit one scanned price as a **pending** entry (validated against the catalog but
+**not** yet in the client base — it waits for daily review; see *Daily review*
+below). Normally called **inside a visit** — pass `visit_id` and the
+store/worker/location are inherited from it. (For one-off use you may instead pass
+`supermarket_id` + `entered_by`.) Body:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -1847,7 +1853,7 @@ Price mapping into the export: `price` → **Precio_Regular**, `wholesale_price`
 **Precio_c_Oferta_1**, and `wholesale_min_units` becomes the **Promocion_1** text
 (`"Precio mayorista desde N u."`).
 
-**201** with:
+**201** with (note: no snapshot yet — that's created on approval):
 
 ```ts
 {
@@ -1855,14 +1861,14 @@ Price mapping into the export: `price` → **Precio_Regular**, `wholesale_price`
   visit_id: string | null;
   supermarket_id: string;
   ean: string;
-  product_id: string;
-  supermarket_product_id: string;
-  snapshot_id: number;
+  product_id: string | null;            // null when the EAN is catalog-only (created on approval)
+  product_name: string | null;          // captured for the review screen
   price: number;                        // Precio Regular (unitario)
   wholesale_price: number | null;       // Precio con oferta (mayorista)
   wholesale_min_units: number | null;   // min units for the wholesale price
   note: string | null;                  // Observaciones
   entered_by: string;
+  review_status: "pending";
   created_at: string;                   // ISO
 }
 ```
@@ -1877,10 +1883,11 @@ Defaults to **today (Buenos Aires)** when no `date` is given. Paginated.
 
 | Param | Type | Description |
 |---|---|---|
-| `date` | `YYYY-MM-DD` | A single Buenos Aires day (default: today) |
-| `visit_id` | uuid | Only one visit |
+| `date` | `YYYY-MM-DD` | A single Buenos Aires day (default: today; **ignored** when `visit_id` is set) |
+| `visit_id` | uuid | Only one visit (shows all its entries, any day) |
 | `supermarket_id` | string | Only one chain |
 | `entered_by` | string | Only one person |
+| `review_status` | `pending`\|`approved`\|`rejected` | Filter by review state |
 | `page`, `limit` | int | Pagination |
 
 Each item:
@@ -1900,9 +1907,62 @@ Each item:
   wholesale_min_units: number | null;   // min units for the wholesale price
   note: string | null;                  // Observaciones
   entered_by: string;
+  review_status: "pending" | "approved" | "rejected";
   created_at: string;
 }
 ```
+
+### Daily review (back-office)
+
+**These three endpoints require a FULL-ACCESS API key** (not the `in-store`-scoped
+app key). They power a back-office screen that reviews each day's finished visits
+before the prices reach the client base.
+
+#### `GET /v1/in-store/review/pending`
+
+Finished visits awaiting review, oldest first. Paginated. Filter: `supermarket_id`.
+Each item is the visit shape plus `supermarket_name` and `pending_entries` (count).
+
+#### `GET /v1/in-store/review/visits/:id`
+
+One visit + all its entries, for the review screen:
+
+```ts
+{
+  visit: { /* visit shape */ };
+  entries: {
+    id: string; ean: string; product_id: string | null;
+    product_name: string | null; brand: string | null; image_url: string | null;
+    price: number; wholesale_price: number | null; wholesale_min_units: number | null;
+    note: string | null; review_status: string; created_at: string;
+  }[];
+}
+```
+
+#### `POST /v1/in-store/review/visits/:id/approve`
+
+Approve the visit. Every pending entry is approved with its entered values unless
+overridden in `decisions`. Approving materializes each entry into a run-less
+snapshot (reaches the client base); rejecting discards it. Marks the visit
+`review_status: "approved"`. Body:
+
+```ts
+{
+  reviewed_by: string;                  // required
+  decisions?: {
+    entry_id: string;
+    action: "approve" | "reject";
+    price?: number;                     // inline edits (approve only)
+    wholesale_price?: number | null;
+    wholesale_min_units?: number | null;
+    note?: string | null;
+  }[];
+}
+```
+
+→ `{ visit_id: string; approved: number; rejected: number; snapshots: number }`.
+Errors: `403 FORBIDDEN` (scoped key), `404 NOT_FOUND` (unknown visit),
+`400 INVALID_REQUEST` (visit not finished).
 
 ---
 

@@ -329,6 +329,15 @@ revista_review_items (
 -- (-> promotion_1 text 'Precio mayorista desde N u.'), note = Observaciones.
 -- Flyer/offer photos are uploaded to a public Supabase Storage bucket
 -- ('instore-photos') and recorded in instore_photos.
+--
+-- Migration 019 (client review) adds a DAILY REVIEW GATE, mirroring the revista
+-- approve-then-materialize flow: a submission now only logs a PENDING entry (no
+-- snapshot). A back-office operator reviews a finished visit and APPROVES it
+-- (per-visit, inline edits allowed) — only then is the run-less snapshot written
+-- (src/instore/review.ts → materializeInStoreEntry). A pending entry isn't a
+-- snapshot, so client_base excludes it automatically (no view change) and
+-- carry-forward only ever sees approved prices. Review endpoints require a
+-- FULL-ACCESS key (not the in-store-scoped app key).
 instore_visits (                    -- one PDV relevamiento (migration 010)
   id              uuid PK
   supermarket_id  text FK
@@ -338,6 +347,9 @@ instore_visits (                    -- one PDV relevamiento (migration 010)
   entered_by      text              -- field worker's name (required)
   note            text
   status          text              -- 'open' | 'finished'
+  review_status   text              -- 'pending' | 'approved' (migration 019)
+  reviewed_at     timestamptz
+  reviewed_by     text
   api_key_id      uuid FK
   started_at      timestamptz
   finished_at     timestamptz
@@ -348,9 +360,10 @@ instore_price_entries (
   visit_id                          uuid FK        -- the PDV visit (migration 010)
   supermarket_id                    text FK
   ean                               text
-  product_id                        uuid FK        -- resolved/created master product
-  resulting_supermarket_product_id  uuid FK
-  resulting_snapshot_id             bigint
+  product_id                        uuid FK        -- resolved master product (null until approve for catalog-only)
+  product_name                      text           -- display name captured at scan (migration 019)
+  resulting_supermarket_product_id  uuid FK        -- set on approval
+  resulting_snapshot_id             bigint         -- set on approval
   price                             numeric(12,2)  -- Precio Regular (unitario)
   list_price                        numeric(12,2)  -- legacy; unused by the new flow
   promo_price                       numeric(12,2)  -- Precio con oferta (precio mayorista)
@@ -359,6 +372,9 @@ instore_price_entries (
   entered_by                        text           -- field worker's name (required)
   api_key_id                        uuid FK        -- which embedded key submitted
   note                              text           -- Observaciones
+  review_status                     text           -- 'pending' | 'approved' | 'rejected' (migration 019)
+  reviewed_at                       timestamptz
+  reviewed_by                       text
   created_at                        timestamptz
 )
 
@@ -854,8 +870,12 @@ Decisions locked in:
   PDV. Four capture fields per product (regular unit price → `price`; wholesale price →
   `promo_price`/`offer_price_1`; min units for wholesale → `promo_min_units`/`promotion_1`;
   observations → `note`) and **flyer photos** (`instore_photos`, Supabase Storage bucket
-  `instore-photos`) instead of per-product promo flags. Frontend contract:
-  `docs/IN_STORE_PRICE_ENTRY.md`.
+  `instore-photos`) instead of per-product promo flags. **Migration 019** adds a **daily
+  review gate** (revista-style approve-then-materialize): submissions are logged as PENDING
+  and a back-office operator approves each finished visit (`src/instore/review.ts`,
+  per-visit with inline edits) to materialize the snapshots — so nothing reaches the client
+  base until reviewed. Review endpoints (`/v1/in-store/review/*`) require a full-access key.
+  Frontend contract: `docs/IN_STORE_PRICE_ENTRY.md`.
 
 ---
 

@@ -30,6 +30,7 @@ import { resolveEan, type ResolvedProduct } from '../../instore/resolve.js';
 import { recordInStoreEntry, InStoreError } from '../../instore/entry.js';
 import { createVisit, finishVisit, getVisit, countVisit, type Visit, type VisitCounts } from '../../instore/visits.js';
 import { uploadVisitPhoto } from '../../instore/storage.js';
+import { approveVisit, type ReviewDecision } from '../../instore/review.js';
 
 export const inStoreRouter = Router();
 
@@ -58,6 +59,18 @@ function toApiError(err: unknown): never {
     throw ApiError.badRequest(err.message);
   }
   throw err;
+}
+
+/**
+ * Review is a back-office action, not something the field app should do. The
+ * app embeds a key scoped to `in-store`; require a FULL-ACCESS key (no scopes)
+ * for the review endpoints so a leaked app key can't approve prices.
+ */
+function requireFullAccess(req: Request): void {
+  const scopes = req.apiKey?.scopes;
+  if (scopes && scopes.length > 0) {
+    throw ApiError.forbidden('Review requires a full-access API key');
+  }
 }
 
 // =============================================================================
@@ -364,13 +377,13 @@ inStoreRouter.post('/entries', async (req: Request, res: Response) => {
         supermarket_id: result.supermarketId,
         ean: result.ean,
         product_id: result.productId,
-        supermarket_product_id: result.supermarketProductId,
-        snapshot_id: result.snapshotId,
+        product_name: result.productName,
         price: result.price,
         wholesale_price: result.wholesalePrice,
         wholesale_min_units: result.wholesaleMinUnits,
         note: result.note,
         entered_by: result.enteredBy,
+        review_status: result.reviewStatus,
         created_at: result.createdAt,
       }),
     );
@@ -387,6 +400,7 @@ const EntriesQuery = PaginationQuery.extend({
   visit_id: z.string().uuid().optional(),
   date: z.iso.date().optional(),
   entered_by: z.string().trim().min(1).optional(),
+  review_status: z.enum(['pending', 'approved', 'rejected']).optional(),
 });
 
 interface EntryRow {
@@ -395,11 +409,13 @@ interface EntryRow {
   supermarket_id: string;
   ean: string;
   product_id: string | null;
+  product_name: string | null;
   price: number;
   promo_price: number | null;
   promo_min_units: number | null;
   note: string | null;
   entered_by: string;
+  review_status: string;
   created_at: string;
   products: { name: string; brand: string | null } | null;
   supermarkets: { name: string; cadena_display_name: string | null } | null;
@@ -411,24 +427,26 @@ inStoreRouter.get('/entries', async (req: Request, res: Response) => {
   const limit = req.pagination?.limit ?? q.limit;
   const offset = req.pagination?.offset ?? (page - 1) * limit;
 
-  // Default to today (Buenos Aires) so "today's list" just works with no args.
-  const date = q.date ?? todayInBuenosAires();
-  const { fromUtc, toUtc } = baDayRangeUtc(date);
-
   let query = db
     .from('instore_price_entries')
     .select(
-      'id, visit_id, supermarket_id, ean, product_id, price, promo_price, promo_min_units, note, entered_by, created_at, products(name, brand), supermarkets(name, cadena_display_name)',
+      'id, visit_id, supermarket_id, ean, product_id, product_name, price, promo_price, promo_min_units, note, entered_by, review_status, created_at, products(name, brand), supermarkets(name, cadena_display_name)',
       { count: 'exact' },
     )
-    .gte('created_at', fromUtc)
-    .lt('created_at', toUtc)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
-  if (q.visit_id) query = query.eq('visit_id', q.visit_id);
+  // A visit spans its own timeline — when scoping to one, show ALL its entries
+  // regardless of day. Otherwise default to today (Buenos Aires).
+  if (q.visit_id) {
+    query = query.eq('visit_id', q.visit_id);
+  } else {
+    const { fromUtc, toUtc } = baDayRangeUtc(q.date ?? todayInBuenosAires());
+    query = query.gte('created_at', fromUtc).lt('created_at', toUtc);
+  }
   if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
   if (q.entered_by) query = query.eq('entered_by', q.entered_by);
+  if (q.review_status) query = query.eq('review_status', q.review_status);
 
   const { data, error, count } = await query;
   if (error) throw error;
@@ -440,15 +458,194 @@ inStoreRouter.get('/entries', async (req: Request, res: Response) => {
     supermarket_name: row.supermarkets?.cadena_display_name ?? row.supermarkets?.name ?? null,
     ean: row.ean,
     product_id: row.product_id,
-    product_name: row.products?.name ?? null,
+    product_name: row.products?.name ?? row.product_name ?? null,
     brand: row.products?.brand ?? null,
     price: row.price,
     wholesale_price: row.promo_price,
     wholesale_min_units: row.promo_min_units,
     note: row.note,
     entered_by: row.entered_by,
+    review_status: row.review_status,
     created_at: row.created_at,
   }));
 
   res.json(paginated(items, count ?? 0, page, limit));
+});
+
+// =============================================================================
+// Daily review (back-office) — requires a full-access API key
+// =============================================================================
+
+// GET /v1/in-store/review/pending — finished visits awaiting review.
+const ReviewPendingQuery = PaginationQuery.extend({
+  supermarket_id: z.string().trim().min(1).optional(),
+});
+
+interface ReviewVisitRow {
+  id: string;
+  supermarket_id: string;
+  provincia: string | null;
+  localidad: string | null;
+  direccion: string | null;
+  entered_by: string;
+  note: string | null;
+  status: 'open' | 'finished';
+  review_status: string;
+  started_at: string;
+  finished_at: string | null;
+  supermarkets: { name: string; cadena_display_name: string | null } | null;
+}
+
+inStoreRouter.get('/review/pending', async (req: Request, res: Response) => {
+  requireFullAccess(req);
+  const q = parseQuery(req, ReviewPendingQuery);
+  const page = req.pagination?.page ?? q.page;
+  const limit = req.pagination?.limit ?? q.limit;
+  const offset = req.pagination?.offset ?? (page - 1) * limit;
+
+  let query = db
+    .from('instore_visits')
+    .select(
+      'id, supermarket_id, provincia, localidad, direccion, entered_by, note, status, review_status, started_at, finished_at, supermarkets(name, cadena_display_name)',
+      { count: 'exact' },
+    )
+    .eq('status', 'finished')
+    .eq('review_status', 'pending')
+    .order('finished_at', { ascending: true, nullsFirst: false })
+    .range(offset, offset + limit - 1);
+  if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  const visits = (data ?? []) as unknown as ReviewVisitRow[];
+
+  // Pending-entry tally per visit (one query, grouped in JS).
+  const ids = visits.map((v) => v.id);
+  const pendingByVisit = new Map<string, number>();
+  if (ids.length > 0) {
+    const pend = await db
+      .from('instore_price_entries')
+      .select('visit_id')
+      .in('visit_id', ids)
+      .eq('review_status', 'pending');
+    if (pend.error) throw pend.error;
+    for (const row of pend.data ?? []) {
+      const vid = row.visit_id as string;
+      pendingByVisit.set(vid, (pendingByVisit.get(vid) ?? 0) + 1);
+    }
+  }
+
+  const items = visits.map((v) => ({
+    id: v.id,
+    supermarket_id: v.supermarket_id,
+    supermarket_name: v.supermarkets?.cadena_display_name ?? v.supermarkets?.name ?? null,
+    provincia: v.provincia,
+    localidad: v.localidad,
+    direccion: v.direccion,
+    entered_by: v.entered_by,
+    note: v.note,
+    status: v.status,
+    review_status: v.review_status,
+    started_at: v.started_at,
+    finished_at: v.finished_at,
+    pending_entries: pendingByVisit.get(v.id) ?? 0,
+  }));
+
+  res.json(paginated(items, count ?? 0, page, limit));
+});
+
+// GET /v1/in-store/review/visits/:id — one visit + all its entries for review.
+interface ReviewEntryRow {
+  id: string;
+  ean: string;
+  product_id: string | null;
+  product_name: string | null;
+  price: number;
+  promo_price: number | null;
+  promo_min_units: number | null;
+  note: string | null;
+  review_status: string;
+  created_at: string;
+  products: { name: string; brand: string | null; metadata: { imageUrl?: string | null } | null } | null;
+}
+
+inStoreRouter.get('/review/visits/:id', async (req: Request, res: Response) => {
+  requireFullAccess(req);
+  const id = req.params.id as string;
+  const visit = await getVisit(id);
+  if (!visit) throw ApiError.notFound('Visit');
+
+  const entriesRes = await db
+    .from('instore_price_entries')
+    .select(
+      'id, ean, product_id, product_name, price, promo_price, promo_min_units, note, review_status, created_at, products(name, brand, metadata)',
+      { count: 'exact' },
+    )
+    .eq('visit_id', id)
+    .order('created_at', { ascending: true });
+  if (entriesRes.error) throw entriesRes.error;
+
+  const entries = ((entriesRes.data ?? []) as unknown as ReviewEntryRow[]).map((e) => ({
+    id: e.id,
+    ean: e.ean,
+    product_id: e.product_id,
+    product_name: e.products?.name ?? e.product_name ?? null,
+    brand: e.products?.brand ?? null,
+    image_url: e.products?.metadata?.imageUrl ?? null,
+    price: e.price,
+    wholesale_price: e.promo_price,
+    wholesale_min_units: e.promo_min_units,
+    note: e.note,
+    review_status: e.review_status,
+    created_at: e.created_at,
+  }));
+
+  res.json(success({ visit: toApiVisit(visit), entries }));
+});
+
+// POST /v1/in-store/review/visits/:id/approve — approve (with inline edits/rejects).
+const ApproveBody = z.object({
+  reviewed_by: z.string().trim().min(1).max(200),
+  decisions: z
+    .array(
+      z.object({
+        entry_id: z.string().uuid(),
+        action: z.enum(['approve', 'reject']),
+        price: z.number().positive().optional(),
+        wholesale_price: z.number().positive().nullable().optional(),
+        wholesale_min_units: z.number().int().positive().nullable().optional(),
+        note: z.string().trim().max(1000).nullable().optional(),
+      }),
+    )
+    .optional(),
+});
+
+inStoreRouter.post('/review/visits/:id/approve', async (req: Request, res: Response) => {
+  requireFullAccess(req);
+  const id = req.params.id as string;
+  const body = parseBody(req, ApproveBody);
+
+  const decisions: ReviewDecision[] | undefined = body.decisions?.map((d) => ({
+    entryId: d.entry_id,
+    action: d.action,
+    price: d.price,
+    wholesalePrice: d.wholesale_price,
+    wholesaleMinUnits: d.wholesale_min_units,
+    note: d.note,
+  }));
+
+  try {
+    const result = await approveVisit(id, { reviewedBy: body.reviewed_by, decisions });
+    res.json(
+      success({
+        visit_id: result.visitId,
+        approved: result.approved,
+        rejected: result.rejected,
+        snapshots: result.snapshots,
+      }),
+    );
+  } catch (err) {
+    toApiError(err);
+  }
 });

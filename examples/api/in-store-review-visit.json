@@ -1,0 +1,47 @@
+{
+  "data": {
+    "visit": {
+      "id": "0a1b2c3d-4e5f-4071-8a2b-3c4d5e6f7081",
+      "supermarket_id": "diarco",
+      "provincia": "Buenos Aires",
+      "localidad": "San Martín",
+      "direccion": "Av. San Martín 1234",
+      "entered_by": "Juan Pérez",
+      "note": null,
+      "status": "finished",
+      "started_at": "2026-07-16T01:20:00.000Z",
+      "finished_at": "2026-07-16T02:05:11.000Z"
+    },
+    "entries": [
+      {
+        "id": "3f2a1b0c-9d8e-4f70-8a1b-2c3d4e5f6071",
+        "ean": "7790040999999",
+        "product_id": "50bb31b8-2222-4aaa-8bbb-000000000002",
+        "product_name": "Gaseosa Cola 2.25L",
+        "brand": "COCA COLA",
+        "image_url": "https://example.supabase.co/storage/v1/object/public/products/coca-2250.jpg",
+        "price": 2590.0,
+        "wholesale_price": 2190.0,
+        "wholesale_min_units": 6,
+        "note": "Góndola punta, se agota",
+        "review_status": "pending",
+        "created_at": "2026-07-16T01:32:05.912Z"
+      },
+      {
+        "id": "6b7c8d9e-0f11-4223-8455-66778899aabb",
+        "ean": "7791234567890",
+        "product_id": "a1b2c3d4-1111-4aaa-8bbb-000000000001",
+        "product_name": "Arroz Largo Fino 1kg",
+        "brand": "GALLO",
+        "image_url": null,
+        "price": 1450.0,
+        "wholesale_price": null,
+        "wholesale_min_units": null,
+        "note": null,
+        "review_status": "pending",
+        "created_at": "2026-07-16T01:31:40.221Z"
+      }
+    ]
+  },
+  "meta": { "ts": "2026-07-16T09:01:00.000Z" }
+}

@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "id": "0a1b2c3d-4e5f-4071-8a2b-3c4d5e6f7081",
+      "supermarket_id": "diarco",
+      "supermarket_name": "DIARCO",
+      "provincia": "Buenos Aires",
+      "localidad": "San Martín",
+      "direccion": "Av. San Martín 1234",
+      "entered_by": "Juan Pérez",
+      "note": null,
+      "status": "finished",
+      "review_status": "pending",
+      "started_at": "2026-07-16T01:20:00.000Z",
+      "finished_at": "2026-07-16T02:05:11.000Z",
+      "pending_entries": 2
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 1, "totalPages": 1 },
+  "meta": { "ts": "2026-07-16T09:00:00.000Z" }
+}

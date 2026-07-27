@@ -1,29 +1,23 @@
 /**
- * Record an in-store price entry.
+ * Record an in-store price entry — and materialize it on approval.
  *
- * A field worker, physically in the store, scans a barcode and enters the price
- * fields the client asked for:
- *   - price               Precio Regular (unitario)          → snapshot.price
- *   - wholesalePrice      Precio con oferta (precio mayorista) → snapshot.offer_price_1
- *   - wholesaleMinUnits   a partir de cuántas u. es mayorista  → snapshot.promotion_1 / raw_data
- *   - note                Observaciones                        → raw_data.note
+ * A field worker, physically in the store, scans a barcode and enters:
+ *   - price               Precio Regular (unitario)            → snapshot.price
+ *   - wholesalePrice      Precio con oferta (precio mayorista)  → snapshot.offer_price_1
+ *   - wholesaleMinUnits   a partir de cuántas u. es mayorista   → snapshot.promotion_1 / raw_data
+ *   - note                Observaciones                         → raw_data.note
  *
- * The submission:
- *   1. resolves the EAN to a master product (creating one from catalog if
- *      needed — see resolve.ts),
- *   2. ensures a `supermarket_products` mapping for (store, product),
- *   3. writes ONE run-less `price_snapshots` row (trusted, always
- *      client-visible; carried forward daily until superseded),
- *   4. logs the submission to `instore_price_entries` (linked to the PDV visit).
- *
- * Entries normally belong to a visit (see visits.ts): the visit carries the
- * store, the worker name, and the branch location. Passing `supermarketId` +
- * `enteredBy` directly (no visit) is still supported for one-off submissions.
+ * DAILY REVIEW GATE (migration 019). A submission no longer writes a snapshot at
+ * submit time — it only logs a **pending** `instore_price_entries` row. The
+ * client base sees nothing until a back-office operator APPROVES the visit, at
+ * which point `materializeInStoreEntry` runs the resolve → mapping → snapshot
+ * chain (see src/instore/review.ts). This mirrors the revista review flow: a
+ * pending entry isn't a snapshot yet, so the export excludes it automatically.
  */
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
-import { ensureMasterProductForEan } from './resolve.js';
+import { ensureMasterProductForEan, resolveEan } from './resolve.js';
 
 /** Synthetic SKU for an in-store mapping (no real site SKU exists). */
 export function inStoreExternalId(productId: string): string {
@@ -65,14 +59,14 @@ export interface InStoreEntryResult {
   visitId: string | null;
   supermarketId: string;
   ean: string;
-  productId: string;
-  supermarketProductId: string;
-  snapshotId: number;
+  productId: string | null;
+  productName: string | null;
   price: number;
   wholesalePrice: number | null;
   wholesaleMinUnits: number | null;
-  enteredBy: string;
   note: string | null;
+  enteredBy: string;
+  reviewStatus: string;
   createdAt: string;
 }
 
@@ -84,6 +78,22 @@ export class InStoreError extends Error {
     this.name = 'InStoreError';
     this.kind = kind;
   }
+}
+
+/** YYYY-MM-DD for a date in Argentina time (the business day the export uses). */
+function buenosAiresDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(d);
+}
+
+/** Build the promo text shown in the export from the wholesale threshold. */
+export function wholesalePromoText(
+  wholesalePrice: number | null,
+  minUnits: number | null,
+): string | null {
+  if (wholesalePrice == null || wholesalePrice <= 0) return null;
+  return minUnits != null ? `Precio mayorista desde ${minUnits} u.` : 'Precio mayorista';
 }
 
 /** Ensure the supermarket exists, is active, and is flagged for in-store entry. */
@@ -108,7 +118,7 @@ export async function assertInStoreSupermarket(supermarketId: string): Promise<v
  * the synthetic external_id + UNIQUE(supermarket_id, external_id): repeated
  * visits reuse the mapping and just append new snapshots.
  */
-async function ensureInStoreMapping(
+export async function ensureInStoreMapping(
   supermarketId: string,
   productId: string,
 ): Promise<string> {
@@ -146,14 +156,13 @@ interface SnapshotInput {
 }
 
 /**
- * Write one run-less snapshot for an in-store entry.
+ * Write one run-less snapshot for an approved in-store entry.
  *
- * Price semantics chosen so the client_base export is correct without touching
- * the view: `price` = the regular unit price (→ Precio_Regular), `offer_price_1`
- * = the wholesale price (→ Precio_c_Oferta_1), and the min-units threshold
- * becomes the promo text (→ Promocion_1). `list_price` stays null.
+ * Price semantics keep the client_base export correct without touching the view:
+ * `price` = regular unit price (→ Precio_Regular), `offer_price_1` = wholesale
+ * price (→ Precio_c_Oferta_1), min-units → promo text (→ Promocion_1).
  */
-async function writeSnapshot(
+export async function writeSnapshot(
   supermarketProductId: string,
   prices: SnapshotInput,
   meta: {
@@ -167,12 +176,7 @@ async function writeSnapshot(
 ): Promise<number> {
   const wholesale = prices.wholesalePrice != null && prices.wholesalePrice > 0 ? prices.wholesalePrice : null;
   const minUnits = prices.wholesaleMinUnits ?? null;
-  const promoText =
-    wholesale != null
-      ? minUnits != null
-        ? `Precio mayorista desde ${minUnits} u.`
-        : 'Precio mayorista'
-      : null;
+  const promoText = wholesalePromoText(wholesale, minUnits);
   const promotions = promoText
     ? [{ type: 'wholesale', description: promoText, min_units: minUnits }]
     : [];
@@ -181,7 +185,6 @@ async function writeSnapshot(
     .from('price_snapshots')
     .insert({
       supermarket_product_id: supermarketProductId,
-      // Run-less: operator-trusted, always client-visible, no publish gate.
       scrape_run_id: null,
       scraped_at: new Date().toISOString(),
       price: prices.price,
@@ -212,18 +215,92 @@ async function writeSnapshot(
   return data.id as number;
 }
 
+/**
+ * Drop any run-less in-store snapshot for this mapping already dated today (a
+ * carry-forward re-emission, or an earlier approval), so an approved fresh price
+ * is the single row for the day. Keeps the export clean (one row per mapping/day).
+ */
+async function purgeSameDayInStoreSnapshots(supermarketProductId: string): Promise<void> {
+  const { data, error } = await db
+    .from('price_snapshots')
+    .select('id, scraped_at, raw_data')
+    .eq('supermarket_product_id', supermarketProductId)
+    .is('scrape_run_id', null)
+    .order('id', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+
+  const today = buenosAiresDate(new Date());
+  const toDelete = (data ?? [])
+    .filter((r) => {
+      const src = (r.raw_data as { source?: string } | null)?.source ?? '';
+      const isInStore = src === IN_STORE_SOURCE || src === 'instore-carry-forward';
+      return isInStore && buenosAiresDate(new Date(r.scraped_at as string)) === today;
+    })
+    .map((r) => r.id as number);
+
+  if (toDelete.length === 0) return;
+  const { error: delErr } = await db.from('price_snapshots').delete().in('id', toDelete);
+  if (delErr) throw delErr;
+}
+
+export interface MaterializeInput {
+  supermarketId: string;
+  ean: string;
+  price: number;
+  wholesalePrice: number | null;
+  wholesaleMinUnits: number | null;
+  enteredBy: string;
+  note: string | null;
+  visitId: string | null;
+  location: VisitLocation | null;
+  apiKeyId: string | null;
+}
+
+export interface MaterializeResult {
+  productId: string;
+  supermarketProductId: string;
+  snapshotId: number;
+}
+
+/**
+ * Turn an approved entry into a live price: resolve/create the master product,
+ * ensure the mapping, drop any same-day in-store snapshot, and write the
+ * run-less snapshot. Called from the review approval flow.
+ */
+export async function materializeInStoreEntry(input: MaterializeInput): Promise<MaterializeResult> {
+  const productId = await ensureMasterProductForEan(input.ean);
+  if (!productId) {
+    throw new InStoreError('not_found', `EAN ${input.ean} is not in the catalog`);
+  }
+  const spId = await ensureInStoreMapping(input.supermarketId, productId);
+  await purgeSameDayInStoreSnapshots(spId);
+  const snapshotId = await writeSnapshot(
+    spId,
+    { price: input.price, wholesalePrice: input.wholesalePrice, wholesaleMinUnits: input.wholesaleMinUnits },
+    {
+      enteredBy: input.enteredBy,
+      ean: input.ean,
+      apiKeyId: input.apiKeyId,
+      note: input.note,
+      visitId: input.visitId,
+      location: input.location,
+    },
+  );
+  return { productId, supermarketProductId: spId, snapshotId };
+}
+
 interface VisitContext {
   supermarketId: string;
   enteredBy: string;
-  location: VisitLocation | null;
 }
 
-/** Resolve the visit (if any) to the store/worker/location used for the entry. */
+/** Resolve the visit (if any) to the store/worker used for the entry. */
 async function resolveContext(input: InStoreEntryInput): Promise<VisitContext> {
   if (input.visitId) {
     const { data, error } = await db
       .from('instore_visits')
-      .select('id, supermarket_id, entered_by, provincia, localidad, direccion, status')
+      .select('id, supermarket_id, entered_by, status')
       .eq('id', input.visitId)
       .maybeSingle();
     if (error) throw error;
@@ -234,15 +311,9 @@ async function resolveContext(input: InStoreEntryInput): Promise<VisitContext> {
     return {
       supermarketId: data.supermarket_id as string,
       enteredBy: input.enteredBy?.trim() || (data.entered_by as string),
-      location: {
-        provincia: (data.provincia as string | null) ?? null,
-        localidad: (data.localidad as string | null) ?? null,
-        direccion: (data.direccion as string | null) ?? null,
-      },
     };
   }
 
-  // No visit: caller must supply store + worker directly.
   if (!input.supermarketId) {
     throw new InStoreError('invalid', 'supermarket_id is required when no visit_id is given');
   }
@@ -250,47 +321,30 @@ async function resolveContext(input: InStoreEntryInput): Promise<VisitContext> {
     throw new InStoreError('invalid', 'entered_by is required when no visit_id is given');
   }
   await assertInStoreSupermarket(input.supermarketId);
-  return { supermarketId: input.supermarketId, enteredBy: input.enteredBy.trim(), location: null };
+  return { supermarketId: input.supermarketId, enteredBy: input.enteredBy.trim() };
 }
 
 /**
- * Record one in-store price submission end to end. Throws InStoreError for
- * caller mistakes (unknown store/visit, EAN not in catalog); the route maps
- * those to HTTP status codes.
+ * Record one in-store submission as a PENDING entry (no snapshot yet — that
+ * happens on approval). Validates the EAN is in the catalog and captures the
+ * product name for the review screen. Throws InStoreError for caller mistakes.
  */
 export async function recordInStoreEntry(
   input: InStoreEntryInput,
 ): Promise<InStoreEntryResult> {
   const ctx = await resolveContext(input);
 
-  const productId = await ensureMasterProductForEan(input.ean);
-  if (!productId) {
+  // Read-only resolve: validate the EAN and capture a display name. Master
+  // product creation is deferred to approval (materializeInStoreEntry).
+  const resolved = await resolveEan(input.ean);
+  if (!resolved) {
     throw new InStoreError('not_found', `EAN ${input.ean} is not in the catalog`);
   }
-
-  const spId = await ensureInStoreMapping(ctx.supermarketId, productId);
 
   const wholesalePrice =
     input.wholesalePrice != null && input.wholesalePrice > 0 ? input.wholesalePrice : null;
   const wholesaleMinUnits = input.wholesaleMinUnits ?? null;
-
-  const snapshotId = await writeSnapshot(
-    spId,
-    { price: input.price, wholesalePrice, wholesaleMinUnits },
-    {
-      enteredBy: ctx.enteredBy,
-      ean: input.ean,
-      apiKeyId: input.apiKeyId ?? null,
-      note: input.note ?? null,
-      visitId: input.visitId ?? null,
-      location: ctx.location,
-    },
-  );
-
-  const promoText =
-    wholesalePrice != null && wholesaleMinUnits != null
-      ? `Precio mayorista desde ${wholesaleMinUnits} u.`
-      : null;
+  const promoText = wholesalePromoText(wholesalePrice, wholesaleMinUnits);
 
   const entryInsert = await db
     .from('instore_price_entries')
@@ -298,9 +352,8 @@ export async function recordInStoreEntry(
       visit_id: input.visitId ?? null,
       supermarket_id: ctx.supermarketId,
       ean: input.ean,
-      product_id: productId,
-      resulting_supermarket_product_id: spId,
-      resulting_snapshot_id: snapshotId,
+      product_id: resolved.productId,
+      product_name: resolved.name,
       price: input.price,
       list_price: null,
       promo_price: wholesalePrice,
@@ -309,14 +362,15 @@ export async function recordInStoreEntry(
       entered_by: ctx.enteredBy,
       api_key_id: input.apiKeyId ?? null,
       note: input.note ?? null,
+      review_status: 'pending',
     })
-    .select('id, created_at')
+    .select('id, created_at, review_status')
     .single();
   if (entryInsert.error) throw entryInsert.error;
 
   logger.info(
-    { visitId: input.visitId ?? null, supermarketId: ctx.supermarketId, ean: input.ean, productId, spId, snapshotId, enteredBy: ctx.enteredBy },
-    'instore: price entry recorded',
+    { visitId: input.visitId ?? null, supermarketId: ctx.supermarketId, ean: input.ean, enteredBy: ctx.enteredBy },
+    'instore: pending price entry recorded',
   );
 
   return {
@@ -324,14 +378,14 @@ export async function recordInStoreEntry(
     visitId: input.visitId ?? null,
     supermarketId: ctx.supermarketId,
     ean: input.ean,
-    productId,
-    supermarketProductId: spId,
-    snapshotId,
+    productId: resolved.productId,
+    productName: resolved.name,
     price: input.price,
     wholesalePrice,
     wholesaleMinUnits,
-    enteredBy: ctx.enteredBy,
     note: input.note ?? null,
+    enteredBy: ctx.enteredBy,
+    reviewStatus: entryInsert.data.review_status as string,
     createdAt: entryInsert.data.created_at as string,
   };
 }
