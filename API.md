@@ -1490,14 +1490,17 @@ and *why*. This is the tool for answering "why did nothing match?". Shape:
     method: "ean" | "llm" | "manual";
     confidence: number;                  // 0..1
     reason: string;                      // judge's explanation
-    matched_product_id: string | null;
-    top_candidates: { id; name; brand }[];  // up to 3 nearest catalog products
+    matched_ean: string | null;          // Catálogo EAN identity (new scrapes)
+    matched_product_id?: string | null;  // legacy metadata only
+    top_candidates: { ean?; id?; name; brand }[];  // up to 3 nearest Catálogo entries
   }[];
 }
 ```
 
 `analysis` includes **unmatched** items too — so the operator sees the whole
-magazine, not just the few auto-matches. See `examples/api/revista-analysis.json`.
+magazine, not just the few auto-matches. Matching indexes Catálogo EAN
+(`descriptionForms` + brand + format), not the `products` table. See
+`examples/api/revista-analysis.json`.
 
 ### `GET /v1/revistas/checks`
 
@@ -1542,8 +1545,10 @@ A single magazine header + counts (same item shape as `pending`).
 
 The review queue, paginated. Each item carries the `page_image_url` (public
 Supabase Storage URL), the AI's `extracted` fields, the `proposed_match` (or
-`null`, including `ean_in_catalog`), a `confidence` (0–1), `method` (`ean` |
-`llm` | `manual`), and the judge `reason`. See `examples/api/revista-items.json`.
+`null`), a `confidence` (0–1), `method` (`ean` | `llm` | `manual`), and the
+judge `reason`. Matching is against **Catálogo EAN** (not `products`);
+`proposed_match.ean` is the identity, `product_id` may be null until approve
+creates/reuses the master. See `examples/api/revista-items.json`.
 
 | Param | Type | Description |
 |---|---|---|
@@ -1551,23 +1556,22 @@ Supabase Storage URL), the AI's `extracted` fields, the `proposed_match` (or
 | `status` | `pending` \| `approved` \| `rejected` | Filter |
 | `page_number` | int | Only items read from a given magazine page |
 
-`proposed_match.ean_in_catalog` is `true` only when the master's EAN is in the
-official Catálogo EAN (built-in taxonomy ∪ `catalog_extra_eans`). The frontend
-should warn and disable approve when it is `false`.
+`proposed_match.ean_in_catalog` is `true` for Catálogo matches. Picker for rematch
+/ manual add: `GET /v1/catalog/eans?source=all&search=`.
 
 ### `POST /v1/revistas/items/:itemId/approve`
 
-Approve a queued item → mapping + snapshot. Body (all optional; omit to accept
-the AI's values): `product_id` (override the match — catalog product), `price`,
-`promo_price`, `promo_text`, `note`, `reviewed_by`. See
-`examples/api/revista-approve.json`.
+Approve a queued item → resolve EAN → mapping + snapshot. Body (all optional;
+omit to accept the AI's `proposed_ean` + prices): `ean` (preferred override),
+`product_id` (legacy), `price`, `promo_price`, `promo_text`, `note`,
+`reviewed_by`. Response includes `ean`. See `examples/api/revista-approve.json`.
 
-On success, if the product's taxonomy columns are blank, they are backfilled
-from Catálogo EAN so the client export is complete.
+On success, taxonomy columns are backfilled from Catálogo EAN so the client
+export is complete.
 
-Errors: `400 INVALID_REQUEST` (no proposed match and no `product_id`, or no
-price, or product sin EAN / EAN not in Catálogo EAN), `404 NOT_FOUND`,
-`409 CONFLICT` (already reviewed).
+Errors: `400 INVALID_REQUEST` (no proposed match and no `ean`/`product_id`, or
+no price, or EAN not in Catálogo EAN), `404 NOT_FOUND`, `409 CONFLICT` (already
+reviewed).
 
 ### `POST /v1/revistas/items/:itemId/reject`
 
@@ -1585,9 +1589,9 @@ hidden). Pass `current_only=false` for full history. Each row includes
 
 ### `PATCH /v1/revistas/items/:itemId`
 
-Edit an approved item (`product_id` / `price` / `promo_price` / `promo_text` /
-`note`). Updates today's snapshot in-place. Rematch = undo + re-approve (same
-Catálogo EAN gate). Fixture: `revista-update.json`.
+Edit an approved item (`ean` / `product_id` / `price` / `promo_price` /
+`promo_text` / `note`). Updates today's snapshot in-place. Rematch = undo +
+re-approve (same Catálogo EAN gate). Fixture: `revista-update.json`.
 
 ### `DELETE /v1/revistas/items/:itemId`
 
@@ -1612,7 +1616,7 @@ Collapse one duplicate group (`supermarket_product_id` + `day`). Keeps offer
 ### `POST /v1/revistas/:magazineId/items`
 
 Manually add a product the AI missed. Body: `page_number` (int, required),
-`product_id` (existing catalog product, required), `price` (required),
+`ean` (preferred Catálogo EAN) **or** `product_id` (legacy), `price` (required),
 `promo_price?`, `promo_text?`, `note?`, `reviewed_by?`. Creates an `approved`,
 `method: "manual"` item + mapping + snapshot. Response shape = `approve`.
 Same Catálogo EAN gate as approve (`400` if EAN missing / not in catalog).

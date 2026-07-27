@@ -34,7 +34,8 @@ We close that gap with AI:
    Magazines update every 1–2 weeks, so on most days this is a no‑op.
 2. When a **new issue** is detected, the system **reads every page with vision
    AI**, extracts the products (name, brand, price, promo, quantity, EAN), and
-   **matches each one against our product catalog** with a confidence score.
+   **matches each one against the official Catálogo EAN** (TAXONOMY ∪
+   `catalog_extra_eans`) with a confidence score.
 3. The matches land in a **human review queue**. **Nothing reaches the client
    until a person approves it** — exactly like the daily publish gate, because
    the AI both *reads* and *guesses the match* and can be wrong.
@@ -106,13 +107,12 @@ A two‑pane, one‑item‑at‑a‑time reviewer (optimized for speed):
 - **Right pane — the decision.**
   - **Extracted** (what the AI read from the page): name, brand, quantity, EAN,
     `price`, `promo_price`, `promo_text`.
-  - **Proposed match** (the catalog product the AI thinks it is): name, brand,
-    EAN, `ean_in_catalog` (whether that EAN is in the official **Catálogo EAN**),
-    plus a **confidence bar** and the judge's one‑line **reason**. May be
-    `null` when the AI found no match (those items aren't queued by default — see
-    §6 "no‑match" handling). When `ean_in_catalog` is `false`, show a warning and
-    **disable Aprobar** until the operator rematches to a product whose EAN is in
-    Catálogo EAN (or adds the EAN there first).
+  - **Proposed match** (Catálogo EAN entry the AI thinks it is): name
+    (`descriptionForms`), brand, EAN, optional `product_id` (master if one
+    already exists for that EAN), `ean_in_catalog` (always `true` for new AI
+    matches), plus a **confidence bar** and the judge's one‑line **reason**.
+    May be `null` when the AI found no match (those items aren't queued by
+    default — see §6 "no‑match" handling).
   - **Price fields** (editable): pre‑filled from what the AI read, so the
     reviewer can correct an obvious vision misread before approving.
   - **Actions:** `APROBAR` · `DESAPROBAR` · `Elegir otro producto` ·
@@ -125,16 +125,14 @@ A two‑pane, one‑item‑at‑a‑time reviewer (optimized for speed):
 ### The three decisions
 
 1. **APROBAR** — the proposed match is correct. → `POST /items/:id/approve`
-   (no `product_id` → uses the proposed match). The product is added to that
-   supermarket (a `supermarket_products` row) and a **price snapshot** is written
-   at the magazine price (`tier_used: "ai"`). **Blocked** with `400` if the
-   product has no EAN or its EAN is not in Catálogo EAN (TAXONOMY ∪
-   `catalog_extra_eans`); on success the master is re‑enriched from that catalog
-   so export columns are complete.
-2. **Wrong match → "Elegir otro producto"** — the AI read a real product but
-   matched the wrong catalog item. Open the **product picker** (typeahead on
-   `GET /v1/products?search=`), pick the correct one, then approve →
-   `POST /items/:id/approve` **with** `product_id`.
+   (omit body `ean`/`product_id` → uses `proposed_ean`). Resolves the Catálogo
+   EAN to a master product (`ensureMasterProductForEan`), writes the mapping +
+   **price snapshot** (`tier_used: "ai"`), and backfills taxonomy so the export
+   is complete.
+2. **Wrong match → "Elegir otro producto"** — open the **Catálogo EAN picker**
+   (`GET /v1/catalog/eans?source=all&search=`), pick the correct EAN, then
+   approve → `POST /items/:id/approve` **with** `ean` (preferred) or legacy
+   `product_id`.
 3. **DESAPROBAR** — the extracted item isn't a real/relevant product (decoration,
    misread, or a product we don't track). → `POST /items/:id/reject`. Nothing is
    written.
@@ -143,17 +141,13 @@ A two‑pane, one‑item‑at‑a‑time reviewer (optimized for speed):
 
 If the reviewer sees a product on the page that isn't in the queue (the AI didn't
 extract it, or extracted it with no match): **"+ Agregar producto manual"** →
-product picker (catalog only) + price fields read off the image →
-`POST /v1/revistas/:magazineId/items`. This writes the mapping + snapshot
-directly (recorded with `method: "manual"`).
+Catálogo EAN picker + price fields read off the image →
+`POST /v1/revistas/:magazineId/items` with `ean` (preferred). This writes the
+mapping + snapshot directly (recorded with `method: "manual"`).
 
-> **Catalog‑only + Catálogo EAN gate.** The picker only links to **existing
-> master products** (`products` table — there is no "create a brand‑new master"
-> flow here). Separately, **approve / manual‑add / rematch** require that the
-> chosen master's EAN exists in the official **Catálogo EAN**. Matching may still
-> propose a product whose EAN is missing from that catalog (`ean_in_catalog:
-> false`); the operator must add the EAN to Catálogo EAN or rematch before
-> approving — otherwise blank export columns and client‑base pollution.
+> **Match = Catálogo EAN.** The AI indexes TAXONOMY ∪ `catalog_extra_eans`, not
+> the `products` table (avoids wrong EANs on scraped masters). Approve resolves
+> EAN → master product. The picker must search Catálogo EAN, not Productos.
 
 ---
 
@@ -225,18 +219,18 @@ The review queue. Paginated.
         "quantity": "1L"
       },
       "proposed_match": {
-        "product_id": "50bb31b8-...",
-        "name": "Lavandina Original Ayudin 2l",
-        "brand": "AYUDIN",
+        "product_id": null,
+        "name": "LAVANDINAS REG AYUDÍN 1L",
+        "brand": "AYUDÍN",
         "ean": "7793253006709",
-        "quantity": "2 Litro",
+        "quantity": "1L",
         "ean_in_catalog": true
       },
       "confidence": 0.82,
       "method": "llm",
       "reason": "Misma marca y tipo (lavandina original); difiere el tamaño.",
       "candidates": [
-        { "product_id": "50bb31b8-...", "name": "Lavandina Original Ayudin 2l", "brand": "AYUDIN" }
+        { "ean": "7793253006709", "product_id": null, "name": "LAVANDINAS REG AYUDÍN 1L", "brand": "AYUDÍN" }
       ],
       "status": "pending",
       "reviewed_by": null,
@@ -260,11 +254,12 @@ one **run-less** `price_snapshots` row (`tier_used: "ai"`, `status: "ok"`,
 so the approved price shows in the export immediately (no publish step needed).
 
 ```jsonc
-// Body — all optional; omit to accept the AI's values as-is.
+// Body — all optional; omit to accept the AI's proposed_ean + prices.
 {
-  "product_id": "uuid",      // override the proposed match with the correct catalog product
-  "price": 1299.0,           // regular price the reviewer confirms off the image
-  "promo_price": 999.0,      // sale/offer price, if any
+  "ean": "7793253006709", // preferred override (Catálogo EAN)
+  "product_id": "uuid",   // legacy override (master uuid)
+  "price": 1299.0,
+  "promo_price": 999.0,
   "promo_text": "2do al 50%",
   "note": "string"
 }
@@ -278,15 +273,16 @@ so the approved price shows in the export immediately (no publish step needed).
     "status": "approved",
     "supermarket_product_id": "uuid",
     "snapshot_id": 10231,
-    "product_id": "50bb31b8-..."
+    "product_id": "50bb31b8-...",
+    "ean": "7793253006709"
   },
   "meta": { "ts": "..." }
 }
 ```
 
-Errors: `400 INVALID_REQUEST` (e.g. approving with neither a proposed match nor a
-`product_id`; no price; product sin EAN; or EAN not in Catálogo EAN),
-`404 NOT_FOUND`, `409 CONFLICT` (already reviewed).
+Errors: `400 INVALID_REQUEST` (no `ean`/`product_id` and no proposed match; no
+price; EAN not in Catálogo EAN), `404 NOT_FOUND`, `409 CONFLICT` (already
+reviewed).
 
 ### `POST /v1/revistas/items/:itemId/reject`
 
@@ -310,12 +306,13 @@ read). See `examples/api/revista-items-all.json`.
 
 ### `PATCH /v1/revistas/items/:itemId`
 
-Edit an **approved** item. Body (all optional; ≥1 required): `product_id`,
-`price`, `promo_price` (null clears), `promo_text` (null/`""` clears), `note`,
-`reviewed_by`. Corrections go into `approved_override` (AI `extracted` is
-preserved). The snapshot for **today** is updated in-place (never a second
-row). Rematch (`product_id` changed) = undo old mapping effects + re-approve.
-See `examples/api/revista-update.json`. Errors: `400`, `404`, `409` (not approved).
+Edit an **approved** item. Body (all optional; ≥1 required): `ean`,
+`product_id`, `price`, `promo_price` (null clears), `promo_text` (null/`""`
+clears), `note`, `reviewed_by`. Corrections go into `approved_override` (AI
+`extracted` is preserved). The snapshot for **today** is updated in-place
+(never a second row). Rematch (`ean` / `product_id` changed) = undo old mapping
+effects + re-approve. See `examples/api/revista-update.json`. Errors: `400`,
+`404`, `409` (not approved).
 
 ### `DELETE /v1/revistas/items/:itemId`
 
@@ -350,12 +347,14 @@ duplicate group for that mapping/day).
 
 ### `POST /v1/revistas/:magazineId/items`
 
-Manually add a product the AI missed. Catalog‑only `product_id`.
+Manually add a product the AI missed. Prefer `ean` (Catálogo EAN); `product_id`
+remains as a legacy alternative.
 
 ```jsonc
 {
   "page_number": 16,         // which page it was seen on (for the image link)
-  "product_id": "uuid",      // existing master product (required)
+  "ean": "7793253006709",    // preferred
+  "product_id": "uuid",      // legacy alternative
   "price": 1299.0,           // required
   "promo_price": 999.0,
   "promo_text": "2do al 50%",
@@ -364,7 +363,7 @@ Manually add a product the AI missed. Catalog‑only `product_id`.
 ```
 
 Response: same shape as `approve` (creates an `approved`, `method: "manual"`
-item + mapping + snapshot).
+item + mapping + snapshot). Requires `ean` or `product_id`.
 
 ### `POST /v1/revistas/:magazineId/deactivate` · `.../activate`
 
@@ -410,10 +409,11 @@ still `pending` (they stay pending and can be revisited).
   "meta": { "ts": "..." } }
 ```
 
-### Reused (no change)
+### Reused (updated picker)
 
-- `GET /v1/products?search=` — the **product picker** for "elegir otro producto"
-  and "agregar manual".
+- `GET /v1/catalog/eans?source=all&search=` — the **Catálogo EAN picker** for
+  "elegir otro producto" and "agregar manual" (search over descriptionForms +
+  brand + EAN). Do **not** use `GET /v1/products` for revista matching.
 - `GET /v1/runs/:id/review`, `POST /v1/runs/:id/publish` — the day's publish gate
   for the **web-scraped** chains. Magazine snapshots are run-less, so they are
   **not** part of any run's review/gap list and don't depend on it — they surface
@@ -466,12 +466,13 @@ export interface RevistaExtracted {
 }
 
 export interface RevistaMatch {
-  product_id: string;
+  /** Master product uuid when one already exists for this EAN; else null until approve. */
+  product_id: string | null;
   name: string;
   brand: string | null;
   ean: string | null;
   quantity: string | null;
-  /** False when the master has no EAN or it is absent from Catálogo EAN — approve is blocked. */
+  /** False only for legacy items whose master EAN is outside Catálogo EAN. */
   ean_in_catalog: boolean;
 }
 
@@ -486,14 +487,15 @@ export interface RevistaReviewItem {
   confidence: number;                  // 0–1
   method: RevistaMethod;
   reason: string;
-  candidates: Array<Pick<RevistaMatch, 'product_id' | 'name' | 'brand'>>;
+  candidates: Array<Pick<RevistaMatch, 'ean' | 'product_id' | 'name' | 'brand'>>;
   status: RevistaItemStatus;
   reviewed_by: string | null;
   reviewed_at: string | null;
 }
 
 export interface RevistaApproveBody {
-  product_id?: string;   // override proposed match
+  ean?: string;          // preferred override (Catálogo EAN)
+  product_id?: string;   // legacy override
   price?: number;
   promo_price?: number;
   promo_text?: string;
@@ -506,6 +508,7 @@ export interface RevistaApproveResult {
   supermarket_product_id: string;
   snapshot_id: number;
   product_id: string;
+  ean: string;
 }
 ```
 
@@ -532,7 +535,7 @@ listAllRevistaItems: (q: { status?: RevistaItemStatus; supermarket_id?: string; 
   request<ApiPaginated<RevistaReviewItem & { supermarket_name: string; magazine_label: string; source_url?: string | null; magazine_status?: string | null; series_key?: string; superseded_by?: string | null }>>(
     `/revistas/items?${new URLSearchParams(q as Record<string, string>)}`,
   ),
-updateRevistaItem: (itemId: string, body: { product_id?: string; price?: number | null; promo_price?: number | null; promo_text?: string | null; note?: string | null }) =>
+updateRevistaItem: (itemId: string, body: { ean?: string; product_id?: string; price?: number | null; promo_price?: number | null; promo_text?: string | null; note?: string | null }) =>
   request<ApiSuccess<RevistaApproveResult>>(`/revistas/items/${itemId}`, {
     method: 'PATCH', body: JSON.stringify(body),
   }),
@@ -548,7 +551,7 @@ resolveRevistaDuplicate: (body: { supermarket_product_id: string; day: string })
   request(`/revistas/duplicates/resolve`, {
     method: 'POST', body: JSON.stringify(body),
   }),
-addRevistaItem: (magazineId: string, body: { page_number: number; product_id: string; price: number; promo_price?: number; promo_text?: string; note?: string }) =>
+addRevistaItem: (magazineId: string, body: { page_number: number; ean?: string; product_id?: string; price: number; promo_price?: number; promo_text?: string; note?: string }) =>
   request<ApiSuccess<RevistaApproveResult>>(`/revistas/${magazineId}/items`, {
     method: 'POST', body: JSON.stringify(body),
   }),
@@ -713,7 +716,7 @@ developer setup".
 
 | # | Question | Working assumption |
 |---|---|---|
-| 1 | Should the reviewer be able to edit the **EAN** when approving (to backfill a missing barcode on the master product)? | No for v1 — link to catalog by `product_id` only. |
+| 1 | Should the reviewer be able to edit the **EAN** when approving (to backfill a missing barcode on the master product)? | Yes — approve/rematch prefer `ean` (Catálogo EAN); master is resolved on approve. |
 | 2 | Do we need a "browse all extracted products on a page" view (incl. no‑match), or is "+ Agregar manual" enough? | "+ Agregar manual" is enough for v1. |
 | 3 | Should approving the **same product twice** in one magazine (two folletos) merge into one snapshot or keep both? | Keep the latest; backend dedups by (super, product, run). |
 | 4 | Stale magazine left unreviewed for N days — Telegram nudge like the publish gate? | Add a "pending revista" nudge later; manual for now. |

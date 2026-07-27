@@ -145,6 +145,7 @@ function approveResultResponse(r: ApproveResult): object {
     supermarket_product_id: r.supermarketProductId,
     snapshot_id: r.snapshotId,
     product_id: r.productId,
+    ean: r.ean,
   };
 }
 
@@ -400,6 +401,7 @@ interface EnrichedItemRow {
   effective_promo_price: number | null;
   effective_promo_text: string | null;
   proposed_product_id: string | null;
+  proposed_ean: string | null;
   match_name: string | null;
   match_brand: string | null;
   match_ean: string | null;
@@ -421,7 +423,56 @@ function isEanInCatalog(ean: string | null | undefined, catalogKeys: Set<string>
   return digits.length > 0 && catalogKeys.has(digits);
 }
 
-function enrichedItemResponse(i: EnrichedItemRow, catalogKeys: Set<string>): object {
+type CatalogTaxMap = Map<string, { descriptionForms: string; brand: string; format: string; variety: string }>;
+
+/** Build proposed_match from proposed_ean (Catálogo) and/or joined product row. */
+function buildProposedMatch(
+  opts: {
+    productId: string | null;
+    ean: string | null;
+    matchName: string | null;
+    matchBrand: string | null;
+    matchQuantity: string | null;
+  },
+  catalog: CatalogTaxMap,
+  catalogKeys: Set<string>,
+): object | null {
+  const ean = (opts.ean ?? '').replace(/\D/g, '') || null;
+  if (!ean && !opts.productId) return null;
+  const tax = ean ? catalog.get(ean) : undefined;
+  const quantity =
+    opts.matchQuantity ??
+    (tax ? [tax.format, tax.variety].filter(Boolean).join(' ').trim() || null : null);
+  return {
+    product_id: opts.productId,
+    name: opts.matchName ?? tax?.descriptionForms ?? null,
+    brand: opts.matchBrand ?? tax?.brand ?? null,
+    ean,
+    quantity,
+    ean_in_catalog: isEanInCatalog(ean, catalogKeys),
+  };
+}
+
+function mapCandidates(candidates: unknown): object[] {
+  if (!Array.isArray(candidates)) return [];
+  return (candidates as Array<Record<string, unknown>>).map((c) => ({
+    ean: (c.ean as string | null | undefined) ?? (typeof c.id === 'string' && /^\d{8,14}$/.test(c.id) ? c.id : null),
+    product_id:
+      typeof c.product_id === 'string'
+        ? c.product_id
+        : typeof c.id === 'string' && !/^\d{8,14}$/.test(c.id)
+          ? c.id
+          : null,
+    name: c.name ?? null,
+    brand: c.brand ?? null,
+  }));
+}
+
+function enrichedItemResponse(
+  i: EnrichedItemRow,
+  catalog: CatalogTaxMap,
+  catalogKeys: Set<string>,
+): object {
   // Effective extracted blob: AI read + operator override for list display.
   const extracted = { ...(i.extracted ?? {}) } as Record<string, unknown>;
   if (i.effective_price != null) extracted.price = Number(i.effective_price);
@@ -433,6 +484,8 @@ function enrichedItemResponse(i: EnrichedItemRow, catalogKeys: Set<string>): obj
   else if (i.approved_override && 'promo_text' in i.approved_override) {
     extracted.promo_text = i.approved_override.promo_text;
   }
+
+  const matchEan = i.match_ean ?? i.proposed_ean;
 
   return {
     id: i.id,
@@ -448,26 +501,21 @@ function enrichedItemResponse(i: EnrichedItemRow, catalogKeys: Set<string>): obj
     page_number: i.page_number,
     page_image_url: i.page_image_url,
     extracted,
-    proposed_match: i.proposed_product_id
-      ? {
-          product_id: i.proposed_product_id,
-          name: i.match_name,
-          brand: i.match_brand,
-          ean: i.match_ean,
-          quantity: i.match_quantity,
-          ean_in_catalog: isEanInCatalog(i.match_ean, catalogKeys),
-        }
-      : null,
+    proposed_match: buildProposedMatch(
+      {
+        productId: i.proposed_product_id,
+        ean: matchEan,
+        matchName: i.match_name,
+        matchBrand: i.match_brand,
+        matchQuantity: i.match_quantity,
+      },
+      catalog,
+      catalogKeys,
+    ),
     confidence: typeof i.confidence === 'string' ? Number(i.confidence) : i.confidence,
     method: i.method,
     reason: i.reason,
-    candidates: Array.isArray(i.candidates)
-      ? (i.candidates as Array<Record<string, unknown>>).map((c) => ({
-          product_id: c.id ?? c.product_id ?? null,
-          name: c.name ?? null,
-          brand: c.brand ?? null,
-        }))
-      : [],
+    candidates: mapCandidates(i.candidates),
     status: i.status,
     note: i.note,
     reviewed_by: i.reviewed_by,
@@ -496,9 +544,11 @@ revistasRouter.get('/items', async (req: Request, res: Response) => {
 
   const { data, error, count } = await query;
   if (error) throw error;
-  const catalogKeys = new Set((await getCatalogEans()).keys());
+  const catalogMap = await getCatalogEans();
+  const catalogKeys = new Set(catalogMap.keys());
+  const catalog: CatalogTaxMap = catalogMap;
   const out = ((data ?? []) as EnrichedItemRow[]).map((row) =>
-    enrichedItemResponse(row, catalogKeys),
+    enrichedItemResponse(row, catalog, catalogKeys),
   );
   res.json(paginated(out, count ?? 0, page, limit));
 });
@@ -843,8 +893,14 @@ revistasRouter.post('/duplicates/resolve', async (req: Request, res: Response) =
 // DELETE /v1/revistas/items/:itemId — undo approval → pending
 // (Registered before /:magazineId so "items" is never a magazine id.)
 // =============================================================================
+const CatalogEanBody = z
+  .string()
+  .trim()
+  .regex(/^\d{8,14}$/, { message: 'ean must be 8–14 digits' });
+
 const UpdateBodySchema = z
   .object({
+    ean: CatalogEanBody.optional(),
     product_id: z.string().uuid().optional(),
     price: z.number().nonnegative().nullable().optional(),
     promo_price: z.number().nonnegative().nullable().optional(),
@@ -854,6 +910,7 @@ const UpdateBodySchema = z
   })
   .refine(
     (b) =>
+      b.ean !== undefined ||
       b.product_id !== undefined ||
       b.price !== undefined ||
       b.promo_price !== undefined ||
@@ -867,6 +924,7 @@ revistasRouter.patch('/items/:itemId', async (req: Request, res: Response) => {
   const itemId = req.params.itemId as string;
   try {
     const result = await updateApprovedItem(itemId, {
+      ean: body.ean,
       productId: body.product_id,
       price: body.price,
       promoPrice: body.promo_price,
@@ -925,8 +983,15 @@ interface MagazineMetadata {
     method: string;
     confidence: number;
     reason: string;
-    matched_product_id: string | null;
-    top_candidates: Array<{ id: string; name: string | null; brand: string | null }>;
+    /** @deprecated Prefer matched_ean (Catálogo EAN match). */
+    matched_product_id?: string | null;
+    matched_ean?: string | null;
+    top_candidates: Array<{
+      ean?: string | null;
+      id?: string | null;
+      name: string | null;
+      brand: string | null;
+    }>;
   }>;
 }
 
@@ -981,7 +1046,7 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
   let query = db
     .from('revista_review_items')
     .select(
-      'id, magazine_id, supermarket_id, page_number, page_image_url, extracted, approved_override, proposed_product_id, confidence, method, reason, candidates, status, reviewed_by, reviewed_at',
+      'id, magazine_id, supermarket_id, page_number, page_image_url, extracted, approved_override, proposed_product_id, proposed_ean, confidence, method, reason, candidates, status, reviewed_by, reviewed_at',
       { count: 'exact' },
     )
     .eq('magazine_id', magazineId)
@@ -1007,18 +1072,9 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
     for (const p of rows) products.set(p.id, p);
   }
 
-  const catalogKeys = new Set((await getCatalogEans()).keys());
-  const toMatch = (p: ProductRow | undefined): object | null =>
-    p
-      ? {
-          product_id: p.id,
-          name: p.name,
-          brand: p.brand,
-          ean: p.ean,
-          quantity: p.unit ?? p.format ?? null,
-          ean_in_catalog: isEanInCatalog(p.ean, catalogKeys),
-        }
-      : null;
+  const catalogMap = await getCatalogEans();
+  const catalogKeys = new Set(catalogMap.keys());
+  const catalog: CatalogTaxMap = catalogMap;
 
   const out = items.map((i) => {
     const extracted = { ...((i.extracted as Record<string, unknown> | null) ?? {}) };
@@ -1032,6 +1088,8 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
       if ('promo_price' in override) extracted.promo_price = override.promo_price;
       if ('promo_text' in override) extracted.promo_text = override.promo_text;
     }
+    const p = i.proposed_product_id ? products.get(i.proposed_product_id) : undefined;
+    const ean = (i.proposed_ean as string | null) ?? p?.ean ?? null;
     return {
       id: i.id,
       magazine_id: i.magazine_id,
@@ -1039,17 +1097,21 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
       page_number: i.page_number,
       page_image_url: i.page_image_url,
       extracted,
-      proposed_match: i.proposed_product_id ? toMatch(products.get(i.proposed_product_id)) : null,
+      proposed_match: buildProposedMatch(
+        {
+          productId: i.proposed_product_id as string | null,
+          ean,
+          matchName: p?.name ?? null,
+          matchBrand: p?.brand ?? null,
+          matchQuantity: p ? (p.unit ?? p.format ?? null) : null,
+        },
+        catalog,
+        catalogKeys,
+      ),
       confidence: typeof i.confidence === 'string' ? Number(i.confidence) : i.confidence,
       method: i.method,
       reason: i.reason,
-      candidates: Array.isArray(i.candidates)
-        ? (i.candidates as Array<Record<string, unknown>>).map((c) => ({
-            product_id: c.id ?? c.product_id ?? null,
-            name: c.name ?? null,
-            brand: c.brand ?? null,
-          }))
-        : [],
+      candidates: mapCandidates(i.candidates),
       status: i.status,
       reviewed_by: i.reviewed_by,
       reviewed_at: i.reviewed_at,
@@ -1063,6 +1125,7 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
 // POST /v1/revistas/items/:itemId/approve
 // =============================================================================
 const ApproveBodySchema = z.object({
+  ean: CatalogEanBody.optional(),
   product_id: z.string().uuid().optional(),
   price: z.number().nonnegative().optional(),
   promo_price: z.number().nonnegative().optional(),
@@ -1076,6 +1139,7 @@ revistasRouter.post('/items/:itemId/approve', async (req: Request, res: Response
   const itemId = req.params.itemId as string;
   try {
     const result = await approveReviewItem(itemId, {
+      ean: body.ean,
       productId: body.product_id,
       price: body.price,
       promoPrice: body.promo_price,
@@ -1128,24 +1192,24 @@ revistasRouter.post('/items/:itemId/reject', async (req: Request, res: Response)
 // =============================================================================
 // POST /v1/revistas/:magazineId/items  — manually add a missed product
 // =============================================================================
-const ManualAddBodySchema = z.object({
-  page_number: z.coerce.number().int().positive(),
-  product_id: z.string().uuid(),
-  price: z.number().nonnegative(),
-  promo_price: z.number().nonnegative().optional(),
-  promo_text: z.string().max(500).optional(),
-  note: z.string().max(1000).optional(),
-  reviewed_by: z.string().max(200).optional(),
-});
+const ManualAddBodySchema = z
+  .object({
+    page_number: z.coerce.number().int().positive(),
+    ean: CatalogEanBody.optional(),
+    product_id: z.string().uuid().optional(),
+    price: z.number().nonnegative(),
+    promo_price: z.number().nonnegative().optional(),
+    promo_text: z.string().max(500).optional(),
+    note: z.string().max(1000).optional(),
+    reviewed_by: z.string().max(200).optional(),
+  })
+  .refine((b) => Boolean(b.ean || b.product_id), {
+    message: 'ean or product_id is required',
+  });
 
 revistasRouter.post('/:magazineId/items', async (req: Request, res: Response) => {
   const magazine = await loadMagazine(req.params.magazineId as string);
   const body = parseBody(req, ManualAddBodySchema);
-
-  // Confirm the catalog product exists (catalog-only by design).
-  const product = await db.from('products').select('id').eq('id', body.product_id).maybeSingle();
-  if (product.error) throw product.error;
-  if (!product.data) throw ApiError.badRequest('product_id does not reference an existing catalog product');
 
   // Reuse the page image of an existing item on the same page, if any.
   const sibling = await db
@@ -1161,6 +1225,7 @@ revistasRouter.post('/:magazineId/items', async (req: Request, res: Response) =>
   try {
     const result = await addManualItem(magazine.id, magazine.supermarket_id, pageImageUrl, {
       pageNumber: body.page_number,
+      ean: body.ean,
       productId: body.product_id,
       price: body.price,
       promoPrice: body.promo_price,

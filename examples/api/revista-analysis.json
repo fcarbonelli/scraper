@@ -38,10 +38,10 @@
         "method": "llm",
         "confidence": 0.92,
         "reason": "Same product line (Ayudín lavandina original), size 2L matches.",
-        "matched_product_id": "b7c1a2d3-1111-4a2b-9c3d-000000000001",
+        "matched_ean": "7793253006709",
         "top_candidates": [
-          { "id": "b7c1a2d3-1111-4a2b-9c3d-000000000001", "name": "Lavandina Original Ayudin 2l", "brand": "AYUDÍN" },
-          { "id": "b7c1a2d3-1111-4a2b-9c3d-000000000002", "name": "Lavandina Ayudin Ropa Color 1l", "brand": "AYUDÍN" }
+          { "ean": "7793253006709", "name": "LAVANDINAS REG AYUDÍN 1L", "brand": "AYUDÍN" },
+          { "ean": "7793253005054", "name": "AERO DESINF AYUDÍN 332 OR", "brand": "AYUDÍN" }
         ]
       },
       {
@@ -59,9 +59,9 @@
         "method": "llm",
         "confidence": 0.04,
         "reason": "No catalog counterpart: catalog is cleaning/home-care only, no cooking oils.",
-        "matched_product_id": null,
+        "matched_ean": null,
         "top_candidates": [
-          { "id": "b7c1a2d3-1111-4a2b-9c3d-000000000050", "name": "Limpiador Cremoso Cif 750ml", "brand": "CIF" }
+          { "ean": "7791290795778", "name": "AERO DESINF CIF 360 OR", "brand": "CIF" }
         ]
       }
     ]

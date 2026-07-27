@@ -206,33 +206,64 @@ export async function insertReviewItems(
   items: ReviewItemInput[],
 ): Promise<void> {
   if (items.length === 0) return;
-  const rows = items.map(({ result, pageImageUrl }) => ({
-    magazine_id: magazineId,
-    supermarket_id: supermarketId,
-    page_number: result.page,
-    page_image_url: pageImageUrl,
-    extracted: {
-      name: result.item.name,
-      brand: result.item.brand,
-      ean: result.item.ean,
-      price: result.item.price,
-      promo_price: result.item.promo_price,
-      promo_text: result.item.promo_text,
-      quantity: result.item.quantity,
-    },
-    proposed_product_id: result.matched?.id ?? null,
-    confidence: Math.round(result.confidence * 1000) / 1000,
-    method: result.method === 'none' ? 'manual' : result.method,
-    reason: result.reason,
-    candidates: result.candidates.map((c) => ({
-      id: c.id,
-      name: c.name,
-      brand: c.brand ?? null,
-      quantity: c.quantity ?? null,
-      ean: c.ean ?? null,
-    })),
-    status: 'pending' as const,
-  }));
+
+  // Match identity is the Catálogo EAN. Resolve an existing master product_id
+  // when one already has that EAN (display join); otherwise leave null until approve.
+  const matchedEans = [
+    ...new Set(
+      items
+        .map(({ result }) => result.matched?.ean ?? result.matched?.id ?? null)
+        .filter((e): e is string => Boolean(e))
+        .map((e) => e.replace(/\D/g, ''))
+        .filter(Boolean),
+    ),
+  ];
+  const productIdByEan = new Map<string, string>();
+  if (matchedEans.length > 0) {
+    const { data, error } = await db
+      .from('products')
+      .select('id, ean')
+      .in('ean', matchedEans)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const ean = typeof row.ean === 'string' ? row.ean.replace(/\D/g, '') : '';
+      if (ean && !productIdByEan.has(ean)) productIdByEan.set(ean, row.id as string);
+    }
+  }
+
+  const rows = items.map(({ result, pageImageUrl }) => {
+    const proposedEan = result.matched
+      ? (result.matched.ean ?? result.matched.id).replace(/\D/g, '') || null
+      : null;
+    return {
+      magazine_id: magazineId,
+      supermarket_id: supermarketId,
+      page_number: result.page,
+      page_image_url: pageImageUrl,
+      extracted: {
+        name: result.item.name,
+        brand: result.item.brand,
+        ean: result.item.ean,
+        price: result.item.price,
+        promo_price: result.item.promo_price,
+        promo_text: result.item.promo_text,
+        quantity: result.item.quantity,
+      },
+      proposed_ean: proposedEan,
+      proposed_product_id: proposedEan ? (productIdByEan.get(proposedEan) ?? null) : null,
+      confidence: Math.round(result.confidence * 1000) / 1000,
+      method: result.method === 'none' ? 'manual' : result.method,
+      reason: result.reason,
+      candidates: result.candidates.map((c) => ({
+        ean: c.ean ?? c.id,
+        name: c.name,
+        brand: c.brand ?? null,
+        quantity: c.quantity ?? null,
+      })),
+      status: 'pending' as const,
+    };
+  });
 
   const { error } = await db.from('revista_review_items').insert(rows);
   if (error) throw error;
