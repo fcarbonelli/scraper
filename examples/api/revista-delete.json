@@ -1,8 +1,10 @@
 {
   "data": {
-    "item_id": "item_01HAPPROVED",
-    "status": "pending",
-    "snapshot_deleted": true
+    "magazine_id": "285b9d01-329a-4f98-9b45-bf04f4cc38f9",
+    "deleted_items": 12,
+    "paused_mappings": 0,
+    "purged_today": 0,
+    "deleted_images": 3
   },
-  "meta": { "ts": "2026-07-20T16:10:00.000Z" }
+  "meta": { "ts": "2026-07-27T13:20:00.000Z" }
 }

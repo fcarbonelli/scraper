@@ -44,3 +44,28 @@ export async function uploadPageImage(
   }
   return db.storage.from(revistaConfig.storageBucket).getPublicUrl(path).data.publicUrl;
 }
+
+/**
+ * Delete every uploaded page image for a magazine (frees Storage space when an
+ * operator deletes a flyer they don't care about). Best-effort: logs and returns
+ * 0 on failure instead of throwing, so a Storage hiccup never blocks the DB
+ * delete.
+ */
+export async function deleteMagazineImages(magazineId: string): Promise<number> {
+  await ensureBucket();
+  const bucket = revistaConfig.storageBucket;
+  const { data, error } = await db.storage.from(bucket).list(magazineId);
+  if (error) {
+    logger.warn({ err: error, magazineId }, 'revista: list page images failed (continuing)');
+    return 0;
+  }
+  const paths = (data ?? []).map((f) => `${magazineId}/${f.name}`);
+  if (paths.length === 0) return 0;
+
+  const { error: rmErr } = await db.storage.from(bucket).remove(paths);
+  if (rmErr) {
+    logger.warn({ err: rmErr, magazineId }, 'revista: remove page images failed (continuing)');
+    return 0;
+  }
+  return paths.length;
+}

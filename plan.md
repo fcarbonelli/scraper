@@ -272,6 +272,7 @@ revista_magazines (
   superseded_by    uuid FK     -- migration 014: points at the newer issue that replaced this one within the same series (NULL = current)
   superseded_at    timestamptz -- when the mark was applied
   series_key       text        -- migration 015: flyer series within the chain (e.g. 'mm', 'gt', 'folder-resto'; 'default' for single-series)
+  carry_active     boolean     -- migration 018: manual on/off switch (default true). false = operator deactivated this issue; its approved prices are excluded from the client base (dropped immediately, approvals kept). Orthogonal to superseded_by. Toggle via POST /v1/revistas/:id/deactivate|activate.
   UNIQUE (supermarket_id, content_hash)
 )
 
