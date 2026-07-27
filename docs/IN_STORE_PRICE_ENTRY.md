@@ -20,9 +20,12 @@ fixtures in [`examples/api/`](../examples/api/) (`in-store-*.json`).
 
 ## 1. Concept & data model (what the backend guarantees)
 
-- A submission is **trusted**: the person on-site is the gate. Each writes a
-  **run-less** price snapshot that is **immediately visible** in the client export
-  (no daily "publish" step).
+- A submission is **pending** until a back-office operator approves it. Nothing
+  reaches the client export until the day's data is reviewed and approved (§10) —
+  the same idea as the online scraper's daily publish. On approval the price
+  becomes a **run-less** snapshot in the client export.
+- The field worker's app still works exactly the same; their own "today's list"
+  shows their entries with a `review_status` (`pending` at first).
 - Prices are entered only **every few days** (≈twice a week). The backend runs a
   **daily carry-forward** that re-emits each product's latest in-store price as a
   fresh row dated today — so a Monday price keeps exporting every day until the
@@ -307,15 +310,17 @@ Submit one price. Body:
   note?: string|null;                 // Observaciones
 }
 ```
-→ **201** `{ entry_id, visit_id, supermarket_id, ean, product_id,
-supermarket_product_id, snapshot_id, price, wholesale_price, wholesale_min_units,
-note, entered_by, created_at }`. Errors: `400` (bad body / chain not enabled /
-finished visit), `404` (unknown store/visit / EAN not in catalog).
+→ **201** `{ entry_id, visit_id, supermarket_id, ean, product_id, product_name,
+price, wholesale_price, wholesale_min_units, note, entered_by, review_status,
+created_at }`. **No snapshot yet** — the entry is `pending` until approved (§10).
+Errors: `400` (bad body / chain not enabled / finished visit), `404` (unknown
+store/visit / EAN not in catalog).
 
-### `GET /v1/in-store/entries?visit_id=&date=&supermarket_id=&entered_by=&page=&limit=`
-Recent submissions (defaults to today, Buenos Aires). Paginated. Item:
-`{ id, visit_id, supermarket_id, supermarket_name, ean, product_id, product_name,
-brand, price, wholesale_price, wholesale_min_units, note, entered_by, created_at }`.
+### `GET /v1/in-store/entries?visit_id=&date=&supermarket_id=&entered_by=&review_status=&page=&limit=`
+Recent submissions (defaults to today, Buenos Aires; `date` is ignored when
+`visit_id` is set). Paginated. Item: `{ id, visit_id, supermarket_id,
+supermarket_name, ean, product_id, product_name, brand, price, wholesale_price,
+wholesale_min_units, note, entered_by, review_status, created_at }`.
 
 ---
 
@@ -335,5 +340,43 @@ brand, price, wholesale_price, wholesale_min_units, note, entered_by, created_at
 8. Offline queue + retry + pending indicator (entries, visit create, photos).
 9. Error/empty states: not-in-catalog skip, network errors, camera-permission denied.
 10. (Optional, later) PWA manifest + service worker for install/fullscreen.
-```
+
+---
+
+## 10. Back-office daily review (separate screen / app)
+
+This is **not** part of the field-worker app — it's a back-office screen (in the
+dashboard) that reviews each day's data before it reaches the client, the same way
+you review the online scraper. **It uses a full-access API key, not the
+`in-store`-scoped app key** (the review endpoints return `403` for a scoped key).
+
+Flow:
+
+1. **Review queue** — `GET /v1/in-store/review/pending` lists finished visits
+   awaiting review (oldest first), each with `supermarket_name`, location, worker,
+   and `pending_entries` count. Filter by `supermarket_id`.
+2. **Review a visit** — `GET /v1/in-store/review/visits/:id` returns the visit +
+   all its entries (with `product_name`, `brand`, `image_url`, the four price
+   fields, and `review_status`). Show the flyer photos too via
+   `GET /v1/in-store/visits/:id/photos`.
+3. **Approve** — `POST /v1/in-store/review/visits/:id/approve`:
+   ```ts
+   {
+     reviewed_by: string;   // required — who signed off
+     decisions?: {          // omit an entry → approved as-is; omit all → approve everything
+       entry_id: string;
+       action: 'approve' | 'reject';
+       price?: number;                    // inline edits, on approve
+       wholesale_price?: number | null;
+       wholesale_min_units?: number | null;
+       note?: string | null;
+     }[];
+   }
+   ```
+   Approving materializes each entry into the client base (a run-less snapshot);
+   rejecting discards it. Response: `{ visit_id, approved, rejected, snapshots }`.
+   The visit then drops out of the pending queue.
+
+Once approved, the carry-forward keeps those prices exporting daily until the next
+visit supersedes them — no further action needed.
 

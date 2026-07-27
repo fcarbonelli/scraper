@@ -5,13 +5,13 @@
     "supermarket_id": "diarco",
     "ean": "7790040999999",
     "product_id": "50bb31b8-2222-4aaa-8bbb-000000000002",
-    "supermarket_product_id": "9c0d1e2f-3a4b-4c5d-8e6f-708192a3b4c5",
-    "snapshot_id": 10231,
+    "product_name": "Gaseosa Cola 2.25L",
     "price": 2590.0,
     "wholesale_price": 2190.0,
     "wholesale_min_units": 6,
     "note": "Góndola punta, se agota",
     "entered_by": "Juan Pérez",
+    "review_status": "pending",
     "created_at": "2026-07-16T01:32:05.912Z"
   },
   "meta": { "ts": "2026-07-16T01:32:05.930Z" }

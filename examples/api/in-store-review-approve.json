@@ -1,0 +1,9 @@
+{
+  "data": {
+    "visit_id": "0a1b2c3d-4e5f-4071-8a2b-3c4d5e6f7081",
+    "approved": 1,
+    "rejected": 1,
+    "snapshots": 1
+  },
+  "meta": { "ts": "2026-07-16T09:05:00.000Z" }
+}

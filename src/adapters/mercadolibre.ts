@@ -215,13 +215,30 @@ function urlForId(id: string): string {
   return `https://${SITE_HOST}/p/${id}`;
 }
 
-/** Strip tracking params and normalize host; keep the path (holds the id). */
+/**
+ * Ecomodico's own listing URL for a catalog product: the shared catalog page
+ * pinned to Ecomodico's specific offer via `?item_id=`. Without the pin the
+ * page shows the cheapest seller (usually not Ecomodico), which is misleading
+ * since we track Ecomodico's price. Falls back to the plain PDP when we don't
+ * have the item id.
+ */
+export function ecomodicoListingUrl(catalogId: string, itemId: string | undefined): string {
+  return itemId ? `${urlForId(catalogId)}?item_id=${encodeURIComponent(itemId)}` : urlForId(catalogId);
+}
+
+/**
+ * Normalize host/protocol and drop tracking params — but KEEP `item_id`, which
+ * pins Ecomodico's offer on the catalog page (see `ecomodicoListingUrl`). The
+ * catalog product id lives in the path, so `resolveExternalId` is unaffected.
+ */
 function canonicalizeUrl(raw: string): string {
   const u = new URL(raw);
   u.protocol = 'https:';
   u.host = SITE_HOST;
-  u.search = '';
   u.hash = '';
+  const itemId = u.searchParams.get('item_id');
+  u.search = '';
+  if (itemId) u.searchParams.set('item_id', itemId);
   return u.toString();
 }
 
@@ -412,11 +429,12 @@ async function searchByEan(ean: string, signal?: AbortSignal): Promise<EanSearch
   const match = results.find((r) => r.id) ?? undefined;
   if (!match?.id) return null;
 
-  // Keep the mapping only if Ecomodico offers this catalog product.
+  // Keep the mapping only if Ecomodico offers this catalog product, and point
+  // the URL at Ecomodico's own listing (not the shared catalog buy-box).
   const offer = await fetchEcomodicoOffer(match.id, signal, SEARCH_TIMEOUT_MS);
   if (!offer) return null;
 
-  return { url: urlForId(match.id), externalId: match.id };
+  return { url: ecomodicoListingUrl(match.id, offer.itemId), externalId: match.id };
 }
 
 export const mercadolibreAdapter: SupermarketAdapter = {
