@@ -16,18 +16,18 @@
         "quantity": "1L"
       },
       "proposed_match": {
-        "product_id": "50bb31b8-1111-4aaa-8bbb-000000000001",
-        "name": "Lavandina Original Ayudin 1l",
-        "brand": "AYUDIN",
+        "product_id": null,
+        "name": "LAVANDINAS REG AYUDÍN 1L",
+        "brand": "AYUDÍN",
         "ean": "7793253006709",
-        "quantity": "1 Litro",
+        "quantity": "1L",
         "ean_in_catalog": true
       },
       "confidence": 1.0,
       "method": "ean",
       "reason": "EAN idéntico",
       "candidates": [
-        { "product_id": "50bb31b8-1111-4aaa-8bbb-000000000001", "name": "Lavandina Original Ayudin 1l", "brand": "AYUDIN" }
+        { "ean": "7793253006709", "product_id": null, "name": "LAVANDINAS REG AYUDÍN 1L", "brand": "AYUDÍN" }
       ],
       "status": "pending",
       "reviewed_by": null,
@@ -40,28 +40,28 @@
       "page_number": 16,
       "page_image_url": "https://project.supabase.co/storage/v1/object/public/revista-pages/f1a2b3c4-d5e6-4789-9abc-def012345678/page-016.png",
       "extracted": {
-        "name": "Lavandina en Gel Ayudín 900ml",
-        "brand": "Ayudín",
+        "name": "Esponja Mortimer cuadriculada",
+        "brand": "Mortimer",
         "ean": null,
         "price": 1899.0,
         "promo_price": 1499.0,
         "promo_text": "2do al 50%",
-        "quantity": "900ml"
+        "quantity": "1 u"
       },
       "proposed_match": {
         "product_id": "50bb31b8-2222-4aaa-8bbb-000000000002",
-        "name": "Lavandina en Gel Original Ayudin 1l",
-        "brand": "AYUDIN",
-        "ean": "7793253009999",
-        "quantity": "1 Litro",
-        "ean_in_catalog": false
+        "name": "ESPONJAS MORTIMER CUADRICULADA",
+        "brand": "MORTIMER",
+        "ean": "7793253038106",
+        "quantity": "CUADRICULADA",
+        "ean_in_catalog": true
       },
       "confidence": 0.82,
       "method": "llm",
-      "reason": "Misma marca y tipo (lavandina en gel original); difiere el tamaño (900ml vs 1L).",
+      "reason": "Misma marca y tipo (esponja cuadriculada).",
       "candidates": [
-        { "product_id": "50bb31b8-2222-4aaa-8bbb-000000000002", "name": "Lavandina en Gel Original Ayudin 1l", "brand": "AYUDIN" },
-        { "product_id": "50bb31b8-3333-4aaa-8bbb-000000000003", "name": "Lavandina en Gel Perfumada Ayudin 1l", "brand": "AYUDIN" }
+        { "ean": "7793253038106", "product_id": null, "name": "ESPONJAS MORTIMER CUADRICULADA", "brand": "MORTIMER" },
+        { "ean": "7793253092276", "product_id": null, "name": "ESPONJAS MORTIMER PODEROSA", "brand": "MORTIMER" }
       ],
       "status": "pending",
       "reviewed_by": null,
@@ -82,25 +82,16 @@
         "promo_text": null,
         "quantity": "750ml"
       },
-      "proposed_match": {
-        "product_id": "50bb31b8-4444-4aaa-8bbb-000000000004",
-        "name": "Detergente Magistral Original 500ml",
-        "brand": "MAGISTRAL",
-        "ean": "7790063012345",
-        "quantity": "500 ml",
-        "ean_in_catalog": false
-      },
-      "confidence": 0.41,
+      "proposed_match": null,
+      "confidence": 0,
       "method": "llm",
-      "reason": "Misma marca y tipo; baja confianza por diferencia de tamaño y variedad no confirmada.",
-      "candidates": [
-        { "product_id": "50bb31b8-4444-4aaa-8bbb-000000000004", "name": "Detergente Magistral Original 500ml", "brand": "MAGISTRAL" }
-      ],
+      "reason": "Ningún candidato del Catálogo EAN coincide (marca fuera de catálogo).",
+      "candidates": [],
       "status": "pending",
       "reviewed_by": null,
       "reviewed_at": null
     }
   ],
   "pagination": { "page": 1, "limit": 50, "total": 3, "totalPages": 1 },
-  "meta": { "ts": "2026-06-29T09:10:02.553Z" }
+  "meta": { "ts": "2026-06-29T09:05:12.441Z" }
 }

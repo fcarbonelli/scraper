@@ -2,24 +2,26 @@
  * Turning a reviewed magazine item into real price data.
  *
  * Approving / editing / manually adding an item:
- *   1. ensures a `supermarket_products` mapping for (supermarket, product),
- *   2. ensures ONE run-less `price_snapshots` row for TODAY (insert or
+ *   1. resolves Catálogo EAN → master product (`ensureMasterProductForEan`),
+ *   2. ensures a `supermarket_products` mapping for (supermarket, product),
+ *   3. ensures ONE run-less `price_snapshots` row for TODAY (insert or
  *      update-in-place — never a second row the same BA day),
- *   3. stamps the review item with the result.
+ *   4. stamps the review item with the result.
  *
  * Snapshots are written RUN-LESS (`scrape_run_id = null`). A human approving
  * the item in the revista review IS the gate — so these are trusted and always
  * client-visible. Carry-forward re-emits them daily until the next issue.
  *
- * Catalog-only: `product_id` must reference an existing master product whose
- * EAN is in the official Catálogo EAN (TAXONOMY ∪ catalog_extra_eans). Matching
- * may still propose any master; approve/manual-add/rematch enforce the gate.
+ * Match identity is the official Catálogo EAN (`proposed_ean`). `product_id` is
+ * resolved on approve. Legacy items with only `proposed_product_id` still work
+ * via the Catálogo EAN gate.
  */
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { lookupCatalog } from '../shared/catalog.js';
 import type { TaxonomyEntry } from '../shared/taxonomy.js';
+import { ensureMasterProductForEan } from '../instore/resolve.js';
 import { deleteMagazineImages } from './storage.js';
 import {
   buenosAiresDate,
@@ -100,6 +102,44 @@ export async function assertProductInEanCatalog(
   }
 
   return { ean };
+}
+
+/**
+ * Resolve approve/manual/rematch target: prefer Catálogo EAN, fall back to
+ * legacy product_id. Creates the master from taxonomy when needed.
+ */
+async function resolveProductForApprove(opts: {
+  ean?: string;
+  productId?: string;
+  fallbackEan?: string | null;
+  fallbackProductId?: string | null;
+}): Promise<{ productId: string; ean: string }> {
+  const bodyEan = opts.ean?.replace(/\D/g, '') || '';
+  const fallbackEan = opts.fallbackEan?.replace(/\D/g, '') || '';
+
+  // Prefer explicit ean; else proposed_ean when no product_id override.
+  const eanToResolve = bodyEan || (!opts.productId ? fallbackEan : '');
+  if (eanToResolve) {
+    const productId = await ensureMasterProductForEan(eanToResolve);
+    if (!productId) {
+      throw new ItemError(
+        'invalid',
+        `EAN ${eanToResolve} no está en el Catálogo EAN. Agregalo ahí antes de aprobar.`,
+      );
+    }
+    await assertProductInEanCatalog(productId);
+    return { productId, ean: eanToResolve };
+  }
+
+  const productId = opts.productId ?? opts.fallbackProductId ?? null;
+  if (!productId) {
+    throw new ItemError(
+      'invalid',
+      'No product to approve: provide ean or product_id (no proposed match).',
+    );
+  }
+  const { ean } = await assertProductInEanCatalog(productId);
+  return { productId, ean };
 }
 
 /**
@@ -297,6 +337,7 @@ interface ReviewItemRow {
   supermarket_id: string;
   status: 'pending' | 'approved' | 'rejected';
   proposed_product_id: string | null;
+  proposed_ean: string | null;
   method: string;
   extracted: {
     name?: string | null;
@@ -318,6 +359,9 @@ interface ReviewItemRow {
 }
 
 export interface ApproveBody {
+  /** Preferred: Catálogo EAN to approve against. */
+  ean?: string;
+  /** Legacy override: master product uuid. */
   productId?: string;
   price?: number;
   promoPrice?: number;
@@ -332,6 +376,7 @@ export interface ApproveResult {
   supermarketProductId: string;
   snapshotId: number;
   productId: string;
+  ean: string;
 }
 
 /**
@@ -345,7 +390,7 @@ export async function approveReviewItem(
   const { data, error } = await db
     .from('revista_review_items')
     .select(
-      'id, magazine_id, supermarket_id, status, proposed_product_id, method, extracted, approved_override, resulting_supermarket_product_id, resulting_snapshot_id',
+      'id, magazine_id, supermarket_id, status, proposed_product_id, proposed_ean, method, extracted, approved_override, resulting_supermarket_product_id, resulting_snapshot_id',
     )
     .eq('id', itemId)
     .maybeSingle();
@@ -357,12 +402,12 @@ export async function approveReviewItem(
   }
   await assertMagazineCarryActive(item.magazine_id);
 
-  const productId = body.productId ?? item.proposed_product_id;
-  if (!productId) {
-    throw new ItemError('invalid', 'No product to approve: provide product_id (no proposed match).');
-  }
-
-  await assertProductInEanCatalog(productId);
+  const { productId, ean } = await resolveProductForApprove({
+    ean: body.ean,
+    productId: body.productId,
+    fallbackEan: item.proposed_ean,
+    fallbackProductId: item.proposed_product_id,
+  });
 
   const prices: SnapshotPrices = {
     price: body.price ?? item.extracted?.price ?? null,
@@ -373,12 +418,17 @@ export async function approveReviewItem(
     throw new ItemError('invalid', 'No price to record (neither price nor promo_price).');
   }
 
+  const rematch =
+    Boolean(body.ean || body.productId) &&
+    (Boolean(body.ean && body.ean.replace(/\D/g, '') !== (item.proposed_ean ?? '').replace(/\D/g, '')) ||
+      Boolean(body.productId && body.productId !== item.proposed_product_id));
+
   const spId = await ensureSupermarketProduct(item.supermarket_id, productId, item.magazine_id);
   const snapshotId = await ensureTodayRevistaSnapshot({
     supermarketProductId: spId,
     prices,
     siteProductName: item.extracted?.name ?? null,
-    tierUsed: body.productId && body.productId !== item.proposed_product_id ? 'manual' : 'ai',
+    tierUsed: rematch ? 'manual' : 'ai',
   });
 
   const upd = await db
@@ -386,23 +436,27 @@ export async function approveReviewItem(
     .update({
       status: 'approved',
       proposed_product_id: productId,
+      proposed_ean: ean,
       note: body.note ?? null,
       reviewed_by: body.reviewedBy ?? null,
       reviewed_at: new Date().toISOString(),
       resulting_supermarket_product_id: spId,
       resulting_snapshot_id: snapshotId,
-      ...(body.productId ? { method: 'manual' } : {}),
+      ...(rematch ? { method: 'manual' } : {}),
     })
     .eq('id', itemId);
   if (upd.error) throw upd.error;
 
-  logger.info({ itemId, productId, spId, snapshotId }, 'revista: item approved');
-  return { itemId, status: 'approved', supermarketProductId: spId, snapshotId, productId };
+  logger.info({ itemId, productId, ean, spId, snapshotId }, 'revista: item approved');
+  return { itemId, status: 'approved', supermarketProductId: spId, snapshotId, productId, ean };
 }
 
 export interface ManualAddBody {
   pageNumber: number;
-  productId: string;
+  /** Preferred: Catálogo EAN. */
+  ean?: string;
+  /** Legacy: existing master product uuid. */
+  productId?: string;
   price: number;
   promoPrice?: number;
   promoText?: string;
@@ -419,7 +473,10 @@ export async function addManualItem(
 ): Promise<ApproveResult> {
   await assertMagazineCarryActive(magazineId);
 
-  await assertProductInEanCatalog(body.productId);
+  const { productId, ean } = await resolveProductForApprove({
+    ean: body.ean,
+    productId: body.productId,
+  });
 
   const prices: SnapshotPrices = {
     price: body.price,
@@ -427,7 +484,7 @@ export async function addManualItem(
     promoText: body.promoText ?? null,
   };
 
-  const spId = await ensureSupermarketProduct(supermarketId, body.productId, magazineId);
+  const spId = await ensureSupermarketProduct(supermarketId, productId, magazineId);
   const snapshotId = await ensureTodayRevistaSnapshot({
     supermarketProductId: spId,
     prices,
@@ -451,7 +508,8 @@ export async function addManualItem(
         promo_text: body.promoText ?? null,
         quantity: null,
       },
-      proposed_product_id: body.productId,
+      proposed_ean: ean,
+      proposed_product_id: productId,
       confidence: 1,
       method: 'manual',
       reason: 'Agregado manualmente por el revisor',
@@ -467,17 +525,19 @@ export async function addManualItem(
     .single();
   if (error) throw error;
 
-  logger.info({ magazineId, itemId: data.id, productId: body.productId, snapshotId }, 'revista: manual item added');
+  logger.info({ magazineId, itemId: data.id, productId, ean, snapshotId }, 'revista: manual item added');
   return {
     itemId: data.id as string,
     status: 'approved',
     supermarketProductId: spId,
     snapshotId,
-    productId: body.productId,
+    productId,
+    ean,
   };
 }
 
 export interface UpdateApprovedBody {
+  ean?: string;
   productId?: string;
   /** Regular price; omit to leave unchanged. Pass null to clear (not useful alone). */
   price?: number | null;
@@ -498,6 +558,7 @@ export async function updateApprovedItem(
   body: UpdateApprovedBody,
 ): Promise<ApproveResult> {
   const hasAny =
+    body.ean !== undefined ||
     body.productId !== undefined ||
     body.price !== undefined ||
     body.promoPrice !== undefined ||
@@ -508,7 +569,7 @@ export async function updateApprovedItem(
   const { data, error } = await db
     .from('revista_review_items')
     .select(
-      'id, magazine_id, supermarket_id, status, proposed_product_id, method, extracted, approved_override, resulting_supermarket_product_id, resulting_snapshot_id',
+      'id, magazine_id, supermarket_id, status, proposed_product_id, proposed_ean, method, extracted, approved_override, resulting_supermarket_product_id, resulting_snapshot_id',
     )
     .eq('id', itemId)
     .maybeSingle();
@@ -520,9 +581,12 @@ export async function updateApprovedItem(
   }
   await assertMagazineCarryActive(item.magazine_id);
 
-  const rematch =
-    body.productId != null &&
-    body.productId !== item.proposed_product_id;
+  const rematchEan =
+    body.ean != null &&
+    body.ean.replace(/\D/g, '') !== (item.proposed_ean ?? '').replace(/\D/g, '');
+  const rematchProduct =
+    body.productId != null && body.productId !== item.proposed_product_id;
+  const rematch = rematchEan || rematchProduct;
 
   if (rematch) {
     // Undo old approval effects, then re-approve against the new product.
@@ -542,6 +606,7 @@ export async function updateApprovedItem(
     if (reApprove.error) throw reApprove.error;
 
     return approveReviewItem(itemId, {
+      ean: body.ean,
       productId: body.productId,
       price: body.price ?? item.extracted?.price ?? undefined,
       promoPrice:
@@ -609,8 +674,9 @@ export async function updateApprovedItem(
     .eq('id', itemId);
   if (upd.error) throw upd.error;
 
+  const ean = (item.proposed_ean ?? '').replace(/\D/g, '') || (await assertProductInEanCatalog(productId)).ean;
   logger.info({ itemId, productId, spId, snapshotId }, 'revista: approved item updated');
-  return { itemId, status: 'approved', supermarketProductId: spId, snapshotId, productId };
+  return { itemId, status: 'approved', supermarketProductId: spId, snapshotId, productId, ean };
 }
 
 export interface UndoResult {

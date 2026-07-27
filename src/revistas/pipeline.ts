@@ -190,8 +190,12 @@ async function processCandidate(
             method: r.method,
             confidence: r.confidence,
             reason: r.reason,
-            matched_product_id: r.matched?.id ?? null,
-            top_candidates: r.candidates.slice(0, 3).map((c) => ({ id: c.id, name: c.name, brand: c.brand ?? null })),
+            matched_ean: r.matched?.ean ?? r.matched?.id ?? null,
+            top_candidates: r.candidates.slice(0, 3).map((c) => ({
+              ean: c.ean ?? c.id,
+              name: c.name,
+              brand: c.brand ?? null,
+            })),
           })),
         },
       })
