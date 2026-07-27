@@ -127,7 +127,8 @@ CREATE INDEX ON price_snapshots (supermarket_product_id, scraped_at DESC);
 -- The client-facing `client_base` view (migration 002, fixed in 003; publication
 -- layer in 005; active-filter in 008; target-prices in 012; operator preview
 -- twin `client_base_preview` in 020 — same columns minus the publish gate,
--- powering GET /v1/data/export?preview=true) maps these
+-- powering GET /v1/data/export?preview=true; EAN-required guard in 021 — both
+-- views drop EAN-less products so no blank-EAN row ever reaches export/API) maps these
 -- to the client's columns: Precio_Regular = COALESCE(list_price, price),
 -- Precio_c_Oferta_1 = the sale price when marked down, and Descuento_Unitario =
 -- max(named-promo discount, markdown gap). Do NOT change `price` to mean the
