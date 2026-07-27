@@ -355,6 +355,38 @@ Manually add a product the AI missed. Catalog‑only `product_id`.
 Response: same shape as `approve` (creates an `approved`, `method: "manual"`
 item + mapping + snapshot).
 
+### `POST /v1/revistas/:magazineId/deactivate` · `.../activate`
+
+Manual **on/off switch** for a whole magazine (`carry_active`). Deactivating
+drops **all** its approved prices from the client base at once — without
+un-approving each product — for a flyer the AI read badly or one you want to
+retire early (until date windows land). Reversible.
+
+- **deactivate** → `carry_active=false`; pauses the mappings the magazine owns
+  (unless another current + active magazine still keeps them) and purges today's
+  run-less snapshots for the paused ones → the export clears immediately.
+  Approvals are preserved.
+- **activate** → `carry_active=true`; re-activates those mappings and re-emits
+  today's price so they reappear in the export immediately.
+
+No body. Response:
+`{ magazine_id, carry_active, affected_mappings, purged_today }`. While
+deactivated, approving/editing its items returns `409 CONFLICT` (reactivate
+first). See `examples/api/revista-deactivate.json`. **UI:** a toggle/switch on
+the magazine header ("Contar en la base" / "Folleto desactivado").
+
+### `DELETE /v1/revistas/:magazineId`
+
+Remove a magazine **entirely** — for a flyer the client doesn't care about and
+wants gone (frees Storage, clears the review queue). Deletes the magazine
+(cascading its review items), drops its prices from the client base (same pause +
+purge-today as deactivate), and deletes its page images from Storage.
+**Not reversible** (unlike deactivate). Historical `price_snapshots` of its
+mappings are kept. Response:
+`{ magazine_id, deleted_items, paused_mappings, purged_today, deleted_images }`.
+See `examples/api/revista-delete.json`. **UI:** a "Eliminar folleto" action with
+a confirm dialog (distinct from the deactivate toggle).
+
 ### `POST /v1/revistas/:magazineId/finalize`
 
 Mark the magazine reviewed (drops it from `pending`, resolves the
@@ -403,6 +435,13 @@ export interface RevistaMagazine {
   /** Newer issue that replaced this one within the same series; null = still current. */
   superseded_by: string | null;
   superseded_at: string | null;
+  /**
+   * Manual on/off switch. false = the operator deactivated this issue, so its
+   * approved prices are excluded from the client base (dropped immediately,
+   * approvals kept). Orthogonal to superseded_by. Toggle via
+   * POST /v1/revistas/:id/deactivate | activate.
+   */
+  carry_active: boolean;
 }
 
 export interface RevistaExtracted {
@@ -503,6 +542,14 @@ addRevistaItem: (magazineId: string, body: { page_number: number; product_id: st
 finalizeRevista: (id: string, force = false) =>
   request<ApiSuccess<{ magazine_id: string; status: RevistaMagazineStatus }>>(
     `/revistas/${id}/finalize`, { method: 'POST', body: JSON.stringify({ force }) },
+  ),
+setRevistaCarryActive: (id: string, active: boolean) =>
+  request<ApiSuccess<{ magazine_id: string; carry_active: boolean; affected_mappings: number; purged_today: number }>>(
+    `/revistas/${id}/${active ? 'activate' : 'deactivate'}`, { method: 'POST' },
+  ),
+deleteRevista: (id: string) =>
+  request<ApiSuccess<{ magazine_id: string; deleted_items: number; paused_mappings: number; purged_today: number; deleted_images: number }>>(
+    `/revistas/${id}`, { method: 'DELETE' },
   ),
 listRevistaChecks: (q: { supermarket_id?: string; latest?: boolean; page?: number; limit?: number } = {}) =>
   request(`/revistas/checks?${new URLSearchParams(q as Record<string, string>)}`),

@@ -1599,6 +1599,67 @@ Mark the magazine reviewed (drops it from `pending`, resolves the
 with items still `pending`. Returns `{ magazine_id, status, approved, rejected, pending }`.
 Errors: `409 CONFLICT` when items are still pending and `force` is not set.
 
+### `POST /v1/revistas/:magazineId/deactivate` · `POST /v1/revistas/:magazineId/activate`
+
+Manual **on/off switch** for a whole magazine (`carry_active`). Deactivating
+drops **all** its approved prices from the client base at once — without
+un-approving each product — for a flyer the AI read badly or one you want to
+retire. Fully reversible.
+
+- **deactivate**: sets `carry_active=false`, pauses the mappings the magazine
+  owns (unless another current + active magazine still keeps them), and purges
+  today's run-less snapshots for the paused ones so the export clears
+  immediately. Approvals are **not** touched.
+- **activate**: sets `carry_active=true`, re-activates those mappings and
+  re-emits today's price so they reappear in the export immediately.
+
+While a magazine is deactivated, approving / editing its items returns
+`409 CONFLICT` (reactivate it first). No body. See
+`examples/api/revista-deactivate.json`.
+
+```json
+{
+  "data": {
+    "magazine_id": "aee0821f-8642-4fcb-9f30-5feb2a23f323",
+    "carry_active": false,
+    "affected_mappings": 7,
+    "purged_today": 7
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+Errors: `404 NOT_FOUND` (unknown magazine).
+
+### `DELETE /v1/revistas/:magazineId`
+
+Remove a magazine **entirely** — for a flyer the client doesn't care about and
+wants gone (frees Storage, clears the review queue). Deletes the magazine row
+(cascading its review items), drops its prices from the client base (same pause +
+purge-today as deactivate), and deletes its page images from Storage.
+**Not reversible.** Historical `price_snapshots` of its mappings are kept. No
+body. See `examples/api/revista-delete.json`.
+
+```json
+{
+  "data": {
+    "magazine_id": "285b9d01-329a-4f98-9b45-bf04f4cc38f9",
+    "deleted_items": 12,
+    "paused_mappings": 0,
+    "purged_today": 0,
+    "deleted_images": 3
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+Errors: `404 NOT_FOUND` (unknown magazine).
+
+> Every magazine header (`/pending`, `/revistas`, `/:id`, `/:id/analysis`) and
+> each cross-magazine item (`/items`) now carries a `carry_active` boolean.
+> `carry_active` is **orthogonal** to `superseded_by`: a magazine can be current
+> (not superseded) yet manually deactivated.
+
 ---
 
 ## In-store (manual price entry)

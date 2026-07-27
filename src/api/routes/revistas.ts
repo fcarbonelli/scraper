@@ -15,7 +15,10 @@
  *   PATCH  /v1/revistas/items/:itemId            edit an approved item
  *   DELETE /v1/revistas/items/:itemId            undo an approval → pending
  *   POST   /v1/revistas/:magazineId/items        manually add a missed product
+ *   POST   /v1/revistas/:magazineId/deactivate   drop all approved prices from base
+ *   POST   /v1/revistas/:magazineId/activate     restore them
  *   POST   /v1/revistas/:magazineId/finalize     mark magazine reviewed
+ *   DELETE /v1/revistas/:magazineId              remove magazine entirely
  *
  * Contract: docs/REVISTA_REVIEW.md. Auth + envelope are the platform standard.
  */
@@ -29,6 +32,9 @@ import {
   addManualItem,
   updateApprovedItem,
   undoApprovedItem,
+  deactivateMagazine,
+  reactivateMagazine,
+  deleteMagazine,
   ItemError,
   type ApproveResult,
 } from '../../revistas/approve.js';
@@ -64,6 +70,8 @@ interface MagazineRow {
   superseded_at: string | null;
   /** Flyer series within the chain (e.g. 'mm', 'folder-resto'). */
   series_key: string | null;
+  /** Manual on/off switch (migration 018). false = excluded from client base. */
+  carry_active: boolean | null;
 }
 
 interface Counts {
@@ -106,11 +114,12 @@ function magazineResponse(m: MagazineRow, supermarketName: string, counts: Count
     series_key: m.series_key ?? 'default',
     superseded_by: m.superseded_by ?? null,
     superseded_at: m.superseded_at ?? null,
+    carry_active: m.carry_active ?? true,
   };
 }
 
 const MAGAZINE_COLS =
-  'id, supermarket_id, label, scrape_run_id, source_strategy, source_url, page_count, status, detected_at, series_key, superseded_by, superseded_at';
+  'id, supermarket_id, label, scrape_run_id, source_strategy, source_url, page_count, status, detected_at, series_key, superseded_by, superseded_at, carry_active';
 
 async function loadMagazine(id: string): Promise<MagazineRow> {
   const { data, error } = await db
@@ -377,6 +386,7 @@ interface EnrichedItemRow {
   magazine_status: string | null;
   series_key: string | null;
   superseded_by: string | null;
+  carry_active: boolean | null;
   page_number: number;
   page_image_url: string | null;
   extracted: Record<string, unknown> | null;
@@ -426,6 +436,7 @@ function enrichedItemResponse(i: EnrichedItemRow): object {
     magazine_status: i.magazine_status ?? null,
     series_key: i.series_key ?? 'default',
     superseded_by: i.superseded_by ?? null,
+    carry_active: i.carry_active ?? true,
     page_number: i.page_number,
     page_image_url: i.page_image_url,
     extracted,
@@ -1136,6 +1147,70 @@ revistasRouter.post('/:magazineId/items', async (req: Request, res: Response) =>
       reviewedBy: body.reviewed_by,
     });
     res.status(201).json(success(approveResultResponse(result)));
+  } catch (err) {
+    mapItemError(err);
+  }
+});
+
+// =============================================================================
+// POST /v1/revistas/:magazineId/deactivate  — manual off switch
+// POST /v1/revistas/:magazineId/activate    — manual on switch
+//
+// Drop / restore ALL approved prices of a magazine from the client base at once,
+// without un-approving each product (e.g. a flyer the AI read badly). Reversible.
+// =============================================================================
+function toggleResultResponse(r: {
+  magazineId: string;
+  carryActive: boolean;
+  affectedMappings: number;
+  purgedToday: number;
+}): object {
+  return {
+    magazine_id: r.magazineId,
+    carry_active: r.carryActive,
+    affected_mappings: r.affectedMappings,
+    purged_today: r.purgedToday,
+  };
+}
+
+revistasRouter.post('/:magazineId/deactivate', async (req: Request, res: Response) => {
+  try {
+    const result = await deactivateMagazine(req.params.magazineId as string);
+    res.json(success(toggleResultResponse(result)));
+  } catch (err) {
+    mapItemError(err);
+  }
+});
+
+revistasRouter.post('/:magazineId/activate', async (req: Request, res: Response) => {
+  try {
+    const result = await reactivateMagazine(req.params.magazineId as string);
+    res.json(success(toggleResultResponse(result)));
+  } catch (err) {
+    mapItemError(err);
+  }
+});
+
+// =============================================================================
+// DELETE /v1/revistas/:magazineId  — remove a magazine entirely
+//
+// For a flyer the client doesn't care about: deletes the magazine (cascading its
+// review items), drops its prices from the client base, and frees Storage (page
+// images). NOT reversible. Registered after /items/:itemId so "items" is never a
+// magazine id.
+// =============================================================================
+revistasRouter.delete('/:magazineId', async (req: Request, res: Response) => {
+  try {
+    const result = await deleteMagazine(req.params.magazineId as string);
+    res.json(
+      success({
+        magazine_id: result.magazineId,
+        deleted_items: result.deletedItems,
+        paused_mappings: result.pausedMappings,
+        purged_today: result.purgedToday,
+        deleted_images: result.deletedImages,
+      }),
+    );
   } catch (err) {
     mapItemError(err);
   }

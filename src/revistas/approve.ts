@@ -16,6 +16,7 @@
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
+import { deleteMagazineImages } from './storage.js';
 import {
   buenosAiresDate,
   decideTodayWrite,
@@ -28,6 +29,26 @@ export type { SnapshotPrices } from './pricing.js';
 /** Synthetic SKU for a revista-sourced mapping (no real site SKU exists). */
 export function revistaExternalId(productId: string): string {
   return `revista-${productId}`;
+}
+
+/**
+ * Block writes (approve / edit / manual add) on a manually deactivated magazine.
+ * A deactivated issue is off the client base on purpose; approving into it would
+ * silently re-activate its mapping. Reactivate the magazine first.
+ */
+async function assertMagazineCarryActive(magazineId: string): Promise<void> {
+  const { data, error } = await db
+    .from('revista_magazines')
+    .select('carry_active')
+    .eq('id', magazineId)
+    .maybeSingle();
+  if (error) throw error;
+  if (data && data.carry_active === false) {
+    throw new ItemError(
+      'conflict',
+      'La revista está desactivada. Reactivala antes de aprobar o editar sus productos.',
+    );
+  }
 }
 
 /**
@@ -263,6 +284,7 @@ export async function approveReviewItem(
   if (item.status !== 'pending') {
     throw new ItemError('conflict', `Item already ${item.status}`);
   }
+  await assertMagazineCarryActive(item.magazine_id);
 
   const productId = body.productId ?? item.proposed_product_id;
   if (!productId) {
@@ -322,6 +344,8 @@ export async function addManualItem(
   pageImageUrl: string | null,
   body: ManualAddBody,
 ): Promise<ApproveResult> {
+  await assertMagazineCarryActive(magazineId);
+
   const prices: SnapshotPrices = {
     price: body.price,
     promoPrice: body.promoPrice ?? null,
@@ -419,6 +443,7 @@ export async function updateApprovedItem(
   if (item.status !== 'approved') {
     throw new ItemError('conflict', `Item is ${item.status}; only approved items can be patched.`);
   }
+  await assertMagazineCarryActive(item.magazine_id);
 
   const rematch =
     body.productId != null &&
@@ -710,10 +735,22 @@ export async function purgeTodayRevistaSnapshotsNotApprovedOn(
   ];
   if (candidateSpIds.length === 0) return 0;
 
+  return purgeTodayRevistaSnapshotsForMappings(candidateSpIds);
+}
+
+/**
+ * Delete today's (Buenos Aires) run-less revista snapshots for the given
+ * mappings, so the client base drops those prices immediately. Only touches
+ * revista-owned run-less rows; leaves manual / scraped rows alone.
+ */
+export async function purgeTodayRevistaSnapshotsForMappings(
+  spIds: string[],
+): Promise<number> {
+  if (spIds.length === 0) return 0;
   const today = buenosAiresDate();
   const toDelete: number[] = [];
 
-  for (const spId of candidateSpIds) {
+  for (const spId of spIds) {
     const { data, error } = await db
       .from('price_snapshots')
       .select('id, scraped_at, raw_data')
@@ -803,7 +840,8 @@ export async function pauseRevistaMappingsNotOnCurrent(
     .from('revista_magazines')
     .select('id')
     .eq('supermarket_id', supermarketId)
-    .is('superseded_by', null);
+    .is('superseded_by', null)
+    .eq('carry_active', true);
   if (currentMagsRes.error) throw currentMagsRes.error;
   const currentMagazineIds = (currentMagsRes.data ?? []).map((r) => r.id as string);
 
@@ -879,7 +917,8 @@ export async function reconcileRevistaActiveMappings(
         .from('revista_magazines')
         .select('id')
         .eq('supermarket_id', smId)
-        .is('superseded_by', null);
+        .is('superseded_by', null)
+        .eq('carry_active', true);
       if (currentMagsRes.error) throw currentMagsRes.error;
       const currentMagazineIds = (currentMagsRes.data ?? []).map((r) => r.id as string);
       const keep = new Set<string>();
@@ -903,6 +942,242 @@ export async function reconcileRevistaActiveMappings(
     paused += await pauseRevistaMappingsNotOnCurrent(smId, ids);
   }
   return { considered, paused };
+}
+
+// =============================================================================
+// Manual magazine on/off switch (carry_active) — migration 018
+// =============================================================================
+
+export interface MagazineToggleResult {
+  magazineId: string;
+  carryActive: boolean;
+  /** Mappings paused (deactivate) or re-emitted (reactivate). */
+  affectedMappings: number;
+  /** Today's snapshots purged (deactivate only). */
+  purgedToday: number;
+}
+
+interface MagazineToggleRow {
+  id: string;
+  supermarket_id: string;
+  carry_active: boolean;
+}
+
+async function loadMagazineForToggle(magazineId: string): Promise<MagazineToggleRow> {
+  const { data, error } = await db
+    .from('revista_magazines')
+    .select('id, supermarket_id, carry_active')
+    .eq('id', magazineId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ItemError('not_found', 'Magazine not found');
+  return data as MagazineToggleRow;
+}
+
+/** Distinct mappings that have an approved review item on this magazine. */
+async function approvedMappingIdsOnMagazine(magazineId: string): Promise<string[]> {
+  const { data, error } = await db
+    .from('revista_review_items')
+    .select('resulting_supermarket_product_id')
+    .eq('magazine_id', magazineId)
+    .eq('status', 'approved')
+    .not('resulting_supermarket_product_id', 'is', null);
+  if (error) throw error;
+  return [
+    ...new Set(
+      (data ?? [])
+        .map((r) => r.resulting_supermarket_product_id as string | null)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+}
+
+const TOGGLE_SNAPSHOT_COLS =
+  'id, price, list_price, offer_price_1, promotion_1, site_product_name, scraped_at';
+
+/** Re-emit today's run-less revista snapshot for a mapping from its latest snapshot. */
+async function reEmitTodayFromLatest(spId: string): Promise<boolean> {
+  const snapRes = await db
+    .from('price_snapshots')
+    .select(TOGGLE_SNAPSHOT_COLS)
+    .eq('supermarket_product_id', spId)
+    .order('scraped_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (snapRes.error) throw snapRes.error;
+  const snap = snapRes.data as {
+    id: number;
+    price: number | null;
+    list_price: number | null;
+    offer_price_1: number | null;
+    promotion_1: string | null;
+    site_product_name: string | null;
+  } | null;
+  if (!snap || snap.price == null) return false;
+
+  await ensureTodayRevistaSnapshot({
+    supermarketProductId: spId,
+    prices: {
+      price: snap.list_price ?? snap.price,
+      promoPrice: snap.offer_price_1,
+      promoText: snap.promotion_1,
+    },
+    siteProductName: snap.site_product_name,
+    tierUsed: 'ai',
+    rawSource: 'revista-carry-forward',
+    fromSnapshotId: snap.id,
+  });
+  return true;
+}
+
+/**
+ * Deactivate a magazine: drop ALL its approved prices from the client base at
+ * once, WITHOUT un-approving any product. Sets carry_active=false, pauses the
+ * mappings it owns (unless another CURRENT + active magazine still keeps them),
+ * and purges today's run-less snapshots for the paused ones so the export clears
+ * immediately. Reversible via {@link reactivateMagazine}.
+ */
+export async function deactivateMagazine(magazineId: string): Promise<MagazineToggleResult> {
+  const mag = await loadMagazineForToggle(magazineId);
+
+  // Flip the switch FIRST so the keep-set computation excludes this magazine.
+  const upd = await db
+    .from('revista_magazines')
+    .update({ carry_active: false })
+    .eq('id', magazineId);
+  if (upd.error) throw upd.error;
+
+  const candidateSpIds = await approvedMappingIdsOnMagazine(magazineId);
+  if (candidateSpIds.length === 0) {
+    return { magazineId, carryActive: false, affectedMappings: 0, purgedToday: 0 };
+  }
+
+  const paused = await pauseRevistaMappingsNotOnCurrent(mag.supermarket_id, candidateSpIds);
+
+  // Purge today's snapshots only for the mappings we actually pulled (now paused).
+  const { data: inactive, error: inErr } = await db
+    .from('supermarket_products')
+    .select('id')
+    .in('id', candidateSpIds)
+    .eq('is_active', false);
+  if (inErr) throw inErr;
+  const inactiveIds = (inactive ?? []).map((r) => r.id as string);
+  const purgedToday = await purgeTodayRevistaSnapshotsForMappings(inactiveIds);
+
+  logger.info(
+    { magazineId, supermarketId: mag.supermarket_id, paused, purgedToday },
+    'revista: magazine deactivated (carry_active=false)',
+  );
+  return { magazineId, carryActive: false, affectedMappings: paused, purgedToday };
+}
+
+/**
+ * Reactivate a magazine: put its approved prices back in the client base. Sets
+ * carry_active=true, re-activates the mappings it owns, and re-emits today's
+ * price for each so the export shows them again immediately (instead of waiting
+ * for tomorrow's carry-forward).
+ */
+export async function reactivateMagazine(magazineId: string): Promise<MagazineToggleResult> {
+  const mag = await loadMagazineForToggle(magazineId);
+
+  const upd = await db
+    .from('revista_magazines')
+    .update({ carry_active: true })
+    .eq('id', magazineId);
+  if (upd.error) throw upd.error;
+
+  const candidateSpIds = await approvedMappingIdsOnMagazine(magazineId);
+  let affected = 0;
+  for (const spId of candidateSpIds) {
+    // Re-activate the mapping (carry-forward + client_base need is_active=true).
+    const act = await db
+      .from('supermarket_products')
+      .update({ is_active: true })
+      .eq('id', spId)
+      .eq('is_active', false);
+    if (act.error) throw act.error;
+
+    // Re-emit today's price from the latest known snapshot (same as carry-forward).
+    if (await reEmitTodayFromLatest(spId)) affected++;
+  }
+
+  logger.info(
+    { magazineId, supermarketId: mag.supermarket_id, reEmitted: affected },
+    'revista: magazine reactivated (carry_active=true)',
+  );
+  return { magazineId, carryActive: true, affectedMappings: affected, purgedToday: 0 };
+}
+
+export interface MagazineDeleteResult {
+  magazineId: string;
+  /** Review items removed (cascade from the magazine row). */
+  deletedItems: number;
+  /** Mappings paused because no other current + active magazine keeps them. */
+  pausedMappings: number;
+  /** Today's run-less snapshots purged for the paused mappings. */
+  purgedToday: number;
+  /** Page images removed from Storage. */
+  deletedImages: number;
+}
+
+/**
+ * Delete a magazine entirely — for a flyer the client doesn't care about and
+ * wants gone (frees Storage + clears the review queue). Removes the magazine row
+ * (cascading its review items), drops its prices from the client base (same
+ * pause + purge-today as deactivate), and deletes its page images from Storage.
+ * NOT reversible; historical price_snapshots of its mappings are kept.
+ */
+export async function deleteMagazine(magazineId: string): Promise<MagazineDeleteResult> {
+  const mag = await loadMagazineForToggle(magazineId);
+
+  // Capture affected mappings + item count BEFORE the cascade delete.
+  const candidateSpIds = await approvedMappingIdsOnMagazine(magazineId);
+  const countRes = await db
+    .from('revista_review_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('magazine_id', magazineId);
+  if (countRes.error) throw countRes.error;
+  const deletedItems = countRes.count ?? 0;
+
+  // Delete the magazine row → cascades revista_review_items (FK ON DELETE CASCADE).
+  const delRes = await db.from('revista_magazines').delete().eq('id', magazineId);
+  if (delRes.error) throw delRes.error;
+
+  // Drop its prices from the client base. With the magazine (and its items) gone,
+  // the keep-set correctly excludes it, so only mappings no other current + active
+  // magazine holds get paused; then purge today's snapshots for those.
+  let pausedMappings = 0;
+  let purgedToday = 0;
+  if (candidateSpIds.length > 0) {
+    pausedMappings = await pauseRevistaMappingsNotOnCurrent(mag.supermarket_id, candidateSpIds);
+    const { data: inactive, error: inErr } = await db
+      .from('supermarket_products')
+      .select('id')
+      .in('id', candidateSpIds)
+      .eq('is_active', false);
+    if (inErr) throw inErr;
+    purgedToday = await purgeTodayRevistaSnapshotsForMappings(
+      (inactive ?? []).map((r) => r.id as string),
+    );
+  }
+
+  // Free Storage (page images) + resolve any open review alert for this magazine.
+  const deletedImages = await deleteMagazineImages(magazineId);
+  const alertRes = await db
+    .from('alerts')
+    .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+    .eq('type', 'revista_review')
+    .eq('status', 'open')
+    .contains('context', { magazine_id: magazineId });
+  if (alertRes.error) {
+    logger.warn({ err: alertRes.error, magazineId }, 'revista: could not resolve alert on delete');
+  }
+
+  logger.info(
+    { magazineId, supermarketId: mag.supermarket_id, deletedItems, pausedMappings, purgedToday, deletedImages },
+    'revista: magazine deleted',
+  );
+  return { magazineId, deletedItems, pausedMappings, purgedToday, deletedImages };
 }
 
 /** Domain error with a coarse kind the route maps to an HTTP status. */

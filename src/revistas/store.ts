@@ -27,6 +27,12 @@ export interface MagazineRow {
    * Supersede / carry-forward scope to (supermarket_id, series_key).
    */
   series_key: string;
+  /**
+   * Manual on/off switch (migration 018). false = this issue is excluded from
+   * the daily carry-forward and its approved prices are dropped from the client
+   * base, without un-approving each product. Orthogonal to superseded_by.
+   */
+  carry_active: boolean;
 }
 
 /** Look up a magazine by its dedup hash (the "did it change?" check). */
@@ -165,8 +171,10 @@ export async function getCurrentMagazineId(supermarketId: string): Promise<strin
 }
 
 /**
- * All current (non-superseded) magazines for a chain — one per flyer series.
- * Carry-forward iterates these so every active series keeps emitting prices.
+ * All current (non-superseded) AND carry-active magazines for a chain — one per
+ * flyer series. Carry-forward iterates these so every active series keeps
+ * emitting prices. A manually deactivated issue (carry_active=false) is excluded
+ * here so it stops feeding the client base immediately.
  */
 export async function getCurrentMagazineIds(supermarketId: string): Promise<string[]> {
   const { data, error } = await db
@@ -174,6 +182,7 @@ export async function getCurrentMagazineIds(supermarketId: string): Promise<stri
     .select('id')
     .eq('supermarket_id', supermarketId)
     .is('superseded_by', null)
+    .eq('carry_active', true)
     .order('detected_at', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r) => r.id as string);
