@@ -18,6 +18,7 @@
 
 import { suplenciaFor } from '../../shared/suplencias.js';
 import { pesoEnCategoriaFor } from '../../shared/pesoEnCategoria.js';
+import { nuevaCategorizacionFor } from '../../shared/nuevaCategorizacion.js';
 
 /** Path of the client pricing endpoint, used to route error formatting. */
 export const CLIENT_PRICING_PATH = '/v1/data/pricing';
@@ -92,6 +93,12 @@ export interface PriceDataItem {
    * (ver src/shared/pesoEnCategoria.ts). Vacío para EANs no clasificados.
    */
   PESO_PRODUCTO_EN_CATEGORIA: string;
+  /**
+   * Código de "nueva categorización" analítica del cliente (ej.
+   * "LAVANDINAS_REG_1L_A1"). Dato de referencia hardcodeado y matcheado por EAN
+   * (ver src/shared/nuevaCategorizacion.ts). Vacío para EANs no clasificados.
+   */
+  NUEVA_CATEGORIZACION: string;
   /** Legacy — reemplazado por IDX_VS_COMPETENCIA. Se mantiene vacío por compatibilidad. */
   Index_Competencia: string;
   /** Legacy — pendiente de definición. Se mantiene vacío por compatibilidad. */
@@ -160,6 +167,7 @@ export function toPriceData(row: Record<string, unknown>): PriceDataItem {
       const p = pesoEnCategoriaFor(str(row['EAN']));
       return p === null ? '' : String(p);
     })(),
+    NUEVA_CATEGORIZACION: nuevaCategorizacionFor(str(row['EAN'])),
     // Legacy fields kept for backward compatibility; always empty.
     Index_Competencia: '',
     Marca_Competencia: '',

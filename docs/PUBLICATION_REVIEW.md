@@ -276,6 +276,30 @@ Set a product's lifecycle independent of any run.
 - `POST /v1/snapshots/manual` — operator-entered prices (`tier_used: "manual"`).
 - `GET /v1/data/coverage` — EAN coverage per chain.
 
+### 5.2a Operator preview download — `GET /v1/data/export?preview=true`
+
+By default the export reads the published-only `client_base` view, so a day is
+downloadable **only after it's approved**. For "let me eyeball today's data
+before I publish it", the export accepts **`?preview=true`** (or `preview=1`),
+which switches the source to the **`client_base_preview`** view
+([migration 020](../migrations/020_client_base_preview.sql)).
+
+- `client_base_preview` is identical to `client_base` in every column but **drops
+  the publication gate** — pending_review days are included. It keeps the same
+  `is_active` gates and still excludes internal `scrape_failed` markers, so a
+  preview looks like what *will* be published (minus gap marker rows, which are
+  only inserted at publish time).
+- Preview downloads get a `_preview` suffix in the filename so an unapproved file
+  is never mistaken for the real thing.
+- **Export-only.** The client JSON contract (`GET /v1/data/pricing`) never reads
+  the preview view and ignores the flag, so the client still only ever sees
+  published days. The flag is intentionally left out of the client-facing
+  `API_PRICING_CLIENTE.md`.
+- ⚠️ Auth note: the flag is not access-gated beyond the normal API key. If a key
+  is shared with the external client, they *could* pass `preview=true` and pull
+  unapproved data. If hard enforcement is needed, gate it behind a dedicated
+  scope / internal-only key.
+
 ### 5.3 Client contract change — `Estado`
 
 [`src/api/lib/clientPricing.ts`](../src/api/lib/clientPricing.ts): add `Estado`

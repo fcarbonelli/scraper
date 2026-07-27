@@ -114,6 +114,16 @@ const ExportQuery = z.object({
   supermarket: z.string().trim().min(1).optional(),
   canal: z.string().trim().min(1).optional(),
   ean: z.string().trim().min(1).optional(),
+  /**
+   * Operator preview: include pending_review (not-yet-approved) days so today's
+   * data can be downloaded and checked before publishing. Truthy only for
+   * `preview=true` / `preview=1` (anything else is false — avoids
+   * z.coerce.boolean's "any non-empty string is true" trap). Export-only — the
+   * /pricing client contract ignores it.
+   */
+  preview: z
+    .preprocess((v) => v === 'true' || v === '1' || v === true, z.boolean())
+    .default(false),
 });
 
 dataRouter.get('/export', async (req: Request, res: Response) => {
@@ -141,10 +151,12 @@ dataRouter.get('/export', async (req: Request, res: Response) => {
     supermarket: q.supermarket,
     canal: q.canal,
     ean: q.ean,
+    includeUnpublished: q.preview,
   });
 
   const windowLabel = from && from === to ? from : `${from ?? 'inicio'}_${to ?? 'hoy'}`;
-  const filenameBase = `client-base_${windowLabel}`;
+  // Mark preview downloads so an unapproved file is never mistaken for the real one.
+  const filenameBase = `client-base_${windowLabel}${q.preview ? '_preview' : ''}`;
 
   if (q.format === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

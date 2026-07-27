@@ -20,6 +20,7 @@ import { db } from '../../shared/db.js';
 import { ApiError } from './apiError.js';
 import { suplenciaFor } from '../../shared/suplencias.js';
 import { pesoEnCategoriaFor } from '../../shared/pesoEnCategoria.js';
+import { nuevaCategorizacionFor } from '../../shared/nuevaCategorizacion.js';
 
 /** Filters shared by the pricing and export endpoints. */
 export interface ClientBaseFilters {
@@ -28,6 +29,13 @@ export interface ClientBaseFilters {
   supermarket?: string | undefined;
   canal?: string | undefined;
   ean?: string | undefined;
+  /**
+   * Operator preview: read from `client_base_preview` (includes pending_review
+   * days) instead of the published-only `client_base`. Lets an operator
+   * download today's data BEFORE approving it. Never used by the client
+   * pricing contract — export-only.
+   */
+  includeUnpublished?: boolean | undefined;
 }
 
 /**
@@ -74,6 +82,9 @@ const COLUMNS: { key: string; header: string }[] = [
   // Hardcoded client reference (category weight 0..1), stamped by EAN in
   // fetchAllClientBase — not a real column of the client_base view.
   { key: 'PESO_PRODUCTO_EN_CATEGORIA', header: 'PESO_PRODUCTO_EN_CATEGORIA' },
+  // Hardcoded client "nueva categorización" code, stamped by EAN — likewise
+  // not a real column of the client_base view.
+  { key: 'NUEVA_CATEGORIZACION', header: 'NUEVA_CATEGORIZACION' },
 ];
 
 type ClientBaseRow = Record<string, unknown>;
@@ -100,9 +111,13 @@ export async function fetchAllClientBase(
   const all: ClientBaseRow[] = [];
   let offset = 0;
 
+  // Published-only client view by default; the preview view (which also
+  // includes pending_review days) only when explicitly requested.
+  const view = filters.includeUnpublished ? 'client_base_preview' : 'client_base';
+
   for (;;) {
     let query = db
-      .from('client_base')
+      .from(view)
       .select('*')
       .order('Fecha_Relevamiento', { ascending: false })
       .order('ID', { ascending: false })
@@ -133,6 +148,7 @@ export async function fetchAllClientBase(
       const ean = row['EAN'] == null ? '' : String(row['EAN']);
       row['SUPLENCIAS'] = suplenciaFor(ean);
       row['PESO_PRODUCTO_EN_CATEGORIA'] = pesoEnCategoriaFor(ean);
+      row['NUEVA_CATEGORIZACION'] = nuevaCategorizacionFor(ean);
     }
 
     all.push(...(data as ClientBaseRow[]));

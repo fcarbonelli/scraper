@@ -1,8 +1,9 @@
 # Client Data API
 
 How the client pulls the official pricing data (the `client_base` view, the flat
-33-column structure their reporting tools expect — including the hardcoded
-`SUPLENCIAS` flag and `PESO_PRODUCTO_EN_CATEGORIA` weight, both matched by EAN).
+34-column structure their reporting tools expect — including the hardcoded
+`SUPLENCIAS` flag, `PESO_PRODUCTO_EN_CATEGORIA` weight and `NUEVA_CATEGORIZACION`
+code, all matched by EAN).
 
 There are two ways to get the exact same data:
 
@@ -75,9 +76,11 @@ returns just today's data** (Argentina time) — the simplest "daily data" pull.
 | `supermarket` | — | Comma-separated chains |
 | `canal` | — | Channel filter |
 | `ean` | — | Single EAN |
+| `preview` | `false` | **Operator-only.** `true`/`1` includes not-yet-approved (`pending_review`) days so you can check today's data before publishing. Adds a `_preview` filename suffix. The client JSON feed (`/pricing`) ignores this. |
 
 The response sets `Content-Disposition: attachment` with a filename like
-`client-base_2026-06-11.xlsx`, so browsers download it directly.
+`client-base_2026-06-11.xlsx` (or `client-base_2026-06-11_preview.xlsx` for a
+preview download), so browsers download it directly.
 
 **Examples:**
 
@@ -137,6 +140,11 @@ pricing workbook), stamped onto each row by EAN: the product's share/weight in
 its category as a ratio (0..1), or empty for EANs the client didn't tag. It sits
 right after `PRECIO_PRODUCTO_EN_CATEGORIA` in both outputs and is not a real
 column of the `client_base` view — see `src/shared/pesoEnCategoria.ts`.
+
+`NUEVA_CATEGORIZACION` is likewise hardcoded client reference data (from the
+"Estructura Base" workbook): an analytical re-categorization code per product
+(e.g. `LAVANDINAS_REG_1L_A1`), or empty for untagged EANs. Stamped by EAN, not a
+real column of the view — see `src/shared/nuevaCategorizacion.ts`.
 
 Two columns remain intentionally empty until their logic is defined:
 `IDX_VS_COMPETENCIA` and `PRECIO_PRODUCTO_EN_CATEGORIA`. All columns appear in

@@ -151,6 +151,7 @@ La respuesta es un objeto con la siguiente estructura:
       "IDX_VS_COMPETENCIA": "",
       "PRECIO_PRODUCTO_EN_CATEGORIA": "",
       "PESO_PRODUCTO_EN_CATEGORIA": "0.18",
+      "NUEVA_CATEGORIZACION": "AERO_DESINF_332_A1",
       "Index_Competencia": "",
       "Marca_Competencia": ""
     },
@@ -189,6 +190,7 @@ La respuesta es un objeto con la siguiente estructura:
       "IDX_VS_COMPETENCIA": "",
       "PRECIO_PRODUCTO_EN_CATEGORIA": "",
       "PESO_PRODUCTO_EN_CATEGORIA": "0.18",
+      "NUEVA_CATEGORIZACION": "AERO_DESINF_332_A1",
       "Index_Competencia": "",
       "Marca_Competencia": ""
     }
@@ -254,6 +256,7 @@ La respuesta es un objeto con la siguiente estructura:
 | `IDX_VS_COMPETENCIA` | Sí | Índice vs. competencia. **Pendiente** (ver sección 8). | `""` |
 | `PRECIO_PRODUCTO_EN_CATEGORIA` | Sí | Precio del producto en su categoría. **Pendiente** (ver sección 8). | `""` |
 | `PESO_PRODUCTO_EN_CATEGORIA` | Sí | Peso (participación) del producto dentro de su categoría, expresado como ratio (0 a 1). Dato de referencia provisto por el cliente y matcheado por EAN. **Vacío (`""`)** para los EAN que el cliente no clasificó. | `"0.18"` |
+| `NUEVA_CATEGORIZACION` | Sí | Código de nueva categorización analítica del producto, provisto por el cliente y matcheado por EAN. **Vacío (`""`)** para los EAN que el cliente no clasificó. | `"AERO_DESINF_332_A1"` |
 | `Index_Competencia` | Sí | *Legacy* — reemplazado por `IDX_VS_COMPETENCIA`. Se mantiene vacío por compatibilidad. | `""` |
 | `Marca_Competencia` | Sí | *Legacy* — marca de competencia asociada. Se mantiene vacío por compatibilidad. | `""` |
 
