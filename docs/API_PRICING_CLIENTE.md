@@ -137,7 +137,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Descripcion_Para_Forms": "AERO DESINF LYSOFORM 360 OR",
       "EAN": "7790520995285",
       "Desc_Sku_Sitio": "DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML.",
-      "Estado": "ok",
+      "Estado": "Disponible",
       "Precio_Regular": "3648",
       "Precio_c_Oferta_1": "2999",
       "Precio_c_Oferta_2": "",
@@ -176,7 +176,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Descripcion_Para_Forms": "AERO DESINF GLADE 360 OR",
       "EAN": "7794000123456",
       "Desc_Sku_Sitio": "DESINF.AMBIENTE GLADE ORIGINAL 360 ML.",
-      "Estado": "out_of_stock",
+      "Estado": "Sin stock",
       "Precio_Regular": "",
       "Precio_c_Oferta_1": "",
       "Precio_c_Oferta_2": "",
@@ -242,15 +242,15 @@ La respuesta es un objeto con la siguiente estructura:
 | `Descripcion_Para_Forms` | Sí | Descripción normalizada del producto. | `"AERO DESINF LYSOFORM 360 OR"` |
 | `EAN` | Sí | Código de barras (EAN-13). | `"7790520995285"` |
 | `Desc_Sku_Sitio` | Sí | Descripción del producto tal como figura en el sitio relevado. | `"DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML."` |
-| `Estado` | Sí | Estado del relevamiento del registro. `ok` indica un precio real; cualquier otro valor indica que ese día no hubo precio y explica el motivo (ver [Estados](#51-estados-del-registro-estado)). | `"ok"` |
-| `Precio_Regular` | Sí | Precio regular (de lista). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"ok"`. | `"3648"` |
+| `Estado` | Sí | Estado del relevamiento del registro. `Disponible` indica un precio real; cualquier otro valor indica que ese día no hubo precio y explica el motivo (ver [Estados](#51-estados-del-registro-estado)). | `"Disponible"` |
+| `Precio_Regular` | Sí | Precio regular (de lista). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"Disponible"`. | `"3648"` |
 | `Precio_c_Oferta_1` | Sí | Precio con la 1ª promoción vigente. **Vacío (`""`)** si no hay promoción. | `"2999"` |
 | `Precio_c_Oferta_2` | Sí | Precio con una 2ª promoción simultánea. **Vacío (`""`)** si no hay una segunda promoción. | `""` |
 | `Promocion_1` | Sí | Descripción de la 1ª promoción. **Vacío (`""`)** si no hay promoción. | `"2da unidad al 70%"` |
 | `Promocion_2` | Sí | Descripción de la 2ª promoción. **Vacío (`""`)** si no hay una segunda promoción. | `""` |
 | `Descuento_Unitario` | Sí | Descuento unitario efectivo (0 a 1) derivado de precio de lista vs. precio con oferta. **Vacío (`""`)** si no hay descuento. | `"0.1779"` |
 | `URL` | Sí | URL de la página del producto relevada. | `"https://..."` |
-| `Precio_Mas_Bajo` | Sí | Precio más bajo detectado (considerando ofertas vigentes). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"ok"`. | `"2999"` |
+| `Precio_Mas_Bajo` | Sí | Precio más bajo detectado (considerando ofertas vigentes). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"Disponible"`. | `"2999"` |
 | `PRECIO_TGT_SPM` | Sí | Precio target de supermercado (de la Lista de Precios). Se completa **solo en registros de cadenas de canal supermercado** (`Canal` = `SPM ...`); en registros mayoristas viene vacío. También vacío si el EAN no está en la lista. | `"8145"` |
 | `PRECIO_TGT_MAY` | Sí | Precio target mayorista (de la Lista de Precios). Se completa **solo en registros de cadenas de canal mayorista** (`Canal` = `MAY ...`); en registros de supermercado viene vacío. También vacío si el EAN no está en la lista. | `"7537"` |
 | `IDX_VS_COMPETENCIA` | Sí | Índice vs. competencia. **Pendiente** (ver sección 8). | `""` |
@@ -268,16 +268,16 @@ qué ocurrió en cada caso:
 
 | `Estado` | Significado | Precio |
 |----------|-------------|--------|
-| `ok` | Precio relevado correctamente. | Presente |
-| `out_of_stock` | Producto sin stock confirmado ese día. | Vacío (o último precio conocido) |
-| `not_found` | La página del producto no existe / fue dada de baja en el sitio. | Vacío |
-| `delisted` | Producto discontinuado o removido del catálogo de la cadena. | Vacío |
+| `Disponible` | Precio relevado correctamente. | Presente |
+| `Sin stock` | Producto sin stock confirmado ese día. | Vacío (o último precio conocido) |
+| `No encontrado` | La página del producto no existe / fue dada de baja en el sitio. | Vacío |
+| `Discontinuado` | Producto discontinuado o removido del catálogo de la cadena. | Vacío |
 
 Todos los estados describen una **situación real del producto** (con precio, sin
 stock, o dado de baja). Solo se publican registros ya verificados.
 
-> **Recomendación:** filtrar por `Estado == "ok"` cuando solo se necesiten precios
-> efectivos; conservar los demás estados para auditar la continuidad de la serie.
+> **Recomendación:** filtrar por `Estado == "Disponible"` cuando solo se necesiten
+> precios efectivos; conservar los demás estados para auditar la continuidad de la serie.
 
 ---
 
