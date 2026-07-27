@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "id": "50bb31b8-5b6d-4a37-8905-ff3de2c6ffb9",
+      "name": "Lavandina Original Ayudin 2L",
+      "category": "Lavandinas Liquidas",
+      "brand": "AYUDIN",
+      "unit": "2 Litro",
+      "ean": "7793253006709",
+      "metadata": {
+        "imageUrl": "https://static.cotodigital.com.ar/sitios/cdigi/productos/00591050.jpg",
+        "department": "LIMPIEZA"
+      },
+      "created_at": "2026-04-29T22:09:33.972Z",
+      "updated_at": "2026-04-29T22:09:33.972Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 100, "total": 1, "totalPages": 1 },
+  "meta": { "ts": "2026-05-07T18:30:14.679Z" }
+}

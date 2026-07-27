@@ -465,7 +465,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listProducts: (q: { search?: string; page?: number; limit?: number } = {}) =>
+  listProducts: (q: { search?: string; ean?: string; page?: number; limit?: number } = {}) =>
     request<ApiPaginated<Product>>(
       `/products?${new URLSearchParams(q as Record<string, string>)}`,
     ),
@@ -549,6 +549,7 @@ List products with optional filters. Paginated.
 |---|---|---|
 | `page`, `limit` | int | Pagination |
 | `search` | string | Case-insensitive substring of `name` |
+| `ean` | string | Barcode lookup (digits only). **Prefix**-matched against `product.ean` (e.g. `779013` matches the full barcode). Whitespace is stripped; a non-digit query returns an empty page. Takes precedence over `search` if both are sent |
 | `category` | string | Exact match on `category` |
 | `brand` | string | Exact match on `brand` |
 
@@ -582,6 +583,10 @@ List products with optional filters. Paginated.
 ```bash
 curl -H "X-API-Key: <key>" \
   "https://api.yourdomain.com/v1/products?search=lavandina&limit=10"
+
+# Barcode / prefix lookup (ProductPicker in revistas, manual add, etc.)
+curl -H "X-API-Key: <key>" \
+  "https://api.yourdomain.com/v1/products?ean=7793253006709&limit=100"
 ```
 
 ---
@@ -1966,7 +1971,10 @@ Fire the three calls in parallel — they don't depend on each other. Show skele
 
 ```
 GET /v1/products?search=<q>&page=<n>&limit=20
+GET /v1/products?ean=<digits>&page=<n>&limit=100
 ```
+
+Name search uses `search` (substring of `name`). Digit-only barcode lookup uses `ean` (prefix match on `product.ean`) — the ProductPicker sends one or the other, never both.
 
 The `pagination` envelope gives you `total` and `totalPages` upfront, so you can render "Showing 1-20 of 347" without a separate count query.
 

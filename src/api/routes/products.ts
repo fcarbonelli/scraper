@@ -76,6 +76,8 @@ const UrlSchema = z
 
 const ListQuery = PaginationQuery.extend({
   search: z.string().trim().min(1).max(200).optional(),
+  /** Barcode lookup. Prefix-matched against product.ean (digits only). */
+  ean: z.string().trim().min(1).max(20).optional(),
   category: z.string().trim().min(1).max(100).optional(),
   brand: z.string().trim().min(1).max(100).optional(),
 });
@@ -86,6 +88,18 @@ productsRouter.get('/', async (req: Request, res: Response) => {
   const limit = req.pagination?.limit ?? q.limit;
   const offset = req.pagination?.offset ?? (page - 1) * limit;
 
+  // Same contract as GET /v1/supermarkets/:id/products?ean=: strip whitespace,
+  // reject non-digit queries with an empty page, prefix-match otherwise.
+  // EAN takes precedence over free-text search when both are supplied.
+  const eanPrefix = q.ean ? q.ean.replace(/\s+/g, '') : undefined;
+  const eanInvalid = eanPrefix !== undefined && !/^\d+$/.test(eanPrefix);
+  const useEan = eanPrefix !== undefined && !eanInvalid;
+
+  if (eanInvalid) {
+    res.json(paginated([], 0, page, limit));
+    return;
+  }
+
   let query = db
     .from('products')
     .select('id, name, category, brand, unit, ean, metadata, created_at, updated_at', {
@@ -94,7 +108,8 @@ productsRouter.get('/', async (req: Request, res: Response) => {
     .order('name', { ascending: true })
     .range(offset, offset + limit - 1);
 
-  if (q.search) query = query.ilike('name', `%${q.search}%`);
+  if (useEan) query = query.like('ean', `${eanPrefix}%`);
+  else if (q.search) query = query.ilike('name', `%${q.search}%`);
   if (q.category) query = query.eq('category', q.category);
   if (q.brand) query = query.eq('brand', q.brand);
 
