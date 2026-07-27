@@ -107,9 +107,12 @@ A two‑pane, one‑item‑at‑a‑time reviewer (optimized for speed):
   - **Extracted** (what the AI read from the page): name, brand, quantity, EAN,
     `price`, `promo_price`, `promo_text`.
   - **Proposed match** (the catalog product the AI thinks it is): name, brand,
-    EAN, plus a **confidence bar** and the judge's one‑line **reason**. May be
+    EAN, `ean_in_catalog` (whether that EAN is in the official **Catálogo EAN**),
+    plus a **confidence bar** and the judge's one‑line **reason**. May be
     `null` when the AI found no match (those items aren't queued by default — see
-    §6 "no‑match" handling).
+    §6 "no‑match" handling). When `ean_in_catalog` is `false`, show a warning and
+    **disable Aprobar** until the operator rematches to a product whose EAN is in
+    Catálogo EAN (or adds the EAN there first).
   - **Price fields** (editable): pre‑filled from what the AI read, so the
     reviewer can correct an obvious vision misread before approving.
   - **Actions:** `APROBAR` · `DESAPROBAR` · `Elegir otro producto` ·
@@ -124,7 +127,10 @@ A two‑pane, one‑item‑at‑a‑time reviewer (optimized for speed):
 1. **APROBAR** — the proposed match is correct. → `POST /items/:id/approve`
    (no `product_id` → uses the proposed match). The product is added to that
    supermarket (a `supermarket_products` row) and a **price snapshot** is written
-   at the magazine price (`tier_used: "ai"`).
+   at the magazine price (`tier_used: "ai"`). **Blocked** with `400` if the
+   product has no EAN or its EAN is not in Catálogo EAN (TAXONOMY ∪
+   `catalog_extra_eans`); on success the master is re‑enriched from that catalog
+   so export columns are complete.
 2. **Wrong match → "Elegir otro producto"** — the AI read a real product but
    matched the wrong catalog item. Open the **product picker** (typeahead on
    `GET /v1/products?search=`), pick the correct one, then approve →
@@ -141,10 +147,13 @@ product picker (catalog only) + price fields read off the image →
 `POST /v1/revistas/:magazineId/items`. This writes the mapping + snapshot
 directly (recorded with `method: "manual"`).
 
-> **Catalog‑only.** Per decision, the picker only links to **existing master
-> products** (the client's tracked EANs). There is no "create a brand‑new master
-> product" flow here — if a magazine product isn't in the catalog, it's out of
-> scope and should be left unmatched / rejected.
+> **Catalog‑only + Catálogo EAN gate.** The picker only links to **existing
+> master products** (`products` table — there is no "create a brand‑new master"
+> flow here). Separately, **approve / manual‑add / rematch** require that the
+> chosen master's EAN exists in the official **Catálogo EAN**. Matching may still
+> propose a product whose EAN is missing from that catalog (`ean_in_catalog:
+> false`); the operator must add the EAN to Catálogo EAN or rematch before
+> approving — otherwise blank export columns and client‑base pollution.
 
 ---
 
@@ -220,7 +229,8 @@ The review queue. Paginated.
         "name": "Lavandina Original Ayudin 2l",
         "brand": "AYUDIN",
         "ean": "7793253006709",
-        "quantity": "2 Litro"
+        "quantity": "2 Litro",
+        "ean_in_catalog": true
       },
       "confidence": 0.82,
       "method": "llm",
@@ -275,7 +285,8 @@ so the approved price shows in the export immediately (no publish step needed).
 ```
 
 Errors: `400 INVALID_REQUEST` (e.g. approving with neither a proposed match nor a
-`product_id`), `404 NOT_FOUND`, `409 CONFLICT` (already reviewed).
+`product_id`; no price; product sin EAN; or EAN not in Catálogo EAN),
+`404 NOT_FOUND`, `409 CONFLICT` (already reviewed).
 
 ### `POST /v1/revistas/items/:itemId/reject`
 
@@ -460,6 +471,8 @@ export interface RevistaMatch {
   brand: string | null;
   ean: string | null;
   quantity: string | null;
+  /** False when the master has no EAN or it is absent from Catálogo EAN — approve is blocked. */
+  ean_in_catalog: boolean;
 }
 
 export interface RevistaReviewItem {

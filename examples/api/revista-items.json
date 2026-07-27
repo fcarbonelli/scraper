@@ -20,7 +20,8 @@
         "name": "Lavandina Original Ayudin 1l",
         "brand": "AYUDIN",
         "ean": "7793253006709",
-        "quantity": "1 Litro"
+        "quantity": "1 Litro",
+        "ean_in_catalog": true
       },
       "confidence": 1.0,
       "method": "ean",
@@ -52,7 +53,8 @@
         "name": "Lavandina en Gel Original Ayudin 1l",
         "brand": "AYUDIN",
         "ean": "7793253009999",
-        "quantity": "1 Litro"
+        "quantity": "1 Litro",
+        "ean_in_catalog": false
       },
       "confidence": 0.82,
       "method": "llm",
@@ -85,7 +87,8 @@
         "name": "Detergente Magistral Original 500ml",
         "brand": "MAGISTRAL",
         "ean": "7790063012345",
-        "quantity": "500 ml"
+        "quantity": "500 ml",
+        "ean_in_catalog": false
       },
       "confidence": 0.41,
       "method": "llm",

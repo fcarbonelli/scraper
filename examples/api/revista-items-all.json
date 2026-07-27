@@ -27,7 +27,8 @@
         "name": "Esponja Mortimer Cuadriculada",
         "brand": "MORTIMER",
         "ean": "7793253038106",
-        "quantity": "1 u"
+        "quantity": "1 u",
+        "ean_in_catalog": true
       },
       "confidence": 0.9,
       "method": "llm",
