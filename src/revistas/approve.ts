@@ -11,11 +11,15 @@
  * the item in the revista review IS the gate — so these are trusted and always
  * client-visible. Carry-forward re-emits them daily until the next issue.
  *
- * Catalog-only: `product_id` must reference an existing master product.
+ * Catalog-only: `product_id` must reference an existing master product whose
+ * EAN is in the official Catálogo EAN (TAXONOMY ∪ catalog_extra_eans). Matching
+ * may still propose any master; approve/manual-add/rematch enforce the gate.
  */
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
+import { lookupCatalog } from '../shared/catalog.js';
+import type { TaxonomyEntry } from '../shared/taxonomy.js';
 import { deleteMagazineImages } from './storage.js';
 import {
   buenosAiresDate,
@@ -29,6 +33,73 @@ export type { SnapshotPrices } from './pricing.js';
 /** Synthetic SKU for a revista-sourced mapping (no real site SKU exists). */
 export function revistaExternalId(productId: string): string {
   return `revista-${productId}`;
+}
+
+/** Taxonomy columns mirrored onto `products` for the client export. */
+function taxonomyPatch(tax: TaxonomyEntry): Record<string, unknown> {
+  return {
+    category: tax.category || null,
+    subcategory: tax.subcategory || null,
+    manufacturer: tax.manufacturer || null,
+    brand: tax.brand || null,
+    format: tax.format || null,
+    variety: tax.variety || null,
+    description_forms: tax.descriptionForms || null,
+  };
+}
+
+/**
+ * Require that `productId` has an EAN present in the official Catálogo EAN.
+ * When it does, backfill taxonomy onto the master so the exportable is complete.
+ */
+export async function assertProductInEanCatalog(
+  productId: string,
+): Promise<{ ean: string }> {
+  const { data, error } = await db
+    .from('products')
+    .select(
+      'id, ean, category, subcategory, manufacturer, brand, format, variety, description_forms',
+    )
+    .eq('id', productId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new ItemError('invalid', `Producto ${productId} no existe en el catálogo de productos.`);
+  }
+
+  const ean = typeof data.ean === 'string' ? data.ean.replace(/\D/g, '') : '';
+  if (!ean) {
+    throw new ItemError(
+      'invalid',
+      'El producto no tiene EAN; no se puede aprobar. Asignale un EAN que exista en el Catálogo EAN.',
+    );
+  }
+
+  const tax = await lookupCatalog(ean);
+  if (!tax) {
+    throw new ItemError(
+      'invalid',
+      `EAN ${ean} no está en el Catálogo EAN. Agregalo ahí antes de aprobar.`,
+    );
+  }
+
+  // Fill blank taxonomy so client_base / export get full columns.
+  const needsEnrich =
+    !data.category ||
+    !data.description_forms ||
+    !data.brand ||
+    !data.manufacturer ||
+    !data.subcategory ||
+    !data.format;
+
+  if (needsEnrich) {
+    const patch = taxonomyPatch(tax);
+    const upd = await db.from('products').update(patch).eq('id', productId);
+    if (upd.error) throw upd.error;
+    logger.info({ productId, ean }, 'revista: enriched product taxonomy from Catálogo EAN');
+  }
+
+  return { ean };
 }
 
 /**
@@ -291,6 +362,8 @@ export async function approveReviewItem(
     throw new ItemError('invalid', 'No product to approve: provide product_id (no proposed match).');
   }
 
+  await assertProductInEanCatalog(productId);
+
   const prices: SnapshotPrices = {
     price: body.price ?? item.extracted?.price ?? null,
     promoPrice: body.promoPrice ?? item.extracted?.promo_price ?? null,
@@ -345,6 +418,8 @@ export async function addManualItem(
   body: ManualAddBody,
 ): Promise<ApproveResult> {
   await assertMagazineCarryActive(magazineId);
+
+  await assertProductInEanCatalog(body.productId);
 
   const prices: SnapshotPrices = {
     price: body.price,

@@ -27,6 +27,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db, fetchInChunks } from '../../shared/db.js';
 import { logger } from '../../shared/logger.js';
+import { getCatalogEans } from '../../shared/catalog.js';
 import {
   approveReviewItem,
   addManualItem,
@@ -413,7 +414,14 @@ interface EnrichedItemRow {
   reviewed_at: string | null;
 }
 
-function enrichedItemResponse(i: EnrichedItemRow): object {
+/** True when digits-only EAN is in the official Catálogo EAN (built-in ∪ extras). */
+function isEanInCatalog(ean: string | null | undefined, catalogKeys: Set<string>): boolean {
+  if (!ean) return false;
+  const digits = ean.replace(/\D/g, '');
+  return digits.length > 0 && catalogKeys.has(digits);
+}
+
+function enrichedItemResponse(i: EnrichedItemRow, catalogKeys: Set<string>): object {
   // Effective extracted blob: AI read + operator override for list display.
   const extracted = { ...(i.extracted ?? {}) } as Record<string, unknown>;
   if (i.effective_price != null) extracted.price = Number(i.effective_price);
@@ -447,6 +455,7 @@ function enrichedItemResponse(i: EnrichedItemRow): object {
           brand: i.match_brand,
           ean: i.match_ean,
           quantity: i.match_quantity,
+          ean_in_catalog: isEanInCatalog(i.match_ean, catalogKeys),
         }
       : null,
     confidence: typeof i.confidence === 'string' ? Number(i.confidence) : i.confidence,
@@ -487,7 +496,10 @@ revistasRouter.get('/items', async (req: Request, res: Response) => {
 
   const { data, error, count } = await query;
   if (error) throw error;
-  const out = ((data ?? []) as EnrichedItemRow[]).map(enrichedItemResponse);
+  const catalogKeys = new Set((await getCatalogEans()).keys());
+  const out = ((data ?? []) as EnrichedItemRow[]).map((row) =>
+    enrichedItemResponse(row, catalogKeys),
+  );
   res.json(paginated(out, count ?? 0, page, limit));
 });
 
@@ -995,8 +1007,18 @@ revistasRouter.get('/:magazineId/items', async (req: Request, res: Response) => 
     for (const p of rows) products.set(p.id, p);
   }
 
+  const catalogKeys = new Set((await getCatalogEans()).keys());
   const toMatch = (p: ProductRow | undefined): object | null =>
-    p ? { product_id: p.id, name: p.name, brand: p.brand, ean: p.ean, quantity: p.unit ?? p.format ?? null } : null;
+    p
+      ? {
+          product_id: p.id,
+          name: p.name,
+          brand: p.brand,
+          ean: p.ean,
+          quantity: p.unit ?? p.format ?? null,
+          ean_in_catalog: isEanInCatalog(p.ean, catalogKeys),
+        }
+      : null;
 
   const out = items.map((i) => {
     const extracted = { ...((i.extracted as Record<string, unknown> | null) ?? {}) };
