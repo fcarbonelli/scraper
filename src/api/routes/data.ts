@@ -28,6 +28,7 @@ import {
   buildPaginacion,
   clientPricingSuccess,
 } from '../lib/clientPricing.js';
+import { buildCatalogOverview, type CatalogProduct } from '../lib/catalogOverview.js';
 
 export const dataRouter = Router();
 
@@ -327,6 +328,114 @@ interface CoverageProduct {
   active: boolean | null;
   url: string | null;
 }
+
+// =============================================================================
+// GET /v1/data/catalog
+//
+// Product-centric view of the EXPORTABLE set: distinct master products that
+// have at least one ACTIVE mapping on an ACTIVE chain — i.e. exactly what the
+// daily client_base export emits. Replaces the deprecated "catálogo" screen
+// (which was backed by GET /v1/products and leaked EAN-less / never-scraped /
+// fully-paused junk).
+//
+// Response: a paginated list of products + a `summary` KPIs block in `meta`
+// (the summary always describes the whole unfiltered universe, so the headline
+// count is stable regardless of the active filters/page).
+//
+//   ?search=coca            name / EAN / description contains (case-insensitive)
+//   ?category=Gaseosas      exact category (case-insensitive)
+//   ?brand=Ayudín           exact brand (case-insensitive)
+//   ?supermarket=coto,vea   keep products present at any of these chains
+//   ?status=active|paused|all   (default all) applied together with supermarket:
+//                               restrict to products whose mapping AT those
+//                               chains is active/paused. With no supermarket,
+//                               'paused' = products with any paused mapping.
+//   ?sort=name|coverage_desc|coverage_asc|category   (default name)
+//   ?page=1 &limit=50       pagination (limit 1..500)
+// =============================================================================
+
+const CatalogQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
+  search: z.string().trim().min(1).max(200).optional(),
+  category: z.string().trim().min(1).max(100).optional(),
+  brand: z.string().trim().min(1).max(100).optional(),
+  supermarket: z.string().trim().min(1).optional(),
+  status: z.enum(['active', 'paused', 'all']).default('all'),
+  sort: z.enum(['name', 'coverage_desc', 'coverage_asc', 'category']).default('name'),
+});
+
+dataRouter.get('/catalog', async (req: Request, res: Response) => {
+  const q = parseQuery(req, CatalogQuery);
+  const { summary, products } = await buildCatalogOverview();
+
+  const requestedChains = q.supermarket
+    ? new Set(q.supermarket.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))
+    : null;
+
+  // --- Filter ---------------------------------------------------------------
+  let filtered = products.filter((p) => {
+    if (q.search) {
+      const needle = q.search.toLowerCase();
+      const hay = `${p.name} ${p.ean ?? ''} ${p.descriptionForms ?? ''}`.toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    if (q.category && (p.category ?? '').toLowerCase() !== q.category.toLowerCase()) {
+      return false;
+    }
+    if (q.brand && (p.brand ?? '').toLowerCase() !== q.brand.toLowerCase()) {
+      return false;
+    }
+
+    if (requestedChains) {
+      // Keep products present at one of the requested chains, honoring status.
+      const match = p.chains.some(
+        (c) =>
+          requestedChains.has(c.id.toLowerCase()) &&
+          (q.status === 'all' || c.status === q.status),
+      );
+      if (!match) return false;
+    } else if (q.status === 'paused') {
+      // No chain filter: 'paused' surfaces products with any paused mapping.
+      if (p.chainsPaused === 0) return false;
+    }
+    // status 'active'/'all' with no supermarket is a no-op (all are exportable).
+
+    return true;
+  });
+
+  // --- Sort -----------------------------------------------------------------
+  const byName = (a: CatalogProduct, b: CatalogProduct) => a.name.localeCompare(b.name);
+  filtered = filtered.sort((a, b) => {
+    switch (q.sort) {
+      case 'coverage_desc':
+        return b.chainsActive - a.chainsActive || byName(a, b);
+      case 'coverage_asc':
+        return a.chainsActive - b.chainsActive || byName(a, b);
+      case 'category':
+        return (a.category ?? '').localeCompare(b.category ?? '') || byName(a, b);
+      case 'name':
+      default:
+        return byName(a, b);
+    }
+  });
+
+  // --- Paginate -------------------------------------------------------------
+  const total = filtered.length;
+  const offset = (q.page - 1) * q.limit;
+  const pageItems = filtered.slice(offset, offset + q.limit);
+
+  res.json({
+    data: pageItems,
+    pagination: {
+      page: q.page,
+      limit: q.limit,
+      total,
+      totalPages: q.limit > 0 ? Math.max(1, Math.ceil(total / q.limit)) : 1,
+    },
+    meta: { ts: new Date().toISOString(), summary },
+  });
+});
 
 // =============================================================================
 // POST /v1/data/discover

@@ -533,6 +533,12 @@ Returns `503` with `status: "degraded"` if the database is unreachable.
 
 A "product" represents a real-world item (e.g., *"Coca Cola 500ml"*) — distinct from any one supermarket's listing of it. The same product can be sold at multiple supermarkets, joined via `supermarket_products`. Master products are matched across supermarkets by EAN/barcode when available.
 
+> **Building a "catálogo" / product‑explorer screen?** Use **`GET /v1/data/catalog`**
+> instead of `GET /v1/products`. `GET /v1/products` lists **every** master row
+> (including EAN‑less, never‑scraped and fully‑paused junk); `/v1/data/catalog`
+> returns only the **exportable set** (products actually scraped/exported) with
+> per‑chain coverage, status and KPI totals. See `docs/CATALOG_API_GUIDE.md`.
+
 ### `GET /v1/products`
 
 List products with optional filters. Paginated.
@@ -979,6 +985,11 @@ Poll a job: `{ jobId, scope, status, progress, results, failedReason }` where
 
 > `GET /v1/data/coverage` (detail mode) now also returns a `paused` count and a
 > per-product `active` flag. See `docs/COVERAGE_API_GUIDE.md`.
+
+> **`GET /v1/data/catalog`** — product‑centric view of the exportable set (what we
+> actually scrape/export) with per‑chain coverage, paused/active status and KPI
+> totals in `meta.summary`. Replaces the old `GET /v1/products`‑backed catálogo
+> screen. See `docs/CATALOG_API_GUIDE.md`.
 
 ---
 

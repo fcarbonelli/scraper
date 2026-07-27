@@ -133,6 +133,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Marca": "LYSOFORM",
       "Formato": "360",
       "Variedad": "OR",
+      "Suplencias": "TITULAR",
       "Descripcion_Para_Forms": "AERO DESINF LYSOFORM 360 OR",
       "EAN": "7790520995285",
       "Desc_Sku_Sitio": "DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML.",
@@ -149,6 +150,7 @@ La respuesta es un objeto con la siguiente estructura:
       "PRECIO_TGT_MAY": "",
       "IDX_VS_COMPETENCIA": "",
       "PRECIO_PRODUCTO_EN_CATEGORIA": "",
+      "PESO_PRODUCTO_EN_CATEGORIA": "0.18",
       "Index_Competencia": "",
       "Marca_Competencia": ""
     },
@@ -169,6 +171,7 @@ La respuesta es un objeto con la siguiente estructura:
       "Marca": "GLADE",
       "Formato": "360",
       "Variedad": "OR",
+      "Suplencias": "",
       "Descripcion_Para_Forms": "AERO DESINF GLADE 360 OR",
       "EAN": "7794000123456",
       "Desc_Sku_Sitio": "DESINF.AMBIENTE GLADE ORIGINAL 360 ML.",
@@ -185,6 +188,7 @@ La respuesta es un objeto con la siguiente estructura:
       "PRECIO_TGT_MAY": "",
       "IDX_VS_COMPETENCIA": "",
       "PRECIO_PRODUCTO_EN_CATEGORIA": "",
+      "PESO_PRODUCTO_EN_CATEGORIA": "0.18",
       "Index_Competencia": "",
       "Marca_Competencia": ""
     }
@@ -232,6 +236,7 @@ La respuesta es un objeto con la siguiente estructura:
 | `Marca` | Sí | Marca del producto. | `"LYSOFORM"` |
 | `Formato` | Sí | Formato/medida del producto. | `"360"` |
 | `Variedad` | Sí | Variedad del producto. | `"OR"` |
+| `Suplencias` | Sí | Marca de suplencia del producto según la lista del cliente: `"TITULAR"` (ítem de referencia), `"SUPLENTE"` (reemplazo) o `""` (vacío) para los productos que el cliente no clasificó. | `"TITULAR"` |
 | `Descripcion_Para_Forms` | Sí | Descripción normalizada del producto. | `"AERO DESINF LYSOFORM 360 OR"` |
 | `EAN` | Sí | Código de barras (EAN-13). | `"7790520995285"` |
 | `Desc_Sku_Sitio` | Sí | Descripción del producto tal como figura en el sitio relevado. | `"DESINF.AMBIENTE LYSOFORM ORIGINAL 360 ML."` |
@@ -248,6 +253,7 @@ La respuesta es un objeto con la siguiente estructura:
 | `PRECIO_TGT_MAY` | Sí | Precio target mayorista (de la Lista de Precios). Se completa **solo en registros de cadenas de canal mayorista** (`Canal` = `MAY ...`); en registros de supermercado viene vacío. También vacío si el EAN no está en la lista. | `"7537"` |
 | `IDX_VS_COMPETENCIA` | Sí | Índice vs. competencia. **Pendiente** (ver sección 8). | `""` |
 | `PRECIO_PRODUCTO_EN_CATEGORIA` | Sí | Precio del producto en su categoría. **Pendiente** (ver sección 8). | `""` |
+| `PESO_PRODUCTO_EN_CATEGORIA` | Sí | Peso (participación) del producto dentro de su categoría, expresado como ratio (0 a 1). Dato de referencia provisto por el cliente y matcheado por EAN. **Vacío (`""`)** para los EAN que el cliente no clasificó. | `"0.18"` |
 | `Index_Competencia` | Sí | *Legacy* — reemplazado por `IDX_VS_COMPETENCIA`. Se mantiene vacío por compatibilidad. | `""` |
 | `Marca_Competencia` | Sí | *Legacy* — marca de competencia asociada. Se mantiene vacío por compatibilidad. | `""` |
 
