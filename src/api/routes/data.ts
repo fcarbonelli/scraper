@@ -19,6 +19,7 @@ import { adaptersWithSearch, type DiscoverOutcome } from '../../discovery/index.
 import { getDiscoveryQueue, type DiscoveryJobData } from '../../shared/queue.js';
 import {
   fetchAllClientBase,
+  loadAyudinPriceRef,
   toCsv,
   writeXlsx,
   todayInBuenosAires,
@@ -28,6 +29,7 @@ import {
   buildPaginacion,
   clientPricingSuccess,
 } from '../lib/clientPricing.js';
+import { isCompetitorEan } from '../../shared/priceIndicators.js';
 import { buildCatalogOverview, type CatalogProduct } from '../lib/catalogOverview.js';
 
 export const dataRouter = Router();
@@ -86,9 +88,22 @@ dataRouter.get('/pricing', async (req: Request, res: Response) => {
   // error envelope ({ ProcesadoOk: false, ... }) for this path.
   if (error) throw error;
 
-  const priceData = (data ?? []).map((row) =>
-    toPriceData(row as Record<string, unknown>),
-  );
+  const rows = (data ?? []) as Record<string, unknown>[];
+
+  // IDX_VS_COMPETENCIA needs the Ayudín price of each competitor's counterpart,
+  // which may live on another page. Only build the (scoped) reference when this
+  // page actually has competitor rows, so non-competitor pages pay nothing.
+  let idxRef: Map<string, number> | undefined;
+  if (rows.some((r) => isCompetitorEan(String(r['EAN'] ?? '')))) {
+    idxRef = await loadAyudinPriceRef({
+      from: q.from,
+      to: q.to,
+      supermarket: q.supermarket,
+      canal: q.canal,
+    });
+  }
+
+  const priceData = rows.map((row) => toPriceData(row, idxRef));
   res.json(clientPricingSuccess(priceData, buildPaginacion(page, limit, count ?? 0)));
 });
 

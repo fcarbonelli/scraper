@@ -51,16 +51,19 @@ const WANT_XLSX = process.argv.includes('--xlsx');
 // Types
 // -----------------------------------------------------------------------------
 
+interface SpJoin {
+  supermarket_id: string;
+  products: { ean: string | null; name: string | null } | { ean: string | null; name: string | null }[] | null;
+}
 interface SnapRow {
   id: string;
   supermarket_product_id: string;
   scraped_at: string;
   price: number | null;
   status: string;
-  supermarket_products: {
-    supermarket_id: string;
-    products: { ean: string | null; name: string | null } | { ean: string | null; name: string | null }[] | null;
-  } | null;
+  // Supabase infers embedded joins as either an object or an array depending on
+  // the relationship inference; accept both and normalize with firstJoin.
+  supermarket_products: SpJoin | SpJoin[] | null;
 }
 
 interface TodayItem {
@@ -132,7 +135,7 @@ async function main(): Promise<void> {
 
   const items: TodayItem[] = [];
   for (const r of todayRows) {
-    const sp = r.supermarket_products;
+    const sp = firstJoin(r.supermarket_products);
     if (!sp || r.price == null) continue;
     const prod = firstJoin(sp.products);
     const ean = prod?.ean ?? '';

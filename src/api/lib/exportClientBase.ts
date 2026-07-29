@@ -16,11 +16,18 @@
  */
 
 import type { Response } from 'express';
-import { db } from '../../shared/db.js';
+import { db, fetchAllPages } from '../../shared/db.js';
 import { ApiError } from './apiError.js';
 import { suplenciaFor } from '../../shared/suplencias.js';
 import { pesoEnCategoriaFor } from '../../shared/pesoEnCategoria.js';
 import { nuevaCategorizacionFor } from '../../shared/nuevaCategorizacion.js';
+import { ixTargetVsCompetenciaFor } from '../../shared/ixTargetVsCompetencia.js';
+import {
+  diffVsEdp,
+  idxVsCompetencia,
+  buildAyudinPriceRef,
+  ayudinEans,
+} from '../../shared/priceIndicators.js';
 
 /** Filters shared by the pricing and export endpoints. */
 export interface ClientBaseFilters {
@@ -77,8 +84,15 @@ const COLUMNS: { key: string; header: string }[] = [
   { key: 'Precio_MasBajo', header: 'Precio_MasBajo' },
   { key: 'PRECIO_TGT_SPM', header: 'PRECIO_TGT_SPM' },
   { key: 'PRECIO_TGT_MAY', header: 'PRECIO_TGT_MAY' },
+  // Derived (stamped in fetchAllClientBase): Precio_Regular vs the EDP target,
+  // as a whole-number percentage string ("23%"). Not a real client_base column.
+  { key: 'DIFF_VS_EDP', header: 'DIFF_VS_EDP' },
+  // Derived (stamped in fetchAllClientBase): competitor vs Ayudín price index.
+  // The view exposes this column as NULL; we overwrite it with the computed %.
   { key: 'IDX_VS_COMPETENCIA', header: 'IDX_VS_COMPETENCIA' },
-  { key: 'PRECIO_PRODUCTO_EN_CATEGORIA', header: 'PRECIO_PRODUCTO_EN_CATEGORIA' },
+  // Hardcoded client reference (target-vs-competitor index), stamped by EAN in
+  // fetchAllClientBase — not a real column of the client_base view.
+  { key: 'IX_TARGET_VS_COMPETENCIA', header: 'IX_TARGET_VS_COMPETENCIA' },
   // Hardcoded client reference (category weight 0..1), stamped by EAN in
   // fetchAllClientBase — not a real column of the client_base view.
   { key: 'PESO_PRODUCTO_EN_CATEGORIA', header: 'PESO_PRODUCTO_EN_CATEGORIA' },
@@ -144,11 +158,15 @@ export async function fetchAllClientBase(
     // Stamp the hardcoded reference columns onto each row by EAN so both the
     // xlsx and csv writers (which read row[c.key]) pick them up like any column.
     // PESO stays a number (or null) so the xlsx writes a real numeric cell.
+    // DIFF_VS_EDP is per-row; IDX_VS_COMPETENCIA needs the cross-row Ayudín
+    // reference and is stamped after the full window is loaded (below).
     for (const row of data as ClientBaseRow[]) {
       const ean = row['EAN'] == null ? '' : String(row['EAN']);
       row['SUPLENCIAS'] = suplenciaFor(ean);
       row['PESO_PRODUCTO_EN_CATEGORIA'] = pesoEnCategoriaFor(ean);
       row['NUEVA_CATEGORIZACION'] = nuevaCategorizacionFor(ean);
+      row['IX_TARGET_VS_COMPETENCIA'] = ixTargetVsCompetenciaFor(ean);
+      row['DIFF_VS_EDP'] = diffVsEdp(row['Precio_Regular'], row['PRECIO_TGT_SPM'], row['PRECIO_TGT_MAY']);
     }
 
     all.push(...(data as ClientBaseRow[]));
@@ -156,7 +174,57 @@ export async function fetchAllClientBase(
     offset += pageSize;
   }
 
+  // IDX_VS_COMPETENCIA: each competitor (…_A1) row is divided by the Ayudín
+  // (…_A) price in the SAME supermarket on the SAME date. We build the Ayudín
+  // reference via a scoped query (NOT from `all`) so it stays correct even when
+  // the caller filters by a single competitor EAN — which would otherwise leave
+  // `all` without any Ayudín rows to compare against.
+  const ayudinRef = await loadAyudinPriceRef(filters);
+  for (const row of all) {
+    row['IDX_VS_COMPETENCIA'] = idxVsCompetencia(row, ayudinRef);
+  }
+
   return all;
+}
+
+/**
+ * Load the Ayudín price reference (Map keyed by code|supermarket|date) used to
+ * compute IDX_VS_COMPETENCIA. Queries the same view/window/supermarket/canal as
+ * the caller but scoped to the Ayudín EAN set (ignoring any single-EAN filter,
+ * which would otherwise exclude the reference product). Shared by the export
+ * and the /pricing endpoint so both produce identical indices.
+ */
+export async function loadAyudinPriceRef(
+  filters: ClientBaseFilters,
+): Promise<Map<string, number>> {
+  const eans = ayudinEans();
+  if (eans.length === 0) return new Map();
+  const view = filters.includeUnpublished ? 'client_base_preview' : 'client_base';
+
+  const rows = await fetchAllPages<Record<string, unknown>>((from, to) => {
+    let query = db
+      .from(view)
+      .select('ID, EAN, Cadena, Fecha_Relevamiento, Precio_Regular')
+      .in('EAN', eans)
+      .order('Fecha_Relevamiento', { ascending: false })
+      .order('ID', { ascending: false })
+      .range(from, to);
+    if (filters.from) query = query.gte('Fecha_Relevamiento', filters.from);
+    if (filters.to) query = query.lte('Fecha_Relevamiento', filters.to);
+    if (filters.canal) query = query.eq('Canal', filters.canal);
+    if (filters.supermarket) {
+      const ids = filters.supermarket.split(',').map((s) => s.trim()).filter(Boolean);
+      const first = ids[0];
+      if (ids.length === 1 && first) {
+        query = query.eq('Cadena', first.toUpperCase());
+      } else if (ids.length > 1) {
+        query = query.in('Cadena', ids.map((id) => id.toUpperCase()));
+      }
+    }
+    return query;
+  });
+
+  return buildAyudinPriceRef(rows);
 }
 
 /** Quote a CSV cell only when it contains a delimiter, quote, or newline. */

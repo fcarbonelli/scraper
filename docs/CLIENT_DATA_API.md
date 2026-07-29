@@ -1,9 +1,10 @@
 # Client Data API
 
 How the client pulls the official pricing data (the `client_base` view, the flat
-34-column structure their reporting tools expect — including the hardcoded
-`SUPLENCIAS` flag, `PESO_PRODUCTO_EN_CATEGORIA` weight and `NUEVA_CATEGORIZACION`
-code, all matched by EAN).
+35-column structure their reporting tools expect — including the hardcoded
+`SUPLENCIAS` flag, `PESO_PRODUCTO_EN_CATEGORIA` weight, `NUEVA_CATEGORIZACION`
+code and `IX_TARGET_VS_COMPETENCIA` index, all matched by EAN, plus the derived
+`DIFF_VS_EDP` / `IDX_VS_COMPETENCIA` indicators).
 
 There are two ways to get the exact same data:
 
@@ -137,15 +138,35 @@ after `Variedad` in both the JSON (`Suplencias`) and the file export
 
 `PESO_PRODUCTO_EN_CATEGORIA` is hardcoded client reference data (from the weekly
 pricing workbook), stamped onto each row by EAN: the product's share/weight in
-its category as a ratio (0..1), or empty for EANs the client didn't tag. It sits
-right after `PRECIO_PRODUCTO_EN_CATEGORIA` in both outputs and is not a real
-column of the `client_base` view — see `src/shared/pesoEnCategoria.ts`.
+its category as a ratio (0..1), or empty for EANs the client didn't tag. It is
+not a real column of the `client_base` view — see
+`src/shared/pesoEnCategoria.ts`.
 
 `NUEVA_CATEGORIZACION` is likewise hardcoded client reference data (from the
 "Estructura Base" workbook): an analytical re-categorization code per product
 (e.g. `LAVANDINAS_REG_1L_A1`), or empty for untagged EANs. Stamped by EAN, not a
 real column of the view — see `src/shared/nuevaCategorizacion.ts`.
 
-Two columns remain intentionally empty until their logic is defined:
-`IDX_VS_COMPETENCIA` and `PRECIO_PRODUCTO_EN_CATEGORIA`. All columns appear in
-both the JSON and the file export so the structure is stable.
+`DIFF_VS_EDP` and `IDX_VS_COMPETENCIA` are **derived indicators**, computed at the
+app layer (they depend on the hardcoded maps above, not on view columns) and
+formatted as a whole-number percentage string (`"23%"`, `"-5%"`, or empty) — see
+`src/shared/priceIndicators.ts`:
+
+- `DIFF_VS_EDP` — `Precio_Regular` vs. the EDP target: `round(Precio_Regular /
+  (PRECIO_TGT_SPM | PRECIO_TGT_MAY) − 1)`. Only one target is present per row
+  (channel-dependent); empty when there's no price or no target.
+- `IDX_VS_COMPETENCIA` — a competitor's price vs. the Ayudín equivalent's:
+  `round(competitorPR / ayudinPR − 1)`. `NUEVA_CATEGORIZACION` codes end in `A`
+  (Ayudín) or `A1` (competitor); each competitor (`…A1`) row is divided by the
+  Ayudín (`…A`) row's `Precio_Regular` in the **same supermarket on the same
+  date** (first match when several share the code). Only competitor rows get a
+  value; Ayudín rows stay empty.
+
+`IX_TARGET_VS_COMPETENCIA` is hardcoded client reference data (from the
+"Estructura Base" workbook, sheet "IX Target"): a target-vs-competitor index per
+product, or empty for untagged EANs. Stamped by EAN, not a real column of the
+view — see `src/shared/ixTargetVsCompetencia.ts`.
+
+All columns appear in both the JSON and the file export so the structure is
+stable. (The former `PRECIO_PRODUCTO_EN_CATEGORIA` column was dropped from both
+outputs; the underlying view column is left in place but no longer emitted.)

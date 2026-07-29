@@ -19,6 +19,8 @@
 import { suplenciaFor } from '../../shared/suplencias.js';
 import { pesoEnCategoriaFor } from '../../shared/pesoEnCategoria.js';
 import { nuevaCategorizacionFor } from '../../shared/nuevaCategorizacion.js';
+import { ixTargetVsCompetenciaFor } from '../../shared/ixTargetVsCompetencia.js';
+import { diffVsEdp, idxVsCompetencia } from '../../shared/priceIndicators.js';
 
 /** Path of the client pricing endpoint, used to route error formatting. */
 export const CLIENT_PRICING_PATH = '/v1/data/pricing';
@@ -83,10 +85,26 @@ export interface PriceDataItem {
   PRECIO_TGT_SPM: string;
   /** Campo pendiente de definición — llega con el Price List. Vacío por ahora. */
   PRECIO_TGT_MAY: string;
-  /** Campo pendiente de definición (cálculo a definir). Vacío por ahora. */
+  /**
+   * Precio_Regular vs. el precio objetivo EDP del cliente, como porcentaje
+   * entero ("23%", "-5%"). Se toma PRECIO_TGT_SPM o PRECIO_TGT_MAY (el que venga
+   * en la fila). Vacío si no hay precio o no hay target (ver priceIndicators.ts).
+   */
+  DIFF_VS_EDP: string;
+  /**
+   * Índice de precio del competidor vs. el producto Ayudín equivalente, como
+   * porcentaje entero. Se completa sólo en las filas de competidor
+   * (NUEVA_CATEGORIZACION termina en "A1"), dividiendo por el precio del producto
+   * Ayudín ("…A") en el MISMO supermercado y MISMA fecha. Vacío en los demás
+   * casos (ver priceIndicators.ts).
+   */
   IDX_VS_COMPETENCIA: string;
-  /** Campo pendiente de definición (cálculo a definir). Vacío por ahora. */
-  PRECIO_PRODUCTO_EN_CATEGORIA: string;
+  /**
+   * Índice "IX TARGET vs COMPETENCIA" provisto por el cliente, hardcodeado y
+   * matcheado por EAN (ver src/shared/ixTargetVsCompetencia.ts). Vacío para los
+   * EAN que el cliente no clasificó.
+   */
+  IX_TARGET_VS_COMPETENCIA: string;
   /**
    * Peso (participación) del producto dentro de su categoría (ratio 0..1).
    * Dato de referencia del cliente, hardcodeado y matcheado por EAN
@@ -124,7 +142,15 @@ function str(value: unknown): string {
  * Fecha_Modificacion, Precio_MasBajo -> Precio_Mas_Bajo) and the two competitor
  * fields that are intentionally left empty until their logic is defined.
  */
-export function toPriceData(row: Record<string, unknown>): PriceDataItem {
+export function toPriceData(
+  row: Record<string, unknown>,
+  /**
+   * Prebuilt Ayudín price reference for IDX_VS_COMPETENCIA. Required to fill the
+   * index (it needs cross-row context); when omitted, IDX_VS_COMPETENCIA is
+   * left empty. The caller builds it once per request via `loadAyudinPriceRef`.
+   */
+  idxRef?: Map<string, number>,
+): PriceDataItem {
   return {
     Pricing_Id: str(row['ID']),
     Fecha_Creacion: str(row['Fecha_Creacion']),
@@ -156,13 +182,15 @@ export function toPriceData(row: Record<string, unknown>): PriceDataItem {
     Descuento_Unitario: str(row['Descuento_Unitario']),
     URL: str(row['URL']),
     Precio_Mas_Bajo: str(row['Precio_MasBajo']),
-    // Empty until their source data / formula is defined (columns exist in the
-    // view as NULL for now, so they'll populate automatically once computed).
+    // Target prices come straight from the view (price_targets); the two
+    // derived indicators are computed at the app layer (they depend on the
+    // hardcoded NUEVA_CATEGORIZACION map, not on a view column).
     PRECIO_TGT_SPM: str(row['PRECIO_TGT_SPM']),
     PRECIO_TGT_MAY: str(row['PRECIO_TGT_MAY']),
-    IDX_VS_COMPETENCIA: str(row['IDX_VS_COMPETENCIA']),
-    PRECIO_PRODUCTO_EN_CATEGORIA: str(row['PRECIO_PRODUCTO_EN_CATEGORIA']),
+    DIFF_VS_EDP: diffVsEdp(row['Precio_Regular'], row['PRECIO_TGT_SPM'], row['PRECIO_TGT_MAY']),
+    IDX_VS_COMPETENCIA: idxRef ? idxVsCompetencia(row, idxRef) : '',
     // Hardcoded client reference data, matched by EAN (not a view column).
+    IX_TARGET_VS_COMPETENCIA: ixTargetVsCompetenciaFor(str(row['EAN'])),
     PESO_PRODUCTO_EN_CATEGORIA: ((): string => {
       const p = pesoEnCategoriaFor(str(row['EAN']));
       return p === null ? '' : String(p);
