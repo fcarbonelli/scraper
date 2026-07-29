@@ -66,7 +66,7 @@ This is what eliminates the gaps. `status` is one of:
 | `status` | Meaning | `price` | Client-visible? |
 |---|---|---|---|
 | `ok` | A real observed price | set | yes |
-| `out_of_stock` | Confirmed out of stock | may be set (last seen) or NULL | yes |
+| `out_of_stock` | Confirmed out of stock | NULL (see note) | yes |
 | `not_found` | Product page 404 / gone from the site | NULL | yes |
 | `delisted` | Officially removed from this chain's catalog | NULL | yes |
 | `scrape_failed` | Couldn't get the price this day (transient/operational) | NULL | **no — internal only** |
@@ -79,6 +79,24 @@ describe the product itself.
 
 `price` becomes **nullable** so marker rows are representable. Existing rows all
 have a price, so this is backward-compatible.
+
+**Out-of-stock is written at scrape time, not just at publish.** When an adapter
+reports a product as not purchasable (`inStock === false`), `recordJobSuccess`
+persists an `out_of_stock` marker with **NULL price** — it does NOT save the
+site's price. This is critical because several VTEX backends (Cencosud —
+Vea/Jumbo/Disco) return a **sentinel low price** for out-of-stock items (e.g.
+`Price=158.77` with `IsAvailable=false` against a real ~$13 000 product). Saving
+that as an `ok` reading would poison the price history and leak a fake price to
+the client. The raw site response is still kept in `raw_data` for audit.
+
+**Residual case + safety net.** Some sites return a bogus low price while
+reporting the product as *available* (no OOS flag to key off). Those slip past
+the rule above, so before approving a day run
+`scripts/scan-price-anomalies.ts` (`npm run anomalies:scan`): it flags any row
+whose price is a tiny fraction of the same-EAN cross-store median (or the
+mapping's own recent median). The operator reviews and flags the real ones via
+the flag endpoint. Real promotions rarely exceed ~50% off, so the default
+threshold (price < 35% of baseline) has a low false-positive rate.
 
 **Guarantee:** when a run is published, **every active mapping has exactly one
 row** for that day — a real price or a marker row. Internally the grid is always

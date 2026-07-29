@@ -77,6 +77,7 @@ scraper/
 │   ├── import-urls.ts                 ← bulk-import URLs from a text file
 │   ├── heal-eans.ts                   ← one-time backfill of catalog EANs onto EAN-less products
 │   ├── import-price-list.ts           ← import client Price List xlsx → price_targets (PRECIO_TGT_SPM/MAY)
+│   ├── scan-price-anomalies.ts        ← review aid: flag bogus low prices (OOS sentinels reported as available)
 │   └── setup-ec2.sh                   ← one-shot bootstrap for a fresh Ubuntu EC2 (Phase 5)
 └── src/
     ├── adapters/
@@ -178,6 +179,7 @@ scraper/
 | `npm run instore:carry-forward`   | Re-emit today's in-store prices (latest hand-entered price → fresh snapshot dated today) — no AI, no scraping | Backfill today's export; the orchestrator does this daily automatically |
 | `npm run orchestrator:run-now`    | Run a one-shot daily scrape immediately (needs Redis) | Manual trigger, e.g., backfill                         |
 | `npx tsx --env-file=.env scripts/import-price-list.ts "<file.xlsx>" [--dry-run]` | Import the client's Price List (EDP target price per EAN per channel) into `price_targets`; fills `PRECIO_TGT_SPM` / `PRECIO_TGT_MAY` in the export | Every time the client sends a new/updated price list. Idempotent upsert. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
+| `npx tsx --env-file=.env scripts/scan-price-anomalies.ts [--date=YYYY-MM-DD] [--threshold=0.35] [--xlsx]` | Read-only scan for bogus low prices (out-of-stock sentinels the site reports as *available*). Flags rows whose price is a tiny fraction of the same-EAN cross-store median (or the mapping's own recent median). | Before approving a day — catches VTEX-style OOS-low-price leaks that have no availability flag. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
 | `npm run apikey:create -- <name> [--scope=in-store]` | Generate an API key, store hash, print plaintext once. `--scope` restricts it to matching routes (e.g. `in-store`) | Granting access to a new consumer (frontend, in-store app, etc.) |
 | `npm run typecheck`               | `tsc --noEmit`                                        | Always run before suggesting code is "done"            |
 | `npm run lint`                    | ESLint over `**/*.ts`                                 | Before committing                                      |

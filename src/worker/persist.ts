@@ -150,19 +150,31 @@ export async function recordJobSuccess(
   const finishedAt = new Date().toISOString();
   const flat = flattenPromotions(result.promotions, result.price);
 
+  // A successful scrape can still report the product as NOT purchasable
+  // (`inStock === false`). We must NOT persist its price in that case: several
+  // sites (notably VTEX/Cencosud — Vea/Jumbo/Disco) return a sentinel/garbage
+  // low price for out-of-stock items (e.g. $158.77 for a ~$13 000 product,
+  // with IsAvailable=false / AvailableQuantity=0). Persisting that as an `ok`
+  // reading poisons the price history and leaks a fake price to the client.
+  // Instead we store a gap-free `out_of_stock` marker (no price), exactly like
+  // the operator-flagged / publish-reconcile markers. The raw_data is kept so
+  // the original site response is still auditable.
+  const outOfStock = result.inStock === false;
+
   // 1. price_snapshots row
   const snapshotInsert = db.from('price_snapshots').insert({
     supermarket_product_id: supermarketProductId,
     scrape_run_id: scrapeRunId,
     scraped_at: finishedAt,
-    price: result.price,
-    list_price: result.listPrice ?? null,
-    unit_price: result.unitPrice ?? null,
-    unit_price_per: result.unitPricePer ?? null,
+    status: outOfStock ? 'out_of_stock' : 'ok',
+    price: outOfStock ? null : result.price,
+    list_price: outOfStock ? null : (result.listPrice ?? null),
+    unit_price: outOfStock ? null : (result.unitPrice ?? null),
+    unit_price_per: outOfStock ? null : (result.unitPricePer ?? null),
     in_stock: result.inStock,
     currency: result.currency,
     tier_used: result.tierUsed,
-    promotions: result.promotions ?? [],
+    promotions: outOfStock ? [] : (result.promotions ?? []),
     // Record which geographic zone produced this snapshot. `zoneUsed` is only
     // set when a location-aware adapter had to fall back from the default zone
     // (see src/adapters/geo-retry.ts); otherwise it's the default zone.
@@ -170,11 +182,11 @@ export async function recordJobSuccess(
       ...(result.rawData ?? {}),
       zoneUsed: result.zoneUsed ?? 'default',
     },
-    offer_price_1: flat.offer_price_1,
-    offer_price_2: flat.offer_price_2,
-    promotion_1: flat.promotion_1,
-    promotion_2: flat.promotion_2,
-    unit_discount: flat.unit_discount,
+    offer_price_1: outOfStock ? null : flat.offer_price_1,
+    offer_price_2: outOfStock ? null : flat.offer_price_2,
+    promotion_1: outOfStock ? null : flat.promotion_1,
+    promotion_2: outOfStock ? null : flat.promotion_2,
+    unit_discount: outOfStock ? null : flat.unit_discount,
     site_product_name: result.productInfo?.name ?? null,
   });
 
