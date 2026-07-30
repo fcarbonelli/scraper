@@ -1,10 +1,17 @@
 # Client Data API
 
 How the client pulls the official pricing data (the `client_base` view, the flat
-35-column structure their reporting tools expect — including the hardcoded
-`SUPLENCIAS` flag, `PESO_PRODUCTO_EN_CATEGORIA` weight, `NUEVA_CATEGORIZACION`
-code and `IX_TARGET_VS_COMPETENCIA` index, all matched by EAN, plus the derived
+structure their reporting tools expect — including the hardcoded `SUPLENCIAS`
+flag, `PESO_PRODUCTO_EN_CATEGORIA` weight, `NUEVA_CATEGORIZACION` code and
+`IX_TARGET_VS_COMPETENCIA` index, all matched by EAN, plus the derived
 `DIFF_VS_EDP` / `IDX_VS_COMPETENCIA` indicators).
+
+The `/pricing` JSON returns **38 fields per record**; the `/export` file has
+**36 columns** (it omits the two legacy placeholders `Index_Competencia` /
+`Marca_Competencia`, which the JSON keeps but always leaves empty). The
+canonical, field-by-field reference the client integrates against is
+**`docs/API_PRICING_CLIENTE.md`** — keep that doc and `src/api/lib/clientPricing.ts`
+(the `toPriceData` mapper) as the source of truth for exact field names and shapes.
 
 There are two ways to get the exact same data:
 
@@ -48,17 +55,48 @@ curl -H "X-API-Key: $KEY" \
   "https://<host>/v1/data/pricing?from=2026-06-11&to=2026-06-11&limit=500"
 ```
 
-**Response:**
+**Response:** the client contract envelope (NOT the generic `{ data, pagination,
+meta }` shape). Every value inside `PriceData` is delivered as a **string**, and
+field names are the client-facing renames (e.g. `ID` → `Pricing_Id`,
+`Precio_MasBajo` → `Precio_Mas_Bajo`):
 
 ```json
 {
-  "data": [ { "ID": 1, "Fecha_Relevamiento": "2026-06-11", "Cadena": "COTO", "EAN": "...", "Precio_Regular": 1234.5, ... } ],
-  "pagination": { "page": 1, "limit": 500, "total": 3900, "totalPages": 8 },
-  "meta": { "ts": "2026-06-11T..." }
+  "ProcesadoOk": true,
+  "Error": "",
+  "PriceData": [
+    {
+      "Pricing_Id": "145090",
+      "Fecha_Relevamiento": "2026-07-30",
+      "Cadena": "MAKRO",
+      "Canal": "MAY NACIONAL",
+      "EAN": "7790132098459",
+      "Precio_Regular": "1820",
+      "PRECIO_TGT_MAY": "1273",
+      "DIFF_VS_EDP": "43%",
+      "IDX_VS_COMPETENCIA": "",
+      "IX_TARGET_VS_COMPETENCIA": "120",
+      "PESO_PRODUCTO_EN_CATEGORIA": "0.36",
+      "NUEVA_CATEGORIZACION": "LAVANDINAS_REG_1L_A"
+    }
+  ],
+  "Paginacion": { "Pagina": 1, "Limite": 500, "TotalRegistros": 72689, "TotalPaginas": 146 }
 }
 ```
 
-To pull a full day programmatically, page through until `page === totalPages`.
+The record above is abridged — each record always carries the full 38-field set
+(see `docs/API_PRICING_CLIENTE.md` §5 for every field). To pull a full day
+programmatically, page through until `Paginacion.Pagina === Paginacion.TotalPaginas`.
+
+> **"A field looks missing":** the key is always present; it may just be an empty
+> string (`""`) because it does not apply to that row. In particular:
+> `IDX_VS_COMPETENCIA` is filled only on competitor rows (`NUEVA_CATEGORIZACION`
+> ending in `A1`); `PRECIO_TGT_SPM` only on `SPM ...` channel rows and
+> `PRECIO_TGT_MAY` only on `MAY ...` rows; `Precio_c_Oferta_2` / `Promocion_2`
+> only when a 2nd promo exists; the hardcoded reference fields (`Suplencias`,
+> `PESO_PRODUCTO_EN_CATEGORIA`, `IX_TARGET_VS_COMPETENCIA`, `NUEVA_CATEGORIZACION`)
+> are empty for EANs the client never classified; and `Index_Competencia` /
+> `Marca_Competencia` are legacy and intentionally always empty.
 
 ---
 
