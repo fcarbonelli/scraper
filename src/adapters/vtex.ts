@@ -34,6 +34,7 @@ import type {
 import { vtexSearchByEan } from './vtex-search.js';
 import { runWithGeoFallback } from './geo-retry.js';
 import { resolveRegionId, withRegion } from './vtex-region.js';
+import { pickStoreOffer } from './vtex-sellers.js';
 import type { Zone } from './zones.js';
 
 // =============================================================================
@@ -285,6 +286,44 @@ function extractPromotions(offer: VtexCommertialOffer): Promotion[] {
 // =============================================================================
 
 /**
+ * Extract master-catalog metadata (name/brand/ean/category/image/unit) from a
+ * VTEX product+item. Split out of `parseVtexResponse` so the store-seller
+ * fallback path (which reads price/stock from the simulation API, not the
+ * catalog offer) can still seed the `products` table with the same fields.
+ */
+function extractVtexProductInfo(product: VtexProduct, item: VtexItem): ProductInfo {
+  const productInfo: ProductInfo = {};
+  if (product.productName) productInfo.name = product.productName;
+  if (product.brand) productInfo.brand = product.brand;
+  if (item.ean) productInfo.ean = item.ean;
+  // Categories come as ["/Limpieza/Lavandinas/", "/Limpieza/"]. The first is
+  // most specific; we use the leaf segment as the human-readable category.
+  if (Array.isArray(product.categories) && product.categories[0]) {
+    const segments = product.categories[0].split('/').filter(Boolean);
+    const leaf = segments[segments.length - 1];
+    if (leaf) productInfo.category = leaf;
+  }
+  const imageUrl = item.images?.[0]?.imageUrl;
+  if (imageUrl) productInfo.imageUrl = imageUrl;
+  // VTEX surfaces the unit label under a Spanish-language spec key (when the
+  // store fills it in). Best-effort: absent on many stores, which is fine.
+  const unitLabel = product['Gramaje leyenda de conversión'];
+  if (Array.isArray(unitLabel) && typeof unitLabel[0] === 'string') {
+    productInfo.unit = unitLabel[0].trim();
+  }
+
+  const metadata: Record<string, unknown> = {};
+  if (product.linkText) metadata.linkText = product.linkText;
+  if (product.link) metadata.link = product.link;
+  if (item.itemId) metadata.itemId = item.itemId;
+  if (Array.isArray(product.categories) && product.categories[0]) {
+    metadata.categoryPath = product.categories[0];
+  }
+  if (Object.keys(metadata).length > 0) productInfo.metadata = metadata;
+  return productInfo;
+}
+
+/**
  * Turn a VTEX catalog `products/search` response into a normalized ScrapeResult.
  * `storeName` only feeds error messages.
  */
@@ -360,47 +399,19 @@ export function parseVtexResponse(
     }
   }
 
-  // -- Per-unit price + label ---------------------------------------------
+  // -- Per-unit price -----------------------------------------------------
   let unitPrice: number | undefined;
-  let unitPricePer: string | undefined;
   if (Array.isArray(product.pricePerUnit) && typeof product.pricePerUnit[0] === 'string') {
     const n = Number(product.pricePerUnit[0]);
     if (Number.isFinite(n) && n > 0) unitPrice = n;
-  }
-  // VTEX surfaces the unit label under a Spanish-language spec key (when the
-  // store fills it in). Best-effort: absent on many stores, which is fine.
-  const unitLabel = product['Gramaje leyenda de conversión'];
-  if (Array.isArray(unitLabel) && typeof unitLabel[0] === 'string') {
-    unitPricePer = unitLabel[0].trim();
   }
 
   // -- Promotions ---------------------------------------------------------
   const promotions = extractPromotions(offer);
 
   // -- Master catalog data (used to backfill `products` row on first scrape) -
-  const productInfo: ProductInfo = {};
-  if (product.productName) productInfo.name = product.productName;
-  if (product.brand) productInfo.brand = product.brand;
-  if (item.ean) productInfo.ean = item.ean;
-  // Categories come as ["/Limpieza/Lavandinas/", "/Limpieza/"]. The first is
-  // most specific; we use the leaf segment as the human-readable category.
-  if (Array.isArray(product.categories) && product.categories[0]) {
-    const segments = product.categories[0].split('/').filter(Boolean);
-    const leaf = segments[segments.length - 1];
-    if (leaf) productInfo.category = leaf;
-  }
-  const imageUrl = item.images?.[0]?.imageUrl;
-  if (imageUrl) productInfo.imageUrl = imageUrl;
-  if (unitPricePer) productInfo.unit = unitPricePer;
-
-  const metadata: Record<string, unknown> = {};
-  if (product.linkText) metadata.linkText = product.linkText;
-  if (product.link) metadata.link = product.link;
-  if (item.itemId) metadata.itemId = item.itemId;
-  if (Array.isArray(product.categories) && product.categories[0]) {
-    metadata.categoryPath = product.categories[0];
-  }
-  if (Object.keys(metadata).length > 0) productInfo.metadata = metadata;
+  const productInfo = extractVtexProductInfo(product, item);
+  const unitPricePer = productInfo.unit;
 
   const result: ScrapeResult = {
     price,
@@ -452,6 +463,37 @@ export interface VtexAdapterOptions {
    * recoverable failure. Mutually exclusive with the geo-fallback path.
    */
   salesChannels?: number[];
+  /**
+   * Enable the per-branch "store seller" fallback (see vtex-sellers.ts).
+   *
+   * Some VTEX stores (ChangoMas / masonline) split inventory between an online
+   * DELIVERY seller ("1", the only one the catalog API returns) and many
+   * per-branch PICKUP sellers. When seller "1" is out of stock / price-less, we
+   * sweep the branches serving `postalCode` via the checkout simulation API and
+   * adopt the live branch's price (in-stock only when actually purchasable).
+   *
+   * The regionId geo-fallback does NOT work for these stores (their catalog
+   * ignores regionId), so this replaces it. Mutually exclusive with both the
+   * geo-fallback and the sales-channel sweep.
+   */
+  storeSellerFallback?: {
+    /** Postal code whose branch sellers to sweep (e.g. CABA "1414"). */
+    postalCode: string;
+  };
+}
+
+/**
+ * VTEX failures the store-seller fallback might fix: seller "1" has no usable
+ * price (price_missing) or no parseable offer (selector_failed). An empty
+ * catalog (product_not_found) has no SKU to simulate, so it isn't swept.
+ */
+function isStoreSellerRecoverable(type: ScrapeError['type']): boolean {
+  return type === 'price_missing' || type === 'selector_failed';
+}
+
+/** A result is "usable" only when it has a real, in-stock price. */
+function isUsableResult(r: ScrapeResult): boolean {
+  return r.inStock === true && Number.isFinite(r.price) && r.price > 0;
 }
 
 /**
@@ -594,6 +636,82 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
     throw lastError;
   }
 
+  /**
+   * Scrape a store that splits delivery/pickup inventory across sellers
+   * (ChangoMas / masonline). Read the default DELIVERY seller ("1") first; if
+   * it's in stock, return it (best case, zero extra requests). Otherwise sweep
+   * the branch sellers serving the configured postal code via the checkout
+   * simulation API and adopt the live branch's price. See vtex-sellers.ts.
+   */
+  async function scrapeWithStoreSellerFallback(
+    ctx: ScrapeContext,
+    postalCode: string,
+  ): Promise<ScrapeResult> {
+    const url = `${base}/api/catalog_system/pub/products/search?fq=productId:${encodeURIComponent(
+      ctx.externalId,
+    )}`;
+    const body = await fetchVtex<VtexProduct[]>(url, ctx.signal, opts.name, 'catalog lookup', userAgent);
+
+    // Default delivery seller. If it's in stock we're done; if it merely has a
+    // price (out of stock) we keep it as a last-resort fallback below.
+    let deliveryResult: ScrapeResult | undefined;
+    try {
+      const r = parseVtexResponse(body, ctx, opts.name);
+      if (isUsableResult(r)) return r;
+      deliveryResult = r;
+    } catch (err) {
+      // Empty catalog (no product/SKU) can't be swept — propagate as-is.
+      if (!(err instanceof ScrapeError) || !isStoreSellerRecoverable(err.type)) throw err;
+    }
+
+    // We need a SKU (itemId) to simulate branch offers. OOS products still list
+    // their item in the catalog, so this is present even when the offer wasn't.
+    const product = body?.[0];
+    const item = product?.items?.[0];
+    const sku = item?.itemId;
+    if (!product || !item || !sku) {
+      if (deliveryResult) return deliveryResult;
+      throw new ScrapeError(
+        'product_not_found',
+        `${opts.name} catalog has no SKU to check branch sellers (productId=${ctx.externalId})`,
+      );
+    }
+
+    const store = await pickStoreOffer({
+      baseUrl: base,
+      sku,
+      postalCode,
+      userAgent,
+      signal: ctx.signal,
+    });
+
+    if (store) {
+      ctx.logger.info(
+        { seller: store.seller, price: store.price, inStock: store.inStock, carriedBy: store.carriedBy },
+        `${opts.name} resolved via branch seller`,
+      );
+      const result: ScrapeResult = {
+        price: store.price,
+        inStock: store.inStock,
+        currency: 'ARS',
+        tierUsed: 'api',
+        zoneUsed: store.seller,
+        promotions: [],
+        productInfo: extractVtexProductInfo(product, item),
+        rawData: { product, storeSeller: store.seller, carriedBy: store.carriedBy, source: 'store_seller_sim' },
+      };
+      return result;
+    }
+
+    // No branch carries it either → keep the delivery OOS price if we had one,
+    // otherwise report it genuinely missing everywhere.
+    if (deliveryResult) return deliveryResult;
+    throw new ScrapeError(
+      'price_missing',
+      `${opts.name}: out of stock on delivery seller and no branch carries productId=${ctx.externalId}`,
+    );
+  }
+
   return {
     id: opts.id,
     name: opts.name,
@@ -619,6 +737,11 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
           'unknown',
           `${opts.name} adapter requires external_id (productId), got empty.`,
         );
+      }
+      // Stores that split delivery/pickup inventory across sellers (ChangoMas /
+      // masonline) can't be regionalized via regionId, so sweep branch sellers.
+      if (opts.storeSellerFallback) {
+        return scrapeWithStoreSellerFallback(ctx, opts.storeSellerFallback.postalCode);
       }
       // Stores that gate their catalog by SALES CHANNEL (e.g. El Abastecedor)
       // can't be regionalized via regionId, so sweep sales channels instead.
