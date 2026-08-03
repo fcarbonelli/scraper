@@ -31,12 +31,16 @@ import { uploadPageImage } from './storage.js';
 import {
   clearReviewItems,
   createMagazine,
+  findCurrentMagazineInSeries,
   findMagazineByHash,
   insertReviewItems,
   setMagazineStatus,
   supersedePreviousMagazines,
+  type MagazineRow,
   type ReviewItemInput,
 } from './store.js';
+import { classifyReupload, shouldProcessSeries, wouldProcess } from './decide.js';
+import { parseFlyerPeriod, type FlyerPeriod } from './period.js';
 import { purgeTodayRevistaSnapshotsNotApprovedOn, pauseSupersededSeriesMappings } from './approve.js';
 
 const StrategySchema = z.object({
@@ -308,17 +312,35 @@ async function uploadAllPages(
   return urls;
 }
 
-/** Decide whether a discovered candidate should be processed given skip/only filters. */
-function shouldProcessSeries(
-  seriesKey: string,
-  sm: RevistaSupermarket,
-  opts: ProcessOptions,
-): boolean {
-  if (opts.onlySeries && opts.onlySeries.length > 0) {
-    return opts.onlySeries.includes(seriesKey);
+/**
+ * Decide whether a discovered candidate should be processed given skip/only
+ * filters. Thin wrapper: the rule itself lives in `decide.ts` so the preview
+ * endpoint applies the identical filter.
+ */
+/**
+ * The stored issue's validity period. Falls back to re-deriving it from the
+ * label for rows written before migration 023 / the backfill, so the re-upload
+ * guard keeps working on an un-backfilled database instead of degrading to
+ * "unknown" for every comparison.
+ */
+function magazinePeriod(row: MagazineRow): FlyerPeriod | null {
+  if (row.period_start && row.period_end) {
+    // Never assume `exact`: a stored fortnight may have been inferred from
+    // "Agosto primera quincena", and the guard treats `exact` as proof.
+    return {
+      start: row.period_start,
+      end: row.period_end,
+      confidence: row.period_confidence === 'exact' ? 'exact' : 'inferred',
+    };
   }
-  const skip = new Set([...(sm.skipSeries ?? []), ...(opts.skipSeries ?? [])]);
-  return !skip.has(seriesKey);
+  return parseFlyerPeriod(row.label, new Date(row.detected_at));
+}
+
+function seriesAllowed(seriesKey: string, sm: RevistaSupermarket, opts: ProcessOptions): boolean {
+  return shouldProcessSeries(seriesKey, sm.skipSeries ?? [], {
+    ...(opts.skipSeries ? { skipSeries: opts.skipSeries } : {}),
+    ...(opts.onlySeries ? { onlySeries: opts.onlySeries } : {}),
+  });
 }
 
 /** Process one supermarket: discover, dedup, and process any new issues. */
@@ -359,9 +381,10 @@ export async function processSupermarket(
   // Decide which candidates actually need (expensive) processing.
   const toProcess: MagazineCandidate[] = [];
   const summaries: MagazineSummary[] = [];
+  const reuploadsSkipped: string[] = [];
   for (const c of candidates) {
     // Series filter runs BEFORE download/render — saves the whole flyer cost.
-    if (!shouldProcessSeries(c.seriesKey, sm, opts)) {
+    if (!seriesAllowed(c.seriesKey, sm, opts)) {
       log.info(
         { label: c.label, seriesKey: c.seriesKey },
         'revista: skipping series (skipSeries / onlySeries)',
@@ -376,25 +399,63 @@ export async function processSupermarket(
     }
 
     const existing = await findMagazineByHash(sm.id, c.hash);
-    // Treat 'failed' like 'processing': allow a retry without --force so a
-    // one-off render/vision glitch self-heals on the next daily check.
-    if (
-      existing &&
-      existing.status !== 'processing' &&
-      existing.status !== 'failed' &&
-      !opts.force
-    ) {
+    if (!wouldProcess(existing, opts.force)) {
       summaries.push({
         supermarketId: sm.id,
         label: c.label,
         status: 'skipped',
         hash: c.hash,
-        magazineId: existing.id,
+        magazineId: existing?.id ?? '',
       });
       continue;
     }
+
+    // Re-upload guard: the hash is new, but the chain may have simply
+    // re-exported the issue we already scanned. Vital republishes the same PDF
+    // several times a day and the hash keys off content-length/ETag, so without
+    // this every run would rescan at full vision cost AND supersede whatever the
+    // operator had already curated.
+    if (!existing && !opts.force) {
+      const current = await findCurrentMagazineInSeries(sm.id, c.seriesKey);
+      const verdict = classifyReupload({
+        strategy: sm.strategy.strategy,
+        candidate: {
+          label: c.label,
+          period: parseFlyerPeriod(c.label, new Date()),
+          fileSize: c.fileSize,
+        },
+        current: current
+          ? {
+              label: current.label,
+              period: magazinePeriod(current),
+              fileSize: current.file_size,
+            }
+          : null,
+      });
+      if (verdict.reupload) {
+        log.info(
+          { label: c.label, seriesKey: c.seriesKey, currentId: current?.id, reason: verdict.reason },
+          'revista: skipping re-upload of an issue already scanned',
+        );
+        reuploadsSkipped.push(`${c.label} (${verdict.reason})`);
+        summaries.push({
+          supermarketId: sm.id,
+          label: c.label,
+          status: 'skipped',
+          hash: c.hash,
+          ...(current ? { magazineId: current.id } : {}),
+        });
+        continue;
+      }
+    }
     toProcess.push(c);
   }
+
+  // A skipped re-upload must be visible: otherwise "nothing changed" reads the
+  // same whether the site published nothing or we declined to rescan it.
+  const reuploadNote = reuploadsSkipped.length > 0
+    ? ` | re-subidas salteadas: ${reuploadsSkipped.join('; ')}`
+    : '';
 
   if (toProcess.length === 0) {
     log.info({ candidates: candidates.length }, 'revista: nothing changed, skipping');
@@ -405,7 +466,9 @@ export async function processSupermarket(
       candidates: candidates.length,
       newIssues: 0,
       durationMs: Date.now() - startedAt,
-      detail: candidates.length === 0 ? 'no magazine found on site' : 'all issues already known',
+      detail:
+        (candidates.length === 0 ? 'no magazine found on site' : 'all issues already known') +
+        reuploadNote,
       scrapeRunId: opts.scrapeRunId ?? null,
     });
     return summaries;
@@ -426,7 +489,8 @@ export async function processSupermarket(
     candidates: candidates.length,
     newIssues: processed,
     durationMs: Date.now() - startedAt,
-    detail: `processed=${processed} failed=${failed} of ${toProcess.length} new issue(s)`,
+    detail:
+      `processed=${processed} failed=${failed} of ${toProcess.length} new issue(s)` + reuploadNote,
     scrapeRunId: opts.scrapeRunId ?? null,
   });
   return summaries;
@@ -456,18 +520,17 @@ export async function ingestPdfUrl(
     seriesKey: opts.seriesKey,
   });
 
-  // Dedup unless --force / prior failed|processing.
-  if (!opts.force) {
-    const existing = await findMagazineByHash(sm.id, candidate.hash);
-    if (existing && existing.status !== 'processing' && existing.status !== 'failed') {
-      return {
-        supermarketId: sm.id,
-        label: candidate.label,
-        status: 'skipped',
-        hash: candidate.hash,
-        magazineId: existing.id,
-      };
-    }
+  // Dedup unless --force / prior failed|processing. Same predicate the daily
+  // check and the preview button use — see decide.ts.
+  const existing = await findMagazineByHash(sm.id, candidate.hash);
+  if (!wouldProcess(existing, opts.force)) {
+    return {
+      supermarketId: sm.id,
+      label: candidate.label,
+      status: 'skipped',
+      hash: candidate.hash,
+      ...(existing ? { magazineId: existing.id } : {}),
+    };
   }
 
   const indexPromise = loadCatalog().then(buildCatalogIndex);
@@ -497,6 +560,12 @@ export async function runRevistaCheck(opts: ProcessOptions = {}): Promise<Magazi
 
   // The catalog is the same for every supermarket — build the index once.
   const indexPromise = loadCatalog().then(buildCatalogIndex);
+  // It is only awaited inside processCandidate, i.e. ONLY when something needs
+  // processing. On a quiet day nothing awaits it, so a rejection here would be
+  // an unhandled rejection — which Node turns into a process exit. Swallow it
+  // here; the real await inside processCandidate still surfaces the error and
+  // fails that magazine properly.
+  indexPromise.catch(() => {});
 
   const all: MagazineSummary[] = [];
   for (const sm of supers) {

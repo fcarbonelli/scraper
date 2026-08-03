@@ -46,6 +46,15 @@ export interface MagazineCandidate {
    * (e.g. 'mm', 'gt', 'folder-resto'). Single-series chains use 'default'.
    */
   seriesKey: string;
+  /**
+   * Cheap facts kept from the discovery probe so the operator (and the
+   * re-upload guard) can tell a new edition from a re-export WITHOUT
+   * downloading anything. Previously these were folded into `hash` and thrown
+   * away, which left the review UI with nothing to show but a label.
+   */
+  fileSize?: number | null;
+  lastModified?: string | null;
+  pageCount?: number | null;
   /** Download + render the pages (the expensive part). */
   fetch: () => Promise<MagazineSource>;
 }
@@ -67,15 +76,60 @@ function totalBytes(pages: Buffer[]): number {
  * `content-length`, `ETag`, and `Last-Modified`. Any of them changing means the
  * file changed → we reprocess. Falls back to just the URL if HEAD is blocked.
  */
-async function headFingerprint(url: string): Promise<string> {
+export interface HeadInfo {
+  /** The joined fingerprint that feeds the dedup hash. Empty when HEAD failed. */
+  raw: string;
+  contentLength: number | null;
+  lastModified: string | null;
+}
+
+/**
+ * Ask for a single byte to learn the full size when HEAD withheld it.
+ * `Content-Range: bytes 0-0/22475835` carries the total; one byte crosses the
+ * wire. Vital's CDN stopped sending `content-length` on HEAD, which silently
+ * blinded the re-upload guard — the size is the only signal separating a
+ * re-export from a new edition once the period matches.
+ */
+async function rangedSize(url: string): Promise<number | null> {
+  let res: Response | undefined;
+  try {
+    res = await fetchRetry(
+      url,
+      { headers: { 'User-Agent': UA, Range: 'bytes=0-0' } },
+      `RANGE ${url}`,
+    );
+    // Only a 206 honoured the range. A server that ignores it answers 200 with
+    // the WHOLE file — tens of MB we must never read, and whose content-length
+    // is the real size but arrives attached to a body we are about to drop.
+    if (res.status !== 206) return null;
+    const total = res.headers.get('content-range')?.split('/')[1];
+    const n = total ? Number(total) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  } finally {
+    // Always release the socket: an unread body keeps the connection alive
+    // until GC, and this runs per PDF on every daily discovery.
+    await res?.body?.cancel().catch(() => {});
+  }
+}
+
+async function headFingerprint(url: string): Promise<HeadInfo> {
   try {
     const res = await fetchRetry(url, { method: 'HEAD', headers: { 'User-Agent': UA } }, `HEAD ${url}`);
     const len = res.headers.get('content-length') ?? '';
     const etag = res.headers.get('etag') ?? '';
     const lastModified = res.headers.get('last-modified') ?? '';
-    return [len, etag, lastModified].join('|');
+    // `raw` must stay byte-identical to what it has always been: it feeds the
+    // dedup hash, and folding a newly-available size into it would make every
+    // stored issue look like a new one.
+    return {
+      raw: [len, etag, lastModified].join('|'),
+      contentLength: len ? Number(len) : await rangedSize(url),
+      lastModified: lastModified || null,
+    };
   } catch {
-    return '';
+    return { raw: '', contentLength: null, lastModified: null };
   }
 }
 
@@ -89,12 +143,14 @@ async function pdfLinkCandidates(
   return Promise.all(
     links.map(async (link) => {
       const fingerprint = await headFingerprint(link.url);
-      const h = hash(link.url, fingerprint);
+      const h = hash(link.url, fingerprint.raw);
       return {
         hash: h,
         label: link.label,
         sourceUrl: link.url,
         seriesKey: link.seriesKey,
+        fileSize: fingerprint.contentLength,
+        lastModified: fingerprint.lastModified,
         fetch: async (): Promise<MagazineSource> => {
           const buf = await downloadPdf(link);
           const all = await renderPdfToImages(buf);
@@ -168,7 +224,7 @@ async function fetchPubhtml5Pages(bookUrl: string, sel?: PageSelection): Promise
  */
 async function readPubhtml5Config(
   bookUrl: string,
-): Promise<{ title: string; files: string[]; fingerprint: string }> {
+): Promise<{ title: string; files: string[]; fingerprint: string; lastModified: string | null }> {
   const cfgUrl = new URL('javascript/config.js', bookUrl).href;
   const res = await fetchRetry(cfgUrl, { headers: { 'User-Agent': UA } }, cfgUrl);
   if (!res.ok) throw new Error(`Could not read PubHTML5 config (${cfgUrl}): HTTP ${res.status}`);
@@ -186,7 +242,7 @@ async function readPubhtml5Config(
   const lastModified = res.headers.get('last-modified') ?? '';
   const len = res.headers.get('content-length') ?? String(cfg.length);
   const fingerprint = [len, etag, lastModified, title, String(files.length), files.join(',')].join('|');
-  return { title, files, fingerprint };
+  return { title, files, fingerprint, lastModified: lastModified || null };
 }
 
 async function pubhtml5Candidates(
@@ -200,7 +256,7 @@ async function pubhtml5Candidates(
 
   // Content fingerprint (not URL alone): Rosental often keeps the same
   // pubhtml5.com/... path across quincenas and only swaps config.js pages.
-  const { title, fingerprint } = await readPubhtml5Config(bookUrl);
+  const { title, files, fingerprint, lastModified } = await readPubhtml5Config(bookUrl);
   const h = hash(bookUrl, fingerprint);
 
   return [
@@ -209,6 +265,10 @@ async function pubhtml5Candidates(
       label: title,
       sourceUrl: bookUrl,
       seriesKey: 'default',
+      // Free from config.js — and the two numbers that actually tell a new
+      // quincena apart from a re-parsed title.
+      pageCount: files.length,
+      lastModified,
       fetch: () => fetchPubhtml5Pages(bookUrl, sel),
     },
   ];
@@ -324,13 +384,15 @@ export async function candidateFromPdfUrl(
 
   const link: PdfLink = { url: pdfUrl, filename, label, seriesKey };
   const fingerprint = await headFingerprint(pdfUrl);
-  const h = hash(pdfUrl, fingerprint);
+  const h = hash(pdfUrl, fingerprint.raw);
 
   return {
     hash: h,
     label,
     sourceUrl: pdfUrl,
     seriesKey,
+    fileSize: fingerprint.contentLength,
+    lastModified: fingerprint.lastModified,
     fetch: async (): Promise<MagazineSource> => {
       const buf = await downloadPdf(link);
       const all = await renderPdfToImages(buf);

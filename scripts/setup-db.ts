@@ -525,7 +525,13 @@ const SUPERMARKETS: SupermarketSeed[] = [
     concurrency: 2,
     // Magazine-sourced (Publuu flipbook). Kept SEPARATE from the retail
     // `comodin` VTEX chain on purpose — this is the wholesale (mayorista) tier.
-    is_active: true,
+    //
+    // DEACTIVATED 2026-08-03: it never ingested a single product, yet every
+    // daily check paid for its discovery (and publuu is the one strategy whose
+    // download needs Playwright). Deactivating here rather than only in SQL
+    // because this seed re-upserts `is_active` on every deploy, so a bare
+    // UPDATE would silently revert. Flip back to true to resume.
+    is_active: false,
     provincia: 'JUJUY',
     zona: 'NOA',
     canal: 'MAY REGIONAL',

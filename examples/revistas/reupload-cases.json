@@ -1,0 +1,82 @@
+{
+  "_comment": [
+    "Vital's re-export churn, measured read-only against production on 2026-07-30.",
+    "Source: docs/REVISTAS_PLAN.md §3.1-bis. Frozen here because the live case is",
+    "gone — the site now serves the 03.08–09.08 period, so a test that probed",
+    "vital.com.ar could never reproduce it again.",
+    "",
+    "Every row is THE SAME FLYER re-exported: same URL, same period, same pages.",
+    "Only content-length/ETag/Last-Modified moved, which is exactly what the dedup",
+    "hash keys off — hence the pipeline saw five 'new editions' that were not."
+  ],
+  "period": "27.07 al 02.08",
+  "cases": [
+    {
+      "file": "112964.pdf",
+      "label": "Folder 27.07 al 02.08 | RESTO",
+      "storedHash": "aadcfa3b661a65dd",
+      "freshHash": "2e73e7e167081b35",
+      "storedSize": 19452302,
+      "freshSize": 19472679,
+      "lastModified": "2026-07-29T17:23:00Z",
+      "expect": "re_subida"
+    },
+    {
+      "file": "112966.pdf",
+      "label": "Folder Nonfood 27.07 al 02.08 | RESTO",
+      "storedHash": "c6edc871ad1f8a94",
+      "freshHash": "96609fb703f27f49",
+      "storedSize": 4580786,
+      "freshSize": 4587119,
+      "lastModified": "2026-07-30T16:49:00Z",
+      "expect": "re_subida"
+    },
+    {
+      "file": "112967.pdf",
+      "label": "Especial Frescos 27.07 al 02.08 | TODAS",
+      "storedHash": "77f862fae5fa9f84",
+      "freshHash": "bb4e9e795bbc3d81",
+      "storedSize": 8792298,
+      "freshSize": 8797671,
+      "lastModified": "2026-07-28T18:49:00Z",
+      "expect": "re_subida"
+    },
+    {
+      "file": "112968.pdf",
+      "label": "Aviso Marca Propia 27.07 al 02.08 | TODAS",
+      "storedHash": "c8103f382d78e6f2",
+      "freshHash": "1454ca36fea64528",
+      "storedSize": 3517256,
+      "freshSize": 3516929,
+      "lastModified": "2026-07-29T20:08:00Z",
+      "expect": "re_subida"
+    },
+    {
+      "file": "112969.pdf",
+      "label": "Aviso Pañales del 27.07 al 02.08 | TODAS",
+      "storedHash": "d0037243bf64deb1",
+      "freshHash": "d0037243bf64deb1",
+      "storedSize": 3178071,
+      "freshSize": 3178071,
+      "lastModified": "2026-07-24T20:46:00Z",
+      "expect": "re_subida"
+    }
+  ],
+  "newEditions": [
+    {
+      "_comment": "The real 03.08 batch ingested on 2026-08-03 — these MUST NOT be skipped.",
+      "label": "Folder 03.08 al 09.08 | MALVINAS - ABASTO",
+      "againstStoredLabel": "Folder 27.07 al 02.08 | RESTO",
+      "storedSize": 19452302,
+      "freshSize": 19472679,
+      "expect": "nueva_edicion"
+    },
+    {
+      "label": "Folder Nonfood 03.08 al 09.08 | AMBA MENOS LP",
+      "againstStoredLabel": "Folder Nonfood 27.07 al 02.08 | RESTO",
+      "storedSize": 4580786,
+      "freshSize": 4587119,
+      "expect": "nueva_edicion"
+    }
+  ]
+}
