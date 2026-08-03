@@ -25,12 +25,22 @@ import { closeAllQueues, getDiscoveryQueue } from '../shared/queue.js';
 import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
+import { checkRevistaConfigHealth, checkStuckMagazines } from '../revistas/health.js';
 import { carryForwardRevistaPrices } from '../revistas/carryForward.js';
 import { carryForwardInStorePrices } from '../instore/carryForward.js';
 import { withTimeout } from '../revistas/pool.js';
 import { revistaConfig } from '../revistas/config.js';
 
 initSentry('orchestrator');
+
+// A rejected promise nobody awaited kills the process on Node 15+, and it takes
+// the cron schedule down with it. Diagnosing that from the outside cost half a
+// day: the DB just shows missing rows, with no hint of where it died. Log it
+// loudly and keep the scheduler alive instead.
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'orchestrator: unhandled promise rejection (process kept alive)');
+  captureError(reason, { phase: 'unhandled-rejection' });
+});
 
 const FINALIZER_INTERVAL_MS = 60 * 1000;
 
@@ -84,7 +94,20 @@ async function runRevistaCheckWithErrorHandling(
     captureError(err, { phase: 'instore-carry-forward' });
   }
 
-  // 2. The magazine check (discovery + vision AI) runs LAST and is
+  // 2. Health probes BEFORE the check, because the check itself cannot report
+  //    these: it early-returns without writing a single row when it is disabled
+  //    or unconfigured, and a killed run leaves a magazine pinned in
+  //    'processing' with nothing to show for it. Both alert on state change
+  //    only. See src/revistas/health.ts.
+  try {
+    await checkRevistaConfigHealth();
+    await checkStuckMagazines();
+  } catch (err) {
+    logger.error({ err }, 'revista health check failed');
+    captureError(err, { phase: 'revista-health' });
+  }
+
+  // 3. The magazine check (discovery + vision AI) runs LAST and is
   //    timeout-guarded, so a wedged site can't stall the orchestrator. Each
   //    site also logs a check row (revista_check_log) so the operator can see
   //    the probe ran even on the (common) days nothing changed.

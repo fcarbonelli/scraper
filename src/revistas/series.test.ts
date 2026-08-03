@@ -32,19 +32,36 @@ describe('seriesKeyFromMakroTitle', () => {
 });
 
 describe('seriesKeyFromVitalDataName', () => {
-  it('strips date ranges and keeps branch suffix', () => {
-    expect(seriesKeyFromVitalDataName('Folder 20.07 al 26.07 | RESTO')).toBe('folder-resto');
+  it('strips date ranges and the branch suffix', () => {
+    expect(seriesKeyFromVitalDataName('Folder 20.07 al 26.07 | RESTO')).toBe('folder');
     expect(seriesKeyFromVitalDataName('Folder Nonfood 20.07 al 26.07 | RESTO')).toBe(
-      'folder-nonfood-resto',
+      'folder-nonfood',
     );
     expect(seriesKeyFromVitalDataName('Especial Frescos 20.07 al 26.07 | TODAS')).toBe(
-      'especial-frescos-todas',
+      'especial-frescos',
     );
     expect(seriesKeyFromVitalDataName('Aviso Marca Propia 20.07 al 26.07 | TODAS')).toBe(
-      'aviso-marca-propia-todas',
+      'aviso-marca-propia',
     );
     expect(seriesKeyFromVitalDataName('Aviso Solo por JUEVES 23/7 (RESTO)')).toBe(
-      'aviso-solo-jueves-resto',
+      'aviso-solo-jueves',
+    );
+  });
+
+  it('gives one key to the same flyer line across branch rotations', () => {
+    // Vital swaps which locality is on display; that must not fork the series,
+    // or the new edition supersedes nothing and the expired one keeps paying out.
+    expect(seriesKeyFromVitalDataName('Folder 27.07 al 02.08 | RESTO')).toBe(
+      seriesKeyFromVitalDataName('Folder 03.08 al 09.08 | MALVINAS - ABASTO'),
+    );
+    expect(seriesKeyFromVitalDataName('Folder Nonfood 27.07 al 02.08 | RESTO')).toBe(
+      seriesKeyFromVitalDataName('Folder Nonfood 03.08 al 09.08 | AMBA MENOS LP'),
+    );
+  });
+
+  it('still separates distinct flyer lines', () => {
+    expect(seriesKeyFromVitalDataName('Folder 03.08 al 09.08 | TODAS')).not.toBe(
+      seriesKeyFromVitalDataName('Folder Nonfood 03.08 al 09.08 | TODAS'),
     );
   });
 });
@@ -53,7 +70,7 @@ describe('deriveSeriesKey', () => {
   it('prefers Vital data-name over filename', () => {
     expect(
       deriveSeriesKey({ dataName: 'Folder 20.07 al 26.07 | RESTO', filename: '112642.pdf' }),
-    ).toBe('folder-resto');
+    ).toBe('folder');
   });
 
   it('uses Makro filename when no data-name', () => {

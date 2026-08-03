@@ -1,0 +1,320 @@
+[
+  {
+    "supermarket_id": "makro",
+    "label": "Flyer-GT-JUNIO-3-Corregido.pdf",
+    "series_key": "gt",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "MAKRONETTA-V6-17al19.pdf",
+    "series_key": "makroneta",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Ofertas semanales del 23/07 al 29/07",
+    "series_key": "mm",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "sponjun4-2.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "jun4etamakro.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Flyer-MAKRONETA-JUL-2.pdf",
+    "series_key": "makroneta",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "gtjul1nnn.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "jul2sponso.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Ofertas semanales del 30/07 al 05/08",
+    "series_key": "mm",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Ofertas especiales del 30/07 al 05/08",
+    "series_key": "sponsor",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "mmjulio1nn.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Ofertas especiales del 16/07 al 22/07",
+    "series_key": "sponsor",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "netajulio1.pdf",
+    "series_key": "makroneta",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Ofertas Gastronómicas del 16/07 al 29/07",
+    "series_key": "gt",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Flyer-MM-CORREGIDO-JUNIO-4.pdf",
+    "series_key": "mm",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "jul2mm.pdf",
+    "series_key": "mm",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Ofertas Gastronómicas del 30/07 al 12/08",
+    "series_key": "gt",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Especial día del amigo del 16/07 al 26/07",
+    "series_key": "especial",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "Ofertas especiales del 23/07 al 29/07",
+    "series_key": "prov",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "makro",
+    "label": "A todo finde en Makro! del 24/07 al 26/07",
+    "series_key": "a-todo-finde-en-makro",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "rosental",
+    "label": "Agosto primera quincena",
+    "series_key": "default",
+    "source_strategy": "pubhtml5"
+  },
+  {
+    "supermarket_id": "rosental",
+    "label": "PubHTML5 flipbook",
+    "series_key": "default",
+    "source_strategy": "pubhtml5"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112140.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112138.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112136.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Folder Nonfood 03.08 al 09.08 | AMBA MENOS LP",
+    "series_key": "folder-nonfood-amba-menos-lp",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112128.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "111634.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "111606.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Especial Frescos 20.07 al 26.07 | TODAS",
+    "series_key": "especial-frescos-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Marca Propia 20.07 al 26.07 | TODAS",
+    "series_key": "aviso-marca-propia-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Marca Propia 03.08 al 09.08 | TODAS",
+    "series_key": "aviso-marca-propia-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Pañales del 20.07 al 26.07 | TODAS",
+    "series_key": "aviso-panales-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Solo por LUNES 27/7 (RESTO)",
+    "series_key": "aviso-solo-lunes-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Folder 27.07 al 02.08 | RESTO",
+    "series_key": "folder-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112141.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112391.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso 1 FDS 24.07 al 26.07 | RESTO",
+    "series_key": "aviso-fds-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Folder Nonfood 27.07 al 02.08 | RESTO",
+    "series_key": "folder-nonfood-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Solo por LUNES 3/8 (RESTO)",
+    "series_key": "aviso-solo-lunes-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Especial Frescos 27.07 al 02.08 | TODAS",
+    "series_key": "especial-frescos-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Solo por JUEVES 23/7 (RESTO)",
+    "series_key": "aviso-solo-jueves-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Folder 03.08 al 09.08 | MALVINAS - ABASTO",
+    "series_key": "folder-malvinas-abasto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Pañales del 27.07 al 02.08 | TODAS",
+    "series_key": "aviso-panales-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Folder 20.07 al 26.07 | RESTO",
+    "series_key": "folder-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Niñez del 03.08 al 09.08 | TODAS",
+    "series_key": "aviso-ninez-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Aviso Marca Propia 27.07 al 02.08 | TODAS",
+    "series_key": "aviso-marca-propia-todas",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "Folder Nonfood 20.07 al 26.07 | RESTO",
+    "series_key": "folder-nonfood-resto",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112380.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112356.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112143.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112142.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  },
+  {
+    "supermarket_id": "vital",
+    "label": "112141.pdf",
+    "series_key": "default",
+    "source_strategy": "html-pdf-links"
+  }
+]

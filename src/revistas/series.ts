@@ -62,14 +62,49 @@ export function seriesKeyFromMakroTitle(title: string): string | null {
 }
 
 /**
- * Vital data-name: "Folder 20.07 al 26.07 | RESTO" → "folder-resto"
- * Keeps the branch suffix (RESTO/TODAS) so locality variants stay distinct.
+ * Drop the branch marker Vital appends to every flyer name: "| RESTO",
+ * "| TODAS", "| MALVINAS - ABASTO", "| AMBA MENOS LP", or a trailing "(RESTO)".
+ *
+ * Vital rotates which locality's flyer is on display, so keeping the marker
+ * split one flyer line into a new series on every rotation — and a new series
+ * supersedes nothing, which left the expired edition current and still feeding
+ * prices into the export. `download.ts` already treats the localities as one
+ * flyer ("the products are the same across localities"); this makes series_key
+ * agree with that.
+ */
+function stripBranchSuffix(raw: string): string {
+  return raw
+    .replace(/\|.*$/, ' ')
+    .replace(/\([^)]*\)\s*$/, ' ')
+    .trim();
+}
+
+/**
+ * Vital data-name: "Folder 20.07 al 26.07 | RESTO" → "folder"
+ * Branch and dates are both noise; what identifies the series is what's left.
  */
 export function seriesKeyFromVitalDataName(dataName: string): string {
-  const cleaned = stripDateNoise(dataName);
+  const cleaned = stripDateNoise(stripBranchSuffix(dataName));
   const slug = slugify(cleaned);
   if (slug) return slug;
   return 'default';
+}
+
+/**
+ * The rule as it stood before the branch suffix was dropped.
+ *
+ * Kept for exactly one purpose: `scripts/revistas-rekey-series.ts` must be able
+ * to tell which stored keys THIS change is responsible for, and re-key only
+ * those. Many stored keys came from migration 015's SQL backfill and already
+ * disagree with what the TypeScript derives (`jul2mm.pdf` is stored `mm` but
+ * derives `jul2mm-pdf`); the re-key must leave that pre-existing drift alone
+ * rather than "fixing" it and scrambling Makro's supersede chains.
+ *
+ * Not used by the pipeline. Delete once the re-key has run everywhere.
+ */
+export function legacySeriesKeyFromVitalDataName(dataName: string): string {
+  const slug = slugify(stripDateNoise(dataName));
+  return slug || 'default';
 }
 
 /**

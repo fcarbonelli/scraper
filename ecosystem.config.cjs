@@ -62,8 +62,14 @@ module.exports = {
       // Single instance — orchestrator is essentially stateless cron logic.
       instances: 1,
       exec_mode: 'fork',
-      // Lower memory ceiling — orchestrator does very little.
-      max_memory_restart: '300M',
+      // NOT "very little": the revista check renders promo PDFs to images and
+      // runs vision over them INSIDE this process. At 300M that killed the
+      // orchestrator mid-render every single day from 28/07 to 03/08 — 138
+      // restarts, always right after "revista: new issue, processing" and
+      // always before `createMagazine`, so it left no failed row, no check-log
+      // entry and no error (a PM2 memory kill is a silent SIGKILL). It retried
+      // the same Makro flyer daily and never got past it.
+      max_memory_restart: '1G',
     },
     {
       ...common,

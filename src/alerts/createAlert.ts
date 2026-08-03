@@ -24,7 +24,9 @@ export type AlertType =
   | 'price_anomaly'
   | 'stock_change'
   | 'revista_review'
-  | 'revista_failed';
+  | 'revista_failed'
+  | 'revista_disabled'
+  | 'revista_stuck';
 
 export interface CreateAlertArgs {
   severity: Severity;

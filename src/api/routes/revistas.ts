@@ -2,6 +2,7 @@
  * Revista (magazine) review routes.
  *
  *   GET    /v1/revistas/pending                  magazines awaiting review
+ *   POST   /v1/revistas/check                    live discovery preview (read-only, no AI)
  *   GET    /v1/revistas/checks                   daily probe log
  *   GET    /v1/revistas/items                    cross-magazine item list (control view)
  *   GET    /v1/revistas/ean-collisions           same-EAN / distinct-product warnings
@@ -51,6 +52,7 @@ import {
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
+import { previewRevistaChains } from '../../revistas/preview.js';
 
 export const revistasRouter = Router();
 
@@ -252,6 +254,74 @@ function checkResponse(r: CheckLogRow, supermarketName: string): object {
     scrape_run_id: r.scrape_run_id,
   };
 }
+
+const CheckNowBody = z.object({
+  supermarket_ids: z.array(z.string().min(1)).optional(),
+});
+
+/**
+ * "¿Qué folletos faltan?" — live discovery + classification, read-only.
+ *
+ * POST despite mutating nothing: it fires outbound probes at every chain's
+ * site, so it is slow and must never be cached or prefetched. It is NOT the
+ * same thing as `GET /checks`, which reads the log of the AUTOMATIC daily run.
+ *
+ * Deliberately does not write a `revista_check_log` row: that table is the
+ * ledger used to tell whether the daily check actually ran, and manual clicks
+ * would destroy the diagnostic.
+ *
+ * Registered before `GET /:magazineId` for clarity — the verb already keeps it
+ * out of that route's reach, but the ordering rule is easy to break later.
+ */
+revistasRouter.post('/check', async (req: Request, res: Response) => {
+  const body = parseBody(req, CheckNowBody);
+  const preview = await previewRevistaChains(body.supermarket_ids);
+  res.json(
+    success({
+      config: {
+        revista_enabled: preview.config.revistaEnabled,
+        openai_key_present: preview.config.openaiKeyPresent,
+        chains_configured: preview.config.chainsConfigured,
+      },
+      warnings: preview.warnings,
+      chains: preview.chains.map((c) => ({
+        supermarket_id: c.supermarketId,
+        supermarket_name: c.supermarketName,
+        strategy: c.strategy,
+        checked_at: c.checkedAt,
+        duration_ms: c.durationMs,
+        error: c.error,
+        candidates: c.candidates.map((k) => ({
+          label: k.label,
+          series_key: k.seriesKey,
+          source_url: k.sourceUrl,
+          hash: k.hash,
+          state: k.state,
+          ingestable: k.ingestable,
+          period_start: k.periodStart,
+          period_end: k.periodEnd,
+          period_confidence: k.periodConfidence,
+          expired_days_ago: k.expiredDaysAgo,
+          file_size: k.fileSize,
+          last_modified: k.lastModified,
+          page_count: k.pageCount,
+          size_delta_pct: k.sizeDeltaPct,
+          reason: k.reason,
+          existing: k.existing
+            ? { id: k.existing.id, status: k.existing.status, detected_at: k.existing.detectedAt }
+            : null,
+          current_in_series: k.currentInSeries
+            ? {
+                id: k.currentInSeries.id,
+                label: k.currentInSeries.label,
+                detected_at: k.currentInSeries.detectedAt,
+              }
+            : null,
+        })),
+      })),
+    }),
+  );
+});
 
 revistasRouter.get('/checks', async (req: Request, res: Response) => {
   const q = parseQuery(req, ChecksQuery);

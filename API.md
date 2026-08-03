@@ -1502,6 +1502,54 @@ magazine, not just the few auto-matches. Matching indexes Catálogo EAN
 (`descriptionForms` + brand + format), not the `products` table. See
 `examples/api/revista-analysis.json`.
 
+### `POST /v1/revistas/check`
+
+**"¿Qué folletos faltan?"** — probes every chain's site live and reports what the
+daily check *would* do. Read-only: writes nothing, and costs **zero OpenAI**
+(discovery never calls the model). Full UI contract in
+`docs/REVISTA_CHECK_BUTTON.md`.
+
+Not to be confused with `GET /v1/revistas/checks` (plural), which reads the log
+of the automatic run. This one goes out to the sites right now.
+
+```jsonc
+POST /v1/revistas/check
+{ "supermarket_ids": ["makro", "vital"] }   // omit for every active chain
+```
+
+It is `POST` despite mutating nothing: each call fans out to the chains' sites,
+so it is slow (a few seconds per chain) and must never be cached or prefetched.
+It deliberately does **not** write a `revista_check_log` row — that table is the
+ledger used to tell whether the *automatic* check ran, and manual clicks would
+destroy that diagnostic.
+
+Response: `success({ config, warnings, chains[] })`.
+
+- `config` — `revista_enabled`, `openai_key_present`, `chains_configured`.
+- `warnings[]` — plain-Spanish strings. **The endpoint still lists flyers when
+  the pipeline is disabled**, and says so here. It never routes through
+  `runRevistaCheck`, which returns silently in exactly that case; a button that
+  inherited that bug would answer "nothing new" precisely when it matters.
+- `chains[].candidates[].state` — one of:
+
+| `state` | Meaning |
+|---|---|
+| `nuevo` | No stored row for this hash and no current issue in the series. |
+| `nueva_edicion` | A current issue exists in this series but covers a different period. |
+| `re_subida` | Same series, same period, near-identical size — the chain re-exported the file we already scanned. |
+| `ya_en_base` | Hash already stored and reviewed / awaiting review. |
+| `reprocesable` | Hash stored but stuck in `processing`/`failed`; the check would retry it. |
+| `serie_ignorada` | Filtered out by `config.revista.skipSeries`. |
+
+Each candidate also carries what the operator needs in order to *decide*, not
+just a badge: `period_start` / `period_end` / `period_confidence`
+(`exact` \| `inferred`), `expired_days_ago`, `file_size`, `size_delta_pct`
+against the stored issue, `last_modified`, `page_count`, a `reason` in words,
+plus `existing` and `current_in_series` references.
+
+`ingestable` is the bottom line: would the daily check spend vision tokens on
+this one right now?
+
 ### `GET /v1/revistas/checks`
 
 The daily "did any magazine change?" probe log — one row **per chain per check**,

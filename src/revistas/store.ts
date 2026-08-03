@@ -4,6 +4,7 @@
  */
 
 import { db } from '../shared/db.js';
+import { parseFlyerPeriod } from './period.js';
 import type { MatchResult } from './match.js';
 
 export interface MagazineRow {
@@ -33,6 +34,20 @@ export interface MagazineRow {
    * base, without un-approving each product. Orthogonal to superseded_by.
    */
   carry_active: boolean;
+  /**
+   * Validity the flyer declares in its own title (migration 023). NULL whenever
+   * the label carries no parseable period — Rosental titles and Makro filenames
+   * usually don't. Never a key; identity stays `content_hash`.
+   */
+  period_start?: string | null;
+  period_end?: string | null;
+  /**
+   * How the period was obtained. Persisted rather than assumed: a fortnight
+   * inferred from "Agosto primera quincena" must not come back out of the
+   * database claiming to be an exact reading, because the re-upload guard
+   * requires both sides `exact` before it skips anything.
+   */
+  period_confidence?: 'exact' | 'inferred' | null;
 }
 
 /** Look up a magazine by its dedup hash (the "did it change?" check). */
@@ -74,31 +89,48 @@ export interface CreateMagazineArgs {
  * `in_review`.
  */
 export async function createMagazine(args: CreateMagazineArgs): Promise<string> {
-  const { data, error } = await db
-    .from('revista_magazines')
-    .upsert(
-      {
-        supermarket_id: args.supermarketId,
-        label: args.label,
-        source_strategy: args.strategy,
-        source_url: args.sourceUrl,
-        content_hash: args.contentHash,
-        file_size: args.fileSize,
-        page_count: args.pageCount,
-        status: 'processing',
-        scrape_run_id: args.scrapeRunId,
-        reviewed_at: null,
-        series_key: args.seriesKey ?? 'default',
-        // A --force reprocess of the current issue must clear any stale
-        // supersede pointer so it becomes "current" again for its series.
-        superseded_by: null,
-        superseded_at: null,
-      },
-      { onConflict: 'supermarket_id,content_hash' },
-    )
-    .select('id')
-    .single();
+  // Anchored to now because a candidate only reaches here after being found on
+  // the chain's site, so "now" is within days of the period it advertises. The
+  // exception is `--url` re-ingesting a months-old PDF by hand, where the
+  // December-wrap correction could pick the wrong year.
+  const period = parseFlyerPeriod(args.label, new Date());
+  const columns: Record<string, unknown> = {
+    supermarket_id: args.supermarketId,
+    label: args.label,
+    source_strategy: args.strategy,
+    source_url: args.sourceUrl,
+    content_hash: args.contentHash,
+    file_size: args.fileSize,
+    page_count: args.pageCount,
+    status: 'processing',
+    scrape_run_id: args.scrapeRunId,
+    reviewed_at: null,
+    series_key: args.seriesKey ?? 'default',
+    // A --force reprocess of the current issue must clear any stale
+    // supersede pointer so it becomes "current" again for its series.
+    superseded_by: null,
+    superseded_at: null,
+    period_start: period?.start ?? null,
+    period_end: period?.end ?? null,
+    period_confidence: period?.confidence ?? null,
+  };
+
+  const upsert = (cols: Record<string, unknown>) =>
+    db
+      .from('revista_magazines')
+      .upsert(cols, { onConflict: 'supermarket_id,content_hash' })
+      .select('id')
+      .single();
+
+  let { data, error } = await upsert(columns);
+  // Migration 023 may not be applied yet (code can reach the server first).
+  // Losing the period is acceptable; losing the whole ingestion is not.
+  if (error && String(error.message ?? '').includes('period_')) {
+    const { period_start: _s, period_end: _e, period_confidence: _c, ...withoutPeriod } = columns;
+    ({ data, error } = await upsert(withoutPeriod));
+  }
   if (error) throw error;
+  if (!data) throw new Error('createMagazine: upsert returned no row');
   return data.id as string;
 }
 
@@ -159,6 +191,38 @@ export async function supersedePreviousMagazines(
     .in('id', ids);
   if (updErr) throw updErr;
   return ids;
+}
+
+/**
+ * The magazine currently standing for one series of one chain.
+ *
+ * Two filters that look redundant and are not:
+ *
+ * - `superseded_by IS NULL` alone is not enough. `supersedePreviousMagazines`
+ *   only runs on the transition to `in_review`, so a row that crashed mid-run
+ *   and is stuck in `processing` was never superseded and never superseded
+ *   anyone. Production currently holds six such rows, the oldest a month old.
+ * - Hence `status IN ('in_review','reviewed')`: a stuck row is a corpse, not
+ *   the current issue.
+ *
+ * Deliberately NOT `.maybeSingle()` — that throws on the duplicate this very
+ * situation produces. Order and take the first instead.
+ */
+export async function findCurrentMagazineInSeries(
+  supermarketId: string,
+  seriesKey: string,
+): Promise<MagazineRow | null> {
+  const { data, error } = await db
+    .from('revista_magazines')
+    .select('*')
+    .eq('supermarket_id', supermarketId)
+    .eq('series_key', seriesKey)
+    .is('superseded_by', null)
+    .in('status', ['in_review', 'reviewed'])
+    .order('detected_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0] as MagazineRow | undefined) ?? null;
 }
 
 /**
