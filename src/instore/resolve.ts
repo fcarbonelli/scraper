@@ -2,16 +2,23 @@
  * Resolve a scanned EAN to a master `products` row for in-store price entry.
  *
  * "Our product list" the operator checks against is the client catalog: the
- * hardcoded taxonomy ∪ catalog_extra_eans (see src/shared/catalog.ts). An EAN
- * can be in one of three states:
+ * hardcoded taxonomy ∪ catalog_extra_eans (see src/shared/catalog.ts).
  *
- *   1. A master `products` row already exists for it (it was scraped somewhere
- *      else, e.g. Coto sells the same item online) → reuse it.
- *   2. No product row yet, but the EAN is in the catalog → we create a master
- *      row seeded from the catalog taxonomy. Wholesale-only chains carry many
- *      items that are never scraped online, so this is the common path.
- *   3. Not in products and not in the catalog → "not in catalog"; the UI lets
- *      the operator skip it.
+ * OFF-LIST GUARD: in-store entry is allowed ONLY for EANs on the official
+ * catalog. Membership on the catalog — NOT the mere existence of a `products`
+ * row — is what qualifies an EAN. Otherwise a leftover scraped/imported row for
+ * a store's own barcode (an off-list EAN, e.g. the same item under a second
+ * barcode) would silently become reusable here and leak into the client base.
+ *
+ * So a scanned EAN resolves as:
+ *
+ *   1. On the catalog AND a master `products` row already exists (it was also
+ *      scraped online, e.g. Coto) → reuse that row.
+ *   2. On the catalog, no product row yet → create a master row seeded from the
+ *      catalog taxonomy. Wholesale-only chains carry many items never scraped
+ *      online, so this is the common path.
+ *   3. NOT on the catalog (whether or not a stray `products` row exists) →
+ *      "not in catalog"; the UI lets the operator skip it.
  *
  * The lookup (GET /v1/in-store/lookup) is READ-ONLY — it never creates a row.
  * Creation only happens when a price is actually submitted (see entry.ts).
@@ -90,6 +97,12 @@ function taxonomyToResolved(ean: string, t: TaxonomyEntry): ResolvedProduct {
  * EAN (from products, else from the catalog), or null when it's in neither.
  */
 export async function resolveEan(ean: string): Promise<ResolvedProduct | null> {
+  // Off-list guard: an EAN qualifies for in-store entry only if it's on the
+  // official catalog. A stray scraped `products` row for an off-list barcode
+  // must NOT be reusable here (see module header).
+  const catalog = await lookupCatalog(ean);
+  if (!catalog) return null;
+
   const existing = await findProductByEan(ean);
   if (existing) {
     return {
@@ -107,10 +120,7 @@ export async function resolveEan(ean: string): Promise<ResolvedProduct | null> {
     };
   }
 
-  const catalog = await lookupCatalog(ean);
-  if (catalog) return taxonomyToResolved(ean, catalog);
-
-  return null;
+  return taxonomyToResolved(ean, catalog);
 }
 
 /**
@@ -121,11 +131,13 @@ export async function resolveEan(ean: string): Promise<ResolvedProduct | null> {
 export async function ensureMasterProductForEan(
   ean: string,
 ): Promise<string | null> {
-  const existing = await findProductByEan(ean);
-  if (existing) return existing.id;
-
+  // Off-list guard (mirrors resolveEan): never materialize a price for an EAN
+  // that isn't on the official catalog, even if a stray scraped row exists.
   const catalog = await lookupCatalog(ean);
   if (!catalog) return null;
+
+  const existing = await findProductByEan(ean);
+  if (existing) return existing.id;
 
   // Seed a master row from the catalog reference so the export gets full
   // taxonomy columns immediately (same fields the ingest path fills).
