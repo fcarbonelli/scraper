@@ -170,9 +170,21 @@ async function classify(
 
   const verdict = classifyReupload({
     strategy: sm.strategy.strategy,
-    candidate: { label: candidate.label, period, fileSize: candidate.fileSize },
+    candidate: {
+      label: candidate.label,
+      period,
+      fileSize: candidate.fileSize,
+      sourceUrl: candidate.sourceUrl,
+      pageCount: candidate.pageCount,
+    },
     current: current
-      ? { label: current.label, period: rowPeriod(current), fileSize: current.file_size }
+      ? {
+          label: current.label,
+          period: rowPeriod(current),
+          fileSize: current.file_size,
+          sourceUrl: current.source_url,
+          pageCount: current.page_count,
+        }
       : null,
   });
 

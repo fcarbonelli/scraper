@@ -79,12 +79,16 @@ interface Candidate {
   file_size: number | null;
   last_modified: string | null;
   page_count: number | null;          // solo pubhtml5 (sale gratis del config.js)
-  size_delta_pct: number | null;      // contra la edición vigente de la serie
-  reason: string;                     // por qué cayó en ese estado, en palabras
+  size_delta_pct: number | null;      // contra la edición vigente de la serie; null en pubhtml5
+  reason: string;                     // por qué cayó en ese estado, en español, listo para mostrar
   existing: { id: string; status: string; detected_at: string } | null;
   current_in_series: { id: string; label: string; detected_at: string } | null;
 }
 ```
+
+El arreglo de la guarda de re-subida del 05/08 **no cambió ni un campo de este
+contrato** — cambió qué `state` y qué `reason` devuelve para los mismos folletos.
+No hay campos nuevos que buscar.
 
 ---
 
@@ -114,7 +118,7 @@ tamaño/delta, y el motivo.
 |---|---|---|
 | `nuevo` | 🟢 verde — "Nuevo" | El chequeo lo va a traer. |
 | `nueva_edicion` | 🟢 verde — "Edición nueva" | Idem, y va a supersedear la anterior de esa serie. |
-| `re_subida` | ⚪ gris — "Re-subida" | Mismo folleto re-exportado; se saltea. Mostrar `size_delta_pct`. |
+| `re_subida` | ⚪ gris — "Re-subida" | Mismo folleto re-exportado; se saltea. Mostrar la evidencia: `size_delta_pct` si existe, si no `page_count` (ver abajo). |
 | `ya_en_base` | 🔵 azul — "Ya está" | Nada que hacer. |
 | `reprocesable` | 🟠 ámbar — "Trabada" | Quedó a mitad de procesar; el chequeo la reintenta. |
 | `serie_ignorada` | ⚪ gris — "Ignorada" | Filtrada por `skipSeries`. |
@@ -131,8 +135,15 @@ Detalles que importan:
 - **`size_delta_pct`**: mostrarlo siempre que exista, sobre todo en `re_subida`.
   Es el número con el que el operador decide si una "re-subida" en realidad trae
   una corrección de precio (ver más abajo).
-- **`reason`**: en un tooltip o en una segunda línea chica. Explica el estado en
-  palabras.
+- **`size_delta_pct` en `null` NO es un dato faltante.** Rosental (`pubhtml5`)
+  no tiene tamaño en la etapa de descubrimiento y nunca lo va a tener: su
+  `config.js` da el título y la lista de páginas, no bytes. Ahí la evidencia del
+  `re_subida` es `page_count` — mostrar "mismas 144 págs" en vez de un guión, o
+  el operador va a leer "el sistema no sabe" cuando en realidad sabe.
+- **`reason`**: en un tooltip o en una segunda línea chica. Viene **en español y
+  redactado para mostrar tal cual** ("mismo período y misma URL (cambió 1,26% de
+  tamaño) → re-exportación del folleto guardado"). No hay que traducirlo ni
+  mapearlo a otro texto.
 - **`error`** por cadena: si no es `null`, la fila de esa cadena va en rojo con el
   mensaje. Descubrimiento caído ≠ "no hay folletos".
 
@@ -143,23 +154,62 @@ Es el único número que el operador realmente mira.
 
 ---
 
-## El límite honesto de `re_subida`
+## Cómo se decide un `re_subida` (y su límite honesto)
 
-Vital re-exporta sus PDFs varias veces por día sobre la misma URL. El hash de
-deduplicación sale de `content-length`/`ETag`/`Last-Modified`, así que cambia — y
-sin la guarda, cada corrida reprocesaría el folleto a costo completo de visión
-**y supersedearía lo que el operador ya curó**.
+Las cadenas re-exportan sus folletos sobre la misma URL sin que el contenido
+cambie. El hash de deduplicación se mueve igual, y sin la guarda cada corrida
+reprocesaría el folleto a costo completo de visión **y supersedearía lo que el
+operador ya curó** — que es exactamente lo que pasó el 05/08: 178 páginas de
+visión y 112 productos que se cayeron de la base del cliente ese día.
 
-La guarda compara **período** y **tamaño**. Lo que no puede hacer es distinguir
-una re-exportación cosmética de una **corrección de precio**: si Vital arregla un
-precio en la página 9, el período no cambia y el delta de tamaño también es
-minúsculo.
+La guarda tiene **una regla por estrategia**, porque cada cadena da una señal
+barata distinta:
 
-Por eso el `state` es información, no una decisión final. El operador ve
-`re_subida` con el delta a la vista y, si sospecha que hay una corrección, la
-trae igual con `revistas:run --force`. **Un `re_subida` mal salteado siempre se
-recupera; una edición real salteada en silencio, no.** De ahí que la guarda solo
-saltee y nunca procese de más.
+| Estrategia | Es re-subida cuando… |
+|---|---|
+| `html-pdf-links` (Makro, Vital) | mismo período **exacto** en los dos lados **y misma `source_url`**. El tamaño se informa pero no decide. |
+| `pubhtml5` (Rosental) | mismo título (y que **no** sea el genérico "Revista" / "PubHTML5 flipbook") **y misma cantidad de páginas**. |
+| `publuu` | nunca: solo tiene la URL del embed, no hay con qué comparar. |
+
+**Por qué la URL y no el tamaño:** las re-exportaciones reales medidas el 05/08
+movieron **1,26% y 3,37%**, o sea muy por encima de cualquier tolerancia que
+todavía las separe de una edición nueva. En cambio Vital le da un id de archivo
+nuevo a cada edición real (`113476.pdf` contra `112964.pdf`), así que la URL
+separa lo que el tamaño ya no separa. La regla **exige período exacto de los dos
+lados a propósito**: una cadena que publique siempre en `/folleto-actual.pdf` con
+un label sin fecha no debe congelarse nunca.
+
+**El límite que queda:** una **corrección de precios** publicada sobre la misma
+URL y dentro del mismo período se saltea. Es más chico que antes, pero existe.
+
+Por eso el `state` es información, no una decisión final: **un `re_subida` mal
+salteado siempre se recupera; una edición real salteada en silencio, no.** De ahí
+que la guarda solo saltee y nunca procese de más.
+
+### Sospecho que hay una corrección de precio
+
+Dos cosas que el operador tiene:
+
+1. **Traerla a mano** — es lo único que fuerza el re-escaneo:
+   ```
+   npm run revistas:run -- --super=vital --force
+   ```
+   El botón nunca ingesta (ver abajo).
+2. **La alerta automática.** Cuando la guarda saltea algo cuyo archivo se movió
+   **más de 5%**, se abre un alerta `revista_review` de severidad `info` en el
+   Daily Review, con el porcentaje y la URL — deduplicada por hash, así que
+   aparece una vez y no una por día mientras la cadena deje ese archivo arriba.
+   **Cubre solo `html-pdf-links`**: `pubhtml5` no tiene tamaño, así que en
+   Rosental no hay magnitud que alertar. Es un hueco real, no una omisión.
+
+### Rosental va a figurar `re_subida` todos los días (y está bien)
+
+Su fila guardada conserva el `content_hash` de una fórmula anterior, así que el
+hash nunca va a coincidir y el candidato cae siempre en la guarda. Badge gris,
+`ingestable: false`, no suma al contador de "folletos para traer". **No es una
+anomalía y no hay que destacarla.** Se limpia corriendo una vez
+`scripts/revistas-undo-reupload.ts --rehash-pubhtml5 --apply`, y a partir de ahí
+pasa a `ya_en_base`.
 
 ---
 

@@ -10,7 +10,7 @@
 > | §1.2 predicado único `wouldProcess` | ✅ hecho — vive en `src/revistas/decide.ts`, no en `preview.ts`, para que `pipeline.ts` y `preview.ts` lo compartan sin ciclo de imports |
 > | §1.3 `POST /v1/revistas/check` | ✅ hecho |
 > | §1.5 docs + tests | ✅ `docs/REVISTA_CHECK_BUTTON.md`, `period.test.ts`, `decide.test.ts`, `series-golden.test.ts` |
-> | §1.6 guarda de re-subida | ✅ hecho, **acotada a `html-pdf-links`** (ver abajo) |
+> | §1.6 guarda de re-subida | ✅ hecho — **una regla por estrategia** (`html-pdf-links`: período + URL; `pubhtml5`: título + páginas). Reforzada el 05/08 tras §3.1-ter |
 > | §3.3 alerta de falla silenciosa | ✅ `src/revistas/health.ts` — y suma una segunda alerta por revistas trabadas en `processing`, que el plan no cubría |
 > | **Parte 2 — `REVISTA_CRON` a las 10:00** | ⏸ **pendiente a propósito.** Con el botón, errarle a la hora deja de ser crítico: se aprieta y listo. Se hace cuando prod esté sano. |
 > | §3.2 arreglar el `.env` de EC2 | ⏸ necesita SSH |
@@ -24,6 +24,11 @@
 >    `'Revista'` (en la base hay una guardada como `"PubHTML5 flipbook"`). Además
 >    ahí la guarda no hace falta: ese hash ya es content-based. Un falso negativo
 >    en Rosental cuesta 144 páginas de visión.
+>    **Refutado el 05/08 (§3.1-ter):** el hash de `pubhtml5` **no** era
+>    content-based — incluía `content-length`/`ETag`/`Last-Modified` de
+>    `config.js`, y se movieron con el libro idéntico. Ahora sí lo es, y la
+>    guarda tiene una rama propia para `pubhtml5` (título + páginas) que conserva
+>    la protección contra el label genérico, que era lo válido del argumento.
 > 2. **Comparar labels crudos era frágil; se modela el período.** Migración 023 +
 >    `src/revistas/period.ts`. El label de Vital trae el sufijo de sucursal, que
 >    rota (`| RESTO` → `| MALVINAS - ABASTO`) — y como el `series_key` sale del
@@ -274,13 +279,33 @@ está en la base:
 3. Corroborar con el tamaño: el `content-length` ya viene en el fingerprint de discovery y
    `revista_magazines.file_size` tiene el guardado. Saltear **solo con coincidencia casi exacta**.
    Cualquier delta mayor sale como candidato y lo decide el operador.
+
+   **Corregido el 2026-08-05 — el tamaño no alcanzaba (ver §3.1-ter).** El desempate para
+   `html-pdf-links` pasa a ser la **identidad de la URL**: mismo período `exact` en ambos lados **y**
+   misma `source_url` ⇒ re-subida, sin mirar el delta (se sigue reportando). Vital re-exporta con
+   deltas de 1–3,4% y le da id nuevo a cada edición real (`113476.pdf` vs `112964.pdf`), así que la
+   URL separa lo que el tamaño ya no separa. La regla **exige período exacto de los dos lados a
+   propósito**: una cadena que publique siempre en `/folleto-actual.pdf` con label sin fecha no debe
+   congelarse nunca — ahí sigue mandando el umbral de tamaño.
 4. **No tocar `content_hash`.** La tentación es adoptar el fingerprint nuevo para que al día
    siguiente sea un hash hit — pero esa fila tiene items aprobados colgando y las imágenes de página
    en Storage renderizadas del PDF **viejo**. Pisarle el hash la haría afirmar que es el archivo
    nuevo cuando su contenido extraído es el viejo: una mentira de procedencia en la tabla que lee el
    panel. El costo de no adoptar es un `HEAD` y un SELECT indexado por día — nada. Si algún día
    molesta, el lugar correcto es `metadata.seen_hashes[]`, no `content_hash`.
-5. Dejarlo en el check-log (`detail`) para que sea visible que se salteó una re-subida.
+
+   *Matiz (2026-08-05):* esto prohíbe **adoptar el hash de una re-subida**. No aplica a
+   **recalcular la identidad del mismo contenido bajo una fórmula nueva**, que es lo que hace
+   `scripts/revistas-undo-reupload.ts --rehash-pubhtml5` cuando cambió el fingerprint de `pubhtml5`:
+   ahí el archivo es el mismo byte a byte y la fila sigue describiendo lo que describía. Es opcional
+   igual — con la guarda puesta, no re-hashear cuesta un salteo por día, no un re-escaneo.
+5. Dejarlo en el check-log (`detail`) para que sea visible que se salteó una re-subida. **Y también
+   lo contrario** (2026-08-05): cuando la guarda **deja pasar** un candidato existiendo una vigente
+   de la misma serie, el motivo va al log y al `detail` (`re-escaneos con vigente en la serie: …`).
+   Que solo se registrara el salteo fue la razón de que el re-escaneo del 05/08 no dejara rastro.
+6. Si se saltea con un delta de tamaño mayor a `REUPLOAD_SUSPICIOUS_DELTA_PCT` (5%), levantar un
+   alerta `revista_review` de severidad `info`: es el único caso donde la guarda puede estar tapando
+   una corrección de precios, y el operador tiene que poder decidir.
 
 **Por qué el label es señal suficiente para el caso común:** tanto Makro como Vital meten el período
 en el título ("Ofertas semanales del 30/07 al 05/08", "Folder 27.07 al 02.08 | RESTO"). Una edición
@@ -428,6 +453,34 @@ Ya está pasando: en la base hay `112141.pdf` dos veces (`791000c3` del 13/07 in
 `179f136e` del 16/07 processing), mismo archivo, dos filas, dos procesamientos.
 
 → Ver §1.6: guarda de re-subida. **Esto es bloqueante para reactivar el cron.**
+
+### 3.1-ter Lo que la guarda dejó pasar el 05/08 (medido ese día contra prod)
+
+El chequeo de las 06:00 ART re-escaneó tres folletos que ya estaban en base desde el 03/08. Dos
+caminos distintos, ninguno cubierto por la guarda tal como estaba:
+
+**Vital — el umbral de tamaño quedó corto.** Mismo período `exact`, **misma URL**, y aun así:
+
+| archivo | guardado | 05/08 | delta | veredicto viejo |
+|---|---|---|---|---|
+| 113476 Folder 03.08 al 09.08 | 22.475.835 | 22.191.853 | **1,26%** | «lo decide el operador» → se procesó |
+| 113297 Aviso Niñez 03.08 al 09.08 | 6.691.827 | 6.925.467 | **3,37%** | «lo decide el operador» → se procesó |
+
+Los 0,15% de §3.1-bis eran una muestra de cinco archivos de una semana, no la cota del fenómeno.
+
+**Rosental — la guarda ni se evaluaba, y el fingerprint miraba headers HTTP.** Las dos filas de
+"Agosto primera quincena" tienen `file_size` idéntico (80.401.900) y 144 páginas: el libro es el
+mismo byte a byte. Lo que se movió fue el `Last-Modified` de `config.js`, que el fingerprint incluía
+junto al título y la lista de páginas. `classifyReupload` cortaba en `strategy !== 'html-pdf-links'`,
+así que no había segunda línea de defensa.
+
+**Costo:** 178 páginas de visión, y el supersede pausó **112 mappings** (98 de Rosental + 14 de
+Vital) — esos precios salieron de la base del cliente ese día. La fila de Rosental tenía 150 ítems
+con 118 aprobados y quedó reemplazada por una de 60 ítems sin revisar.
+
+**Reparado con** `scripts/revistas-undo-reupload.ts` (borra el duplicado, des-supera la fila curada,
+reactiva y re-emite el precio del día). **Prevenido con** la regla de URL y la rama `pubhtml5` de
+§1.6, más el fingerprint solo-contenido de `readPubhtml5Config`.
 
 ### 3.2 Confirmación pendiente (en el server, todo read-only)
 

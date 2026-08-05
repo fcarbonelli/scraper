@@ -62,6 +62,47 @@
       "expect": "re_subida"
     }
   ],
+  "sameUrlReuploads": {
+    "_comment": [
+      "The re-exports of 2026-08-05, measured read-only against production the same",
+      "day. Same PDF URL, same exact period as the stored issue — and size deltas of",
+      "1.26% and 3.37%, i.e. FAR past REUPLOAD_SIZE_TOLERANCE_PCT (0.5%). The size",
+      "rule let both through: 34 pages of vision were re-read and the curated rows",
+      "(118 + 14 approved items) were superseded. These are the cases the URL rule",
+      "exists for."
+    ],
+    "cases": [
+      {
+        "file": "113476.pdf",
+        "label": "Folder 03.08 al 09.08 | MALVINAS - ABASTO",
+        "url": "https://www.vital.com.ar/wp-content/uploads/folletos/2026/08/113476.pdf",
+        "storedSize": 22475835,
+        "freshSize": 22191853,
+        "expect": "re_subida"
+      },
+      {
+        "file": "113297.pdf",
+        "label": "Aviso Niñez del 03.08 al 09.08 | TODAS",
+        "url": "https://www.vital.com.ar/wp-content/uploads/folletos/2026/08/113297.pdf",
+        "storedSize": 6691827,
+        "freshSize": 6925467,
+        "expect": "re_subida"
+      }
+    ]
+  },
+  "pubhtml5Reupload": {
+    "_comment": [
+      "Rosental on 2026-08-05: the same book read twice. Identical title, identical",
+      "144 page files and identical 80,401,900 bytes downloaded — only the HTTP",
+      "metadata of config.js moved, which the discovery hash used to include."
+    ],
+    "label": "Agosto primera quincena",
+    "bookUrl": "https://online.pubhtml5.com/oggo/ignq/",
+    "pageCount": 144,
+    "storedSize": 80401900,
+    "freshSize": 80401900,
+    "expect": "re_subida"
+  },
   "newEditions": [
     {
       "_comment": "The real 03.08 batch ingested on 2026-08-03 — these MUST NOT be skipped.",
