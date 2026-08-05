@@ -29,6 +29,24 @@ interface Fixture {
     freshSize: number;
     expect: string;
   }[];
+  sameUrlReuploads: {
+    cases: {
+      file: string;
+      label: string;
+      url: string;
+      storedSize: number;
+      freshSize: number;
+      expect: string;
+    }[];
+  };
+  pubhtml5Reupload: {
+    label: string;
+    bookUrl: string;
+    pageCount: number;
+    storedSize: number;
+    freshSize: number;
+    expect: string;
+  };
   newEditions: {
     label: string;
     againstStoredLabel: string;
@@ -125,6 +143,129 @@ describe('classifyReupload — the real Vital churn of 2026-07-30', () => {
   }
 });
 
+describe('classifyReupload — the Vital re-exports of 2026-08-05 (same URL, big delta)', () => {
+  const DETECTED_0805 = new Date('2026-08-05T09:07:00Z');
+
+  for (const c of fixture.sameUrlReuploads.cases) {
+    it(`flags ${c.file} as a re-export even though the size moved`, () => {
+      const period = parseFlyerPeriod(c.label, DETECTED_0805);
+      const verdict = classifyReupload({
+        strategy: 'html-pdf-links',
+        candidate: { label: c.label, period, fileSize: c.freshSize, sourceUrl: c.url },
+        current: { label: c.label, period, fileSize: c.storedSize, sourceUrl: c.url },
+      });
+      expect(verdict.reupload).toBe(true);
+      expect(verdict.reason).toContain('same URL');
+      // The point of the rule: the size rule alone would have processed these.
+      expect(verdict.sizeDeltaPct).toBeGreaterThan(0.5);
+    });
+  }
+
+  it('still processes a same-URL candidate whose period moved on', () => {
+    const c = fixture.sameUrlReuploads.cases[0]!;
+    const verdict = classifyReupload({
+      strategy: 'html-pdf-links',
+      candidate: {
+        label: 'Folder 10.08 al 16.08 | MALVINAS - ABASTO',
+        period: parseFlyerPeriod('Folder 10.08 al 16.08 | MALVINAS - ABASTO', DETECTED_0805),
+        fileSize: c.freshSize,
+        sourceUrl: c.url,
+      },
+      current: {
+        label: c.label,
+        period: parseFlyerPeriod(c.label, DETECTED_0805),
+        fileSize: c.storedSize,
+        sourceUrl: c.url,
+      },
+    });
+    expect(verdict.reupload).toBe(false);
+    expect(verdict.reason).toContain('period differs');
+  });
+
+  it('does not freeze a chain that publishes forever at the same dateless URL', () => {
+    // No parseable period on either side → the URL must not authorise a skip,
+    // or that chain would never get a new edition again.
+    const url = 'https://example.com/folleto-actual.pdf';
+    const verdict = classifyReupload({
+      strategy: 'html-pdf-links',
+      candidate: { label: 'folleto-actual.pdf', period: null, fileSize: 12_000_000, sourceUrl: url },
+      current: { label: 'folleto-actual.pdf', period: null, fileSize: 9_000_000, sourceUrl: url },
+    });
+    expect(verdict.reupload).toBe(false);
+    expect(verdict.reason).toContain('operator decides');
+  });
+});
+
+describe('classifyReupload — Rosental (pubhtml5): same title + same page count', () => {
+  const p = fixture.pubhtml5Reupload;
+
+  it('flags the same book read twice as a re-export', () => {
+    const verdict = classifyReupload({
+      strategy: 'pubhtml5',
+      candidate: {
+        label: p.label,
+        period: parseFlyerPeriod(p.label, DETECTED),
+        pageCount: p.pageCount,
+        sourceUrl: p.bookUrl,
+      },
+      current: {
+        label: p.label,
+        period: parseFlyerPeriod(p.label, DETECTED),
+        pageCount: p.pageCount,
+        fileSize: p.storedSize,
+        sourceUrl: p.bookUrl,
+      },
+    });
+    expect(verdict.reupload).toBe(true);
+    expect(verdict.reason).toContain('144 pages');
+  });
+
+  it('lets a new quincena through (the title carries the period)', () => {
+    const verdict = classifyReupload({
+      strategy: 'pubhtml5',
+      candidate: { label: 'Agosto segunda quincena', period: null, pageCount: p.pageCount },
+      current: { label: p.label, period: null, pageCount: p.pageCount },
+    });
+    expect(verdict.reupload).toBe(false);
+    expect(verdict.reason).toContain('title differs');
+  });
+
+  it('lets a same-titled book through when the page count moved', () => {
+    const verdict = classifyReupload({
+      strategy: 'pubhtml5',
+      candidate: { label: p.label, period: null, pageCount: 150 },
+      current: { label: p.label, period: null, pageCount: p.pageCount },
+    });
+    expect(verdict.reupload).toBe(false);
+    expect(verdict.reason).toContain('new edition');
+  });
+
+  it('never skips on a generic PubHTML5 title, however well everything else matches', () => {
+    // Rosental stores one issue as the literal "PubHTML5 flipbook" and the
+    // config.js regex falls back to "Revista": matching on either would skip a
+    // real 144-page quincena, the most expensive mistake available here.
+    for (const label of ['PubHTML5 flipbook', 'Revista', '']) {
+      const verdict = classifyReupload({
+        strategy: 'pubhtml5',
+        candidate: { label, period: null, pageCount: p.pageCount },
+        current: { label, period: null, pageCount: p.pageCount },
+      });
+      expect(verdict.reupload, label).toBe(false);
+      expect(verdict.reason, label).toContain('generic fallback');
+    }
+  });
+
+  it('leaves it to the operator when a page count is missing', () => {
+    const verdict = classifyReupload({
+      strategy: 'pubhtml5',
+      candidate: { label: p.label, period: null, pageCount: null },
+      current: { label: p.label, period: null, pageCount: p.pageCount },
+    });
+    expect(verdict.reupload).toBe(false);
+    expect(verdict.reason).toContain('no page count');
+  });
+});
+
 describe('classifyReupload — real new editions must never be skipped', () => {
   for (const c of fixture.newEditions) {
     it(`lets "${c.label}" through`, () => {
@@ -151,17 +292,8 @@ describe('classifyReupload — guard rails', () => {
   const period = parseFlyerPeriod('Folder 27.07 al 02.08 | RESTO', OLD_DETECTED);
   const same = { label: 'Folder 27.07 al 02.08 | RESTO', period, fileSize: 1_000_000 };
 
-  it('never fires for pubhtml5, whose label can be a constant fallback', () => {
-    // Rosental stores one issue as the literal "PubHTML5 flipbook"; matching on
-    // that would skip a real 144-page quincena.
-    const verdict = classifyReupload({
-      strategy: 'pubhtml5',
-      candidate: { label: 'PubHTML5 flipbook', period: null, fileSize: 1_000_000 },
-      current: { label: 'PubHTML5 flipbook', period: null, fileSize: 1_000_100 },
-    });
-    expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('not html-pdf-links');
-  });
+  // pubhtml5 has its own rule now (title + page count) — see the Rosental
+  // describe above, which keeps the generic-label protection this used to give.
 
   it('never fires for publuu, which has no size signal', () => {
     const verdict = classifyReupload({

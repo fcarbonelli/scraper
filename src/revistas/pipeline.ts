@@ -39,7 +39,12 @@ import {
   type MagazineRow,
   type ReviewItemInput,
 } from './store.js';
-import { classifyReupload, shouldProcessSeries, wouldProcess } from './decide.js';
+import {
+  classifyReupload,
+  shouldProcessSeries,
+  wouldProcess,
+  REUPLOAD_SUSPICIOUS_DELTA_PCT,
+} from './decide.js';
 import { parseFlyerPeriod, type FlyerPeriod } from './period.js';
 import { purgeTodayRevistaSnapshotsNotApprovedOn, pauseSupersededSeriesMappings } from './approve.js';
 
@@ -336,6 +341,66 @@ function magazinePeriod(row: MagazineRow): FlyerPeriod | null {
   return parseFlyerPeriod(row.label, new Date(row.detected_at));
 }
 
+/**
+ * A skipped re-upload whose file moved a lot is the one case the guard can get
+ * wrong: same URL, same period, but the chain replaced the content (a price
+ * correction). We still skip — the alternative is rescanning every re-export —
+ * but the operator gets told, with the number, and can force it from the panel.
+ * Reuses the existing `revista_review` type: a new AlertType needs a migration
+ * for the alerts.type CHECK, and this does not warrant one.
+ *
+ * Covers `html-pdf-links` ONLY, and not by choice: pubhtml5 discovery has no
+ * size at all (config.js gives pages and a title, never bytes), so a Rosental
+ * re-export that changed its images has no magnitude to threshold. That gap is
+ * real; it just has no cheap signal behind it.
+ *
+ * Deduped on the candidate hash: the condition holds for as long as the chain
+ * keeps that file up, and one alert per day for a week is how a Daily Review
+ * stops being read.
+ */
+async function alertSuspiciousReupload(
+  sm: RevistaSupermarket,
+  candidate: MagazineCandidate,
+  current: MagazineRow | null,
+  verdict: ReturnType<typeof classifyReupload>,
+  log: Logger,
+): Promise<void> {
+  const delta = verdict.sizeDeltaPct;
+  if (delta === null || delta <= REUPLOAD_SUSPICIOUS_DELTA_PCT) return;
+  try {
+    const { data: open, error: openErr } = await db
+      .from('alerts')
+      .select('id')
+      .eq('type', 'revista_review')
+      .eq('status', 'open')
+      .contains('context', { hash: candidate.hash })
+      .limit(1);
+    if (openErr) throw openErr;
+    if ((open ?? []).length > 0) return;
+
+    await createAlert({
+      severity: 'info',
+      type: 'revista_review',
+      supermarketId: sm.id,
+      title: `${sm.name} re-subió un folleto con cambios grandes`,
+      message:
+        `"${candidate.label}" volvió a publicarse en la misma URL y para el mismo período, ` +
+        `pero el archivo cambió ${delta.toFixed(1)}%. No se re-escaneó para no pisar lo ya revisado. ` +
+        `Si fue una corrección de precios, reprocesalo desde el panel.`,
+      context: {
+        magazine_id: current?.id ?? null,
+        hash: candidate.hash,
+        size_delta_pct: Number(delta.toFixed(2)),
+        source_url: candidate.sourceUrl,
+        series_key: candidate.seriesKey,
+      },
+    });
+  } catch (err) {
+    // An alert is never worth failing the run over.
+    log.warn({ err, label: candidate.label }, 'revista: could not raise re-upload alert');
+  }
+}
+
 function seriesAllowed(seriesKey: string, sm: RevistaSupermarket, opts: ProcessOptions): boolean {
   return shouldProcessSeries(seriesKey, sm.skipSeries ?? [], {
     ...(opts.skipSeries ? { skipSeries: opts.skipSeries } : {}),
@@ -382,6 +447,8 @@ export async function processSupermarket(
   const toProcess: MagazineCandidate[] = [];
   const summaries: MagazineSummary[] = [];
   const reuploadsSkipped: string[] = [];
+  /** Candidates processed even though the series already had a current issue. */
+  const rescanned: string[] = [];
   for (const c of candidates) {
     // Series filter runs BEFORE download/render — saves the whole flyer cost.
     if (!seriesAllowed(c.seriesKey, sm, opts)) {
@@ -423,21 +490,32 @@ export async function processSupermarket(
           label: c.label,
           period: parseFlyerPeriod(c.label, new Date()),
           fileSize: c.fileSize,
+          sourceUrl: c.sourceUrl,
+          pageCount: c.pageCount,
         },
         current: current
           ? {
               label: current.label,
               period: magazinePeriod(current),
               fileSize: current.file_size,
+              sourceUrl: current.source_url,
+              pageCount: current.page_count,
             }
           : null,
       });
       if (verdict.reupload) {
         log.info(
-          { label: c.label, seriesKey: c.seriesKey, currentId: current?.id, reason: verdict.reason },
+          {
+            label: c.label,
+            seriesKey: c.seriesKey,
+            currentId: current?.id,
+            reason: verdict.reason,
+            sizeDeltaPct: verdict.sizeDeltaPct,
+          },
           'revista: skipping re-upload of an issue already scanned',
         );
         reuploadsSkipped.push(`${c.label} (${verdict.reason})`);
+        await alertSuspiciousReupload(sm, c, current, verdict, log);
         summaries.push({
           supermarketId: sm.id,
           label: c.label,
@@ -447,6 +525,22 @@ export async function processSupermarket(
         });
         continue;
       }
+      // Declined to skip: say so. Until 2026-08-05 only the SKIP was logged, so
+      // a guard that let a re-export through ("size moved 1.26% → operator
+      // decides") left no trace anywhere and the rescan looked spontaneous.
+      if (current) {
+        log.info(
+          {
+            label: c.label,
+            seriesKey: c.seriesKey,
+            currentId: current.id,
+            reason: verdict.reason,
+            sizeDeltaPct: verdict.sizeDeltaPct,
+          },
+          'revista: processing despite a current issue in this series',
+        );
+        rescanned.push(`${c.label} (${verdict.reason})`);
+      }
     }
     toProcess.push(c);
   }
@@ -455,6 +549,14 @@ export async function processSupermarket(
   // same whether the site published nothing or we declined to rescan it.
   const reuploadNote = reuploadsSkipped.length > 0
     ? ` | re-subidas salteadas: ${reuploadsSkipped.join('; ')}`
+    : '';
+
+  // The symmetric half: a rescan of a series that already had a current issue
+  // is the expensive decision, and it must be as legible in the check log as
+  // the cheap one. Only reachable on the processing path — a rescan by
+  // definition put something in `toProcess`.
+  const rescanNote = rescanned.length > 0
+    ? ` | re-escaneos con vigente en la serie: ${rescanned.join('; ')}`
     : '';
 
   if (toProcess.length === 0) {
@@ -490,7 +592,9 @@ export async function processSupermarket(
     newIssues: processed,
     durationMs: Date.now() - startedAt,
     detail:
-      `processed=${processed} failed=${failed} of ${toProcess.length} new issue(s)` + reuploadNote,
+      `processed=${processed} failed=${failed} of ${toProcess.length} new issue(s)` +
+      reuploadNote +
+      rescanNote,
     scrapeRunId: opts.scrapeRunId ?? null,
   });
   return summaries;

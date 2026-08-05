@@ -54,18 +54,35 @@ export async function uploadPageImage(
 export async function deleteMagazineImages(magazineId: string): Promise<number> {
   await ensureBucket();
   const bucket = revistaConfig.storageBucket;
-  const { data, error } = await db.storage.from(bucket).list(magazineId);
-  if (error) {
-    logger.warn({ err: error, magazineId }, 'revista: list page images failed (continuing)');
-    return 0;
+
+  // Storage `list()` returns 100 entries by DEFAULT. Deleting a 144-page
+  // Rosental quincena on 2026-08-05 removed exactly 100 files and silently left
+  // 44 behind, so anything over 100 pages has been leaking since this existed.
+  // Page until a short batch comes back.
+  const PAGE = 1000;
+  const paths: string[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await db.storage.from(bucket).list(magazineId, { limit: PAGE, offset });
+    if (error) {
+      logger.warn({ err: error, magazineId }, 'revista: list page images failed (continuing)');
+      return 0;
+    }
+    const batch = data ?? [];
+    for (const f of batch) paths.push(`${magazineId}/${f.name}`);
+    if (batch.length < PAGE) break;
   }
-  const paths = (data ?? []).map((f) => `${magazineId}/${f.name}`);
   if (paths.length === 0) return 0;
 
-  const { error: rmErr } = await db.storage.from(bucket).remove(paths);
-  if (rmErr) {
-    logger.warn({ err: rmErr, magazineId }, 'revista: remove page images failed (continuing)');
-    return 0;
+  // `remove()` takes a list; keep the request bounded for very long magazines.
+  let removed = 0;
+  for (let i = 0; i < paths.length; i += 100) {
+    const chunk = paths.slice(i, i + 100);
+    const { error: rmErr } = await db.storage.from(bucket).remove(chunk);
+    if (rmErr) {
+      logger.warn({ err: rmErr, magazineId }, 'revista: remove page images failed (continuing)');
+      return removed;
+    }
+    removed += chunk.length;
   }
-  return paths.length;
+  return removed;
 }

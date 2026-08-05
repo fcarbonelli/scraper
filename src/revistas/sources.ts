@@ -236,12 +236,15 @@ async function readPubhtml5Config(
     .filter((f): f is string => Boolean(f));
   if (files.length === 0) throw new Error('No page images in the PubHTML5 config.');
 
-  // Prefer ETag / Last-Modified / length from the config response when present;
-  // always include the page-file list so a silent republish is still caught.
-  const etag = res.headers.get('etag') ?? '';
+  // CONTENT ONLY — deliberately not the ETag / Last-Modified / content-length of
+  // this response. Those moved on 2026-08-05 while the book was byte-identical
+  // (same title, same 144 page files, same 80,401,900 bytes downloaded), which
+  // made the pipeline rescan the whole quincena and supersede a reviewed issue.
+  // The page filenames are content hashes, so a real new edition still changes
+  // the fingerprint. This now matches what `fetchPubhtml5Pages` computes as the
+  // content id — the two used to disagree.
   const lastModified = res.headers.get('last-modified') ?? '';
-  const len = res.headers.get('content-length') ?? String(cfg.length);
-  const fingerprint = [len, etag, lastModified, title, String(files.length), files.join(',')].join('|');
+  const fingerprint = [title, String(files.length), files.join(',')].join('|');
   return { title, files, fingerprint, lastModified: lastModified || null };
 }
 
