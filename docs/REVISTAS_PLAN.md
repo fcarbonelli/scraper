@@ -463,8 +463,8 @@ caminos distintos, ninguno cubierto por la guarda tal como estaba:
 
 | archivo | guardado | 05/08 | delta | veredicto viejo |
 |---|---|---|---|---|
-| 113476 Folder 03.08 al 09.08 | 22.475.835 | 22.191.853 | **1,26%** | `operator decides` → se procesó |
-| 113297 Aviso Niñez 03.08 al 09.08 | 6.691.827 | 6.925.467 | **3,37%** | `operator decides` → se procesó |
+| 113476 Folder 03.08 al 09.08 | 22.475.835 | 22.191.853 | **1,26%** | «lo decide el operador» → se procesó |
+| 113297 Aviso Niñez 03.08 al 09.08 | 6.691.827 | 6.925.467 | **3,37%** | «lo decide el operador» → se procesó |
 
 Los 0,15% de §3.1-bis eran una muestra de cinco archivos de una semana, no la cota del fenómeno.
 

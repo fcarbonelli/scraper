@@ -155,7 +155,7 @@ describe('classifyReupload — the Vital re-exports of 2026-08-05 (same URL, big
         current: { label: c.label, period, fileSize: c.storedSize, sourceUrl: c.url },
       });
       expect(verdict.reupload).toBe(true);
-      expect(verdict.reason).toContain('same URL');
+      expect(verdict.reason).toContain('misma URL');
       // The point of the rule: the size rule alone would have processed these.
       expect(verdict.sizeDeltaPct).toBeGreaterThan(0.5);
     });
@@ -179,7 +179,7 @@ describe('classifyReupload — the Vital re-exports of 2026-08-05 (same URL, big
       },
     });
     expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('period differs');
+    expect(verdict.reason).toContain('el período es distinto');
   });
 
   it('does not freeze a chain that publishes forever at the same dateless URL', () => {
@@ -192,7 +192,7 @@ describe('classifyReupload — the Vital re-exports of 2026-08-05 (same URL, big
       current: { label: 'folleto-actual.pdf', period: null, fileSize: 9_000_000, sourceUrl: url },
     });
     expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('operator decides');
+    expect(verdict.reason).toContain('lo decide el operador');
   });
 });
 
@@ -217,7 +217,7 @@ describe('classifyReupload — Rosental (pubhtml5): same title + same page count
       },
     });
     expect(verdict.reupload).toBe(true);
-    expect(verdict.reason).toContain('144 pages');
+    expect(verdict.reason).toContain('las mismas 144 páginas');
   });
 
   it('lets a new quincena through (the title carries the period)', () => {
@@ -227,7 +227,7 @@ describe('classifyReupload — Rosental (pubhtml5): same title + same page count
       current: { label: p.label, period: null, pageCount: p.pageCount },
     });
     expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('title differs');
+    expect(verdict.reason).toContain('el título es distinto');
   });
 
   it('lets a same-titled book through when the page count moved', () => {
@@ -237,7 +237,7 @@ describe('classifyReupload — Rosental (pubhtml5): same title + same page count
       current: { label: p.label, period: null, pageCount: p.pageCount },
     });
     expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('new edition');
+    expect(verdict.reason).toContain('edición nueva');
   });
 
   it('never skips on a generic PubHTML5 title, however well everything else matches', () => {
@@ -251,7 +251,7 @@ describe('classifyReupload — Rosental (pubhtml5): same title + same page count
         current: { label, period: null, pageCount: p.pageCount },
       });
       expect(verdict.reupload, label).toBe(false);
-      expect(verdict.reason, label).toContain('generic fallback');
+      expect(verdict.reason, label).toContain('genérico');
     }
   });
 
@@ -262,7 +262,7 @@ describe('classifyReupload — Rosental (pubhtml5): same title + same page count
       current: { label: p.label, period: null, pageCount: p.pageCount },
     });
     expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('no page count');
+    expect(verdict.reason).toContain('sin cantidad de páginas');
   });
 });
 
@@ -283,7 +283,7 @@ describe('classifyReupload — real new editions must never be skipped', () => {
         },
       });
       expect(verdict.reupload).toBe(false);
-      expect(verdict.reason).toContain('period differs');
+      expect(verdict.reason).toContain('el período es distinto');
     });
   }
 });
@@ -320,7 +320,7 @@ describe('classifyReupload — guard rails', () => {
       current: { ...same, fileSize: 1_200_000 },
     });
     expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('operator decides');
+    expect(verdict.reason).toContain('lo decide el operador');
   });
 
   it('defers to the operator when there is no size to compare', () => {
@@ -343,6 +343,6 @@ describe('classifyReupload — guard rails', () => {
       current: { label: 'Julio segunda quincena', period: a, fileSize: 1_000_100 },
     });
     expect(verdict.reupload).toBe(false);
-    expect(verdict.reason).toContain('label differs');
+    expect(verdict.reason).toContain('el título es distinto');
   });
 });

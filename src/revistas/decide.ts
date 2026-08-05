@@ -80,12 +80,24 @@ export interface ReuploadVerdict {
   reupload: boolean;
   /** Size difference vs the stored issue, in percent. Null when unknown. */
   sizeDeltaPct: number | null;
+  /**
+   * Why, in Spanish — this string is not a log line. It reaches the operator
+   * twice: as the `reason` of `POST /v1/revistas/check` (the panel's button,
+   * see docs/REVISTA_CHECK_BUTTON.md) and inside the `detail` of
+   * `revista_check_log`. Both are read by whoever decides if a flyer is
+   * missing, so English here was just a translation asked of the reader.
+   */
   reason: string;
 }
 
 export function sizeDeltaPct(a?: number | null, b?: number | null): number | null {
   if (!a || !b) return null;
   return Math.abs(a - b) / Math.max(a, b) * 100;
+}
+
+/** Percentage as the operator writes it: two decimals, comma. */
+function pct(n: number): string {
+  return `${n.toFixed(2).replace('.', ',')}%`;
 }
 
 /**
@@ -137,11 +149,11 @@ function classifyPubhtml5(
     return {
       reupload: false,
       sizeDeltaPct: delta,
-      reason: 'pubhtml5 title is a generic fallback → cannot tell editions apart, process it',
+      reason: 'el título de pubhtml5 es genérico → no alcanza para distinguir ediciones, se procesa',
     };
   }
   if (candidate.label !== current.label) {
-    return { reupload: false, sizeDeltaPct: delta, reason: 'title differs → new edition' };
+    return { reupload: false, sizeDeltaPct: delta, reason: 'el título es distinto → edición nueva' };
   }
   const pages = candidate.pageCount;
   const storedPages = current.pageCount;
@@ -149,20 +161,20 @@ function classifyPubhtml5(
     return {
       reupload: false,
       sizeDeltaPct: delta,
-      reason: 'no page count to compare — leave it to the operator',
+      reason: 'sin cantidad de páginas para comparar — lo decide el operador',
     };
   }
   if (pages !== storedPages) {
     return {
       reupload: false,
       sizeDeltaPct: delta,
-      reason: `same title but ${pages} pages vs ${storedPages} stored → new edition`,
+      reason: `mismo título pero ${pages} páginas contra ${storedPages} guardadas → edición nueva`,
     };
   }
   return {
     reupload: true,
     sizeDeltaPct: delta,
-    reason: `same title and same ${pages} pages → re-export`,
+    reason: `mismo título y las mismas ${pages} páginas → re-exportación`,
   };
 }
 
@@ -194,50 +206,54 @@ export function classifyReupload(input: ReuploadInput): ReuploadVerdict {
   const delta = sizeDeltaPct(input.candidate.fileSize, input.current?.fileSize);
 
   if (!input.current) {
-    return { reupload: false, sizeDeltaPct: delta, reason: 'no current issue in this series' };
+    return { reupload: false, sizeDeltaPct: delta, reason: 'no hay edición vigente de esta serie' };
   }
   const { candidate, current } = input;
 
   if (input.strategy === 'pubhtml5') return classifyPubhtml5(candidate, current, delta);
   if (input.strategy !== 'html-pdf-links') {
-    return { reupload: false, sizeDeltaPct: delta, reason: 'strategy is not html-pdf-links' };
+    return { reupload: false, sizeDeltaPct: delta, reason: 'la estrategia no es html-pdf-links' };
   }
 
   const periodsMatch = sameExactPeriod(candidate, current);
 
   if (candidate.period?.confidence === 'exact' && current.period?.confidence === 'exact') {
     if (!periodsMatch) {
-      return { reupload: false, sizeDeltaPct: delta, reason: 'period differs → new edition' };
+      return { reupload: false, sizeDeltaPct: delta, reason: 'el período es distinto → edición nueva' };
     }
   } else if (candidate.label !== current.label) {
     // No trustworthy period on one side; fall back to the label, which embeds
     // the period for every chain that publishes one.
-    return { reupload: false, sizeDeltaPct: delta, reason: 'label differs → new edition' };
+    return { reupload: false, sizeDeltaPct: delta, reason: 'el título es distinto → edición nueva' };
   }
 
   if (periodsMatch && sameUrl(candidate, current)) {
-    const moved = delta === null ? 'size unknown' : `${delta.toFixed(2)}% size change`;
+    const moved = delta === null ? 'tamaño desconocido' : `cambió ${pct(delta)} de tamaño`;
     return {
       reupload: true,
       sizeDeltaPct: delta,
-      reason: `same period and same URL (${moved}) → re-export of the stored issue`,
+      reason: `mismo período y misma URL (${moved}) → re-exportación del folleto guardado`,
     };
   }
 
   if (delta === null) {
-    return { reupload: false, sizeDeltaPct: null, reason: 'no size to compare — leave it to the operator' };
+    return {
+      reupload: false,
+      sizeDeltaPct: null,
+      reason: 'sin tamaño para comparar — lo decide el operador',
+    };
   }
   if (delta > REUPLOAD_SIZE_TOLERANCE_PCT) {
     return {
       reupload: false,
       sizeDeltaPct: delta,
-      reason: `same period but size moved ${delta.toFixed(2)}% → operator decides`,
+      reason: `mismo período pero el tamaño cambió ${pct(delta)} → lo decide el operador`,
     };
   }
 
   return {
     reupload: true,
     sizeDeltaPct: delta,
-    reason: `same period and size within ${REUPLOAD_SIZE_TOLERANCE_PCT}% (${delta.toFixed(2)}%) → re-export`,
+    reason: `mismo período y tamaño dentro del ${pct(REUPLOAD_SIZE_TOLERANCE_PCT)} (${pct(delta)}) → re-exportación`,
   };
 }
