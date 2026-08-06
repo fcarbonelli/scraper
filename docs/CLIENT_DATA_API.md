@@ -1,7 +1,7 @@
 # Client Data API
 
 How the client pulls the official pricing data (the `client_base` view, the flat
-35-column structure their reporting tools expect — including the hardcoded
+36-column structure their reporting tools expect — including the hardcoded
 `SUPLENCIAS` flag, `PESO_PRODUCTO_EN_CATEGORIA` weight, `NUEVA_CATEGORIZACION`
 code and `IX_TARGET_VS_COMPETENCIA` index, all matched by EAN, plus the derived
 `DIFF_VS_EDP` / `IDX_VS_COMPETENCIA` indicators).
@@ -123,11 +123,18 @@ server-side download route, so the key isn't exposed in the browser).
 
 ## Notes & future fields
 
-`PRECIO_TGT_SPM` and `PRECIO_TGT_MAY` are populated from the client's **Price
-List** (`price_targets`, loaded via `npm run lp:import <file.xlsx>` — migration
-012). Each row shows only the target for its own channel: supermarket rows
-(`Canal` `SPM ...`) carry `PRECIO_TGT_SPM`, mayorista rows (`MAY ...`) carry
-`PRECIO_TGT_MAY`; the other stays empty, as does any EAN not in the list.
+`PRECIO_TGT_SPM`, `PRECIO_TGT_WHS` and `PRECIO_TGT_WHS_REG` are populated from
+the client's **Price List** (`price_targets`, loaded via
+`npm run lp:import <file.xlsx>` — migrations 012 → 023). Each row shows only the
+target for its OWN channel:
+
+- supermarket rows (`Canal` `SPM ...`) → `PRECIO_TGT_SPM` (LP channel `SPM`)
+- national wholesalers (`Canal` `MAY NACIONAL`) → `PRECIO_TGT_WHS` (LP channel `MAY`)
+- regional wholesalers (`Canal` `MAY REGIONAL`) → `PRECIO_TGT_WHS_REG` (LP channel `MAY REG`)
+
+The other target columns stay empty, as does any EAN not in the list.
+(`PRECIO_TGT_WHS` was formerly `PRECIO_TGT_MAY`; it now excludes regional
+wholesalers, which carry `PRECIO_TGT_WHS_REG` instead — migration 023.)
 
 `SUPLENCIAS` is hardcoded client reference data (from the "Productos (EAN)"
 Setup sheet), stamped onto each row by EAN: `TITULAR` (primary/reference item),
@@ -153,8 +160,8 @@ formatted as a whole-number percentage string (`"23%"`, `"-5%"`, or empty) — s
 `src/shared/priceIndicators.ts`:
 
 - `DIFF_VS_EDP` — `Precio_Regular` vs. the EDP target: `round(Precio_Regular /
-  (PRECIO_TGT_SPM | PRECIO_TGT_MAY) − 1)`. Only one target is present per row
-  (channel-dependent); empty when there's no price or no target.
+  (PRECIO_TGT_SPM | PRECIO_TGT_WHS | PRECIO_TGT_WHS_REG) − 1)`. Only one target
+  is present per row (channel-dependent); empty when there's no price or no target.
 - `IDX_VS_COMPETENCIA` — a competitor's price vs. the Ayudín equivalent's:
   `round(competitorPR / ayudinPR − 1)`. `NUEVA_CATEGORIZACION` codes end in `A`
   (Ayudín) or `A1` (competitor); each competitor (`…A1`) row is divided by the

@@ -7,10 +7,12 @@
  * "23%", "-5%", "0%"), never a decimal:
  *
  *   DIFF_VS_EDP        — Precio_Regular vs the client's EDP target price.
- *                        round(Precio_Regular / (PRECIO_TGT_SPM | PRECIO_TGT_MAY) - 1) * 100.
- *                        Only one target is reported per row (channel-dependent);
- *                        we take whichever is present (SPM first). Blank when the
- *                        row has no price or no target.
+ *                        round(Precio_Regular / (PRECIO_TGT_SPM | PRECIO_TGT_WHS |
+ *                        PRECIO_TGT_WHS_REG) - 1) * 100. Only one target is
+ *                        reported per row (channel-dependent: SPM for
+ *                        supermarkets, WHS for national wholesalers, WHS_REG for
+ *                        regional wholesalers); we take whichever is present.
+ *                        Blank when the row has no price or no target.
  *
  *   IDX_VS_COMPETENCIA — a competitor's Precio_Regular vs the Ayudín equivalent's.
  *                        NUEVA_CATEGORIZACION codes end in "A" (Ayudín) or "A1"
@@ -48,12 +50,20 @@ function pct(ratioMinusOne: number): string {
 
 /**
  * DIFF_VS_EDP for a client_base row. `precioRegular` is the row's Precio_Regular;
- * `tgtSpm`/`tgtMay` are PRECIO_TGT_SPM / PRECIO_TGT_MAY (only one is set per row).
+ * `targets` are the channel target columns (PRECIO_TGT_SPM, PRECIO_TGT_WHS,
+ * PRECIO_TGT_WHS_REG) — exactly one is set per row, so we take the first present.
  * Returns "" when there's no price or no (positive) target to compare against.
  */
-export function diffVsEdp(precioRegular: unknown, tgtSpm: unknown, tgtMay: unknown): string {
+export function diffVsEdp(precioRegular: unknown, ...targets: unknown[]): string {
   const pr = toNumber(precioRegular);
-  const tgt = toNumber(tgtSpm) ?? toNumber(tgtMay);
+  let tgt: number | null = null;
+  for (const t of targets) {
+    const n = toNumber(t);
+    if (n !== null) {
+      tgt = n;
+      break;
+    }
+  }
   if (pr === null || tgt === null || tgt <= 0) return '';
   return pct(pr / tgt - 1);
 }

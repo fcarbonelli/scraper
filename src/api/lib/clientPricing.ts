@@ -81,14 +81,24 @@ export interface PriceDataItem {
   Descuento_Unitario: string;
   URL: string;
   Precio_Mas_Bajo: string;
-  /** Campo pendiente de definición — llega con el Price List. Vacío por ahora. */
+  /** Precio objetivo EDP del cliente para SUPERMERCADOS (canal SPM). Vacío en otras filas. */
   PRECIO_TGT_SPM: string;
-  /** Campo pendiente de definición — llega con el Price List. Vacío por ahora. */
-  PRECIO_TGT_MAY: string;
+  /**
+   * Precio objetivo EDP del cliente para MAYORISTAS NACIONALES (canal MAY).
+   * Antes se llamaba PRECIO_TGT_MAY. Vacío en supermercados y en mayoristas
+   * regionales (ver PRECIO_TGT_WHS_REG).
+   */
+  PRECIO_TGT_WHS: string;
+  /**
+   * Precio objetivo EDP del cliente para MAYORISTAS REGIONALES (canal MAY REG).
+   * Sólo se completa en filas de mayoristas regionales; vacío en el resto.
+   */
+  PRECIO_TGT_WHS_REG: string;
   /**
    * Precio_Regular vs. el precio objetivo EDP del cliente, como porcentaje
-   * entero ("23%", "-5%"). Se toma PRECIO_TGT_SPM o PRECIO_TGT_MAY (el que venga
-   * en la fila). Vacío si no hay precio o no hay target (ver priceIndicators.ts).
+   * entero ("23%", "-5%"). Se toma el target del canal de la fila
+   * (PRECIO_TGT_SPM | PRECIO_TGT_WHS | PRECIO_TGT_WHS_REG). Vacío si no hay
+   * precio o no hay target (ver priceIndicators.ts).
    */
   DIFF_VS_EDP: string;
   /**
@@ -186,8 +196,14 @@ export function toPriceData(
     // derived indicators are computed at the app layer (they depend on the
     // hardcoded NUEVA_CATEGORIZACION map, not on a view column).
     PRECIO_TGT_SPM: str(row['PRECIO_TGT_SPM']),
-    PRECIO_TGT_MAY: str(row['PRECIO_TGT_MAY']),
-    DIFF_VS_EDP: diffVsEdp(row['Precio_Regular'], row['PRECIO_TGT_SPM'], row['PRECIO_TGT_MAY']),
+    PRECIO_TGT_WHS: str(row['PRECIO_TGT_WHS']),
+    PRECIO_TGT_WHS_REG: str(row['PRECIO_TGT_WHS_REG']),
+    DIFF_VS_EDP: diffVsEdp(
+      row['Precio_Regular'],
+      row['PRECIO_TGT_SPM'],
+      row['PRECIO_TGT_WHS'],
+      row['PRECIO_TGT_WHS_REG'],
+    ),
     IDX_VS_COMPETENCIA: idxRef ? idxVsCompetencia(row, idxRef) : '',
     // Hardcoded client reference data, matched by EAN (not a view column).
     IX_TARGET_VS_COMPETENCIA: ixTargetVsCompetenciaFor(str(row['EAN'])),

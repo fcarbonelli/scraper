@@ -83,7 +83,11 @@ const COLUMNS: { key: string; header: string }[] = [
   { key: 'URL', header: 'URL' },
   { key: 'Precio_MasBajo', header: 'Precio_MasBajo' },
   { key: 'PRECIO_TGT_SPM', header: 'PRECIO_TGT_SPM' },
-  { key: 'PRECIO_TGT_MAY', header: 'PRECIO_TGT_MAY' },
+  // Wholesale target (LP 'MAY'), national wholesalers only. Renamed from the
+  // old PRECIO_TGT_MAY (migration 023).
+  { key: 'PRECIO_TGT_WHS', header: 'PRECIO_TGT_WHS' },
+  // Regional wholesale target (LP 'MAY REG'), regional wholesalers only.
+  { key: 'PRECIO_TGT_WHS_REG', header: 'PRECIO_TGT_WHS_REG' },
   // Derived (stamped in fetchAllClientBase): Precio_Regular vs the EDP target,
   // as a whole-number percentage string ("23%"). Not a real client_base column.
   { key: 'DIFF_VS_EDP', header: 'DIFF_VS_EDP' },
@@ -166,7 +170,12 @@ export async function fetchAllClientBase(
       row['PESO_PRODUCTO_EN_CATEGORIA'] = pesoEnCategoriaFor(ean);
       row['NUEVA_CATEGORIZACION'] = nuevaCategorizacionFor(ean);
       row['IX_TARGET_VS_COMPETENCIA'] = ixTargetVsCompetenciaFor(ean);
-      row['DIFF_VS_EDP'] = diffVsEdp(row['Precio_Regular'], row['PRECIO_TGT_SPM'], row['PRECIO_TGT_MAY']);
+      row['DIFF_VS_EDP'] = diffVsEdp(
+        row['Precio_Regular'],
+        row['PRECIO_TGT_SPM'],
+        row['PRECIO_TGT_WHS'],
+        row['PRECIO_TGT_WHS_REG'],
+      );
     }
 
     all.push(...(data as ClientBaseRow[]));

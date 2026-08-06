@@ -147,7 +147,8 @@ La respuesta es un objeto con la siguiente estructura:
       "URL": "https://www.atomoconviene.com/...",
       "Precio_Mas_Bajo": "2999",
       "PRECIO_TGT_SPM": "3450",
-      "PRECIO_TGT_MAY": "",
+      "PRECIO_TGT_WHS": "",
+      "PRECIO_TGT_WHS_REG": "",
       "DIFF_VS_EDP": "6%",
       "IDX_VS_COMPETENCIA": "8%",
       "IX_TARGET_VS_COMPETENCIA": "100",
@@ -187,7 +188,8 @@ La respuesta es un objeto con la siguiente estructura:
       "URL": "https://www.atomoconviene.com/...",
       "Precio_Mas_Bajo": "",
       "PRECIO_TGT_SPM": "",
-      "PRECIO_TGT_MAY": "",
+      "PRECIO_TGT_WHS": "",
+      "PRECIO_TGT_WHS_REG": "",
       "DIFF_VS_EDP": "",
       "IDX_VS_COMPETENCIA": "",
       "IX_TARGET_VS_COMPETENCIA": "",
@@ -253,9 +255,10 @@ La respuesta es un objeto con la siguiente estructura:
 | `Descuento_Unitario` | Sí | Descuento unitario efectivo (0 a 1) derivado de precio de lista vs. precio con oferta. **Vacío (`""`)** si no hay descuento. | `"0.1779"` |
 | `URL` | Sí | URL de la página del producto relevada. | `"https://..."` |
 | `Precio_Mas_Bajo` | Sí | Precio más bajo detectado (considerando ofertas vigentes). **Puede venir vacío (`""`)** cuando `Estado` ≠ `"Disponible"`. | `"2999"` |
-| `PRECIO_TGT_SPM` | Sí | Precio target de supermercado (de la Lista de Precios). Se completa **solo en registros de cadenas de canal supermercado** (`Canal` = `SPM ...`); en registros mayoristas viene vacío. También vacío si el EAN no está en la lista. | `"8145"` |
-| `PRECIO_TGT_MAY` | Sí | Precio target mayorista (de la Lista de Precios). Se completa **solo en registros de cadenas de canal mayorista** (`Canal` = `MAY ...`); en registros de supermercado viene vacío. También vacío si el EAN no está en la lista. | `"7537"` |
-| `DIFF_VS_EDP` | Sí | Diferencia de `Precio_Regular` vs. el precio target EDP, como **porcentaje entero** (`"23%"`, `"-5%"`). Se usa `PRECIO_TGT_SPM` o `PRECIO_TGT_MAY` (el que venga en la fila; solo llega uno por canal). **Vacío (`""`)** si no hay `Precio_Regular` o no hay target. | `"6%"` |
+| `PRECIO_TGT_SPM` | Sí | Precio target de supermercado (de la Lista de Precios, canal `SPM`). Se completa **solo en registros de canal supermercado** (`Canal` = `SPM ...`); vacío en mayoristas. También vacío si el EAN no está en la lista. | `"8145"` |
+| `PRECIO_TGT_WHS` | Sí | Precio target mayorista **nacional** (de la Lista de Precios, canal `MAY`). *Antes se llamaba `PRECIO_TGT_MAY`.* Se completa **solo en registros de mayoristas nacionales** (`Canal` = `MAY NACIONAL`); vacío en supermercados y en **mayoristas regionales** (esos usan `PRECIO_TGT_WHS_REG`). También vacío si el EAN no está en la lista. | `"7537"` |
+| `PRECIO_TGT_WHS_REG` | Sí | Precio target mayorista **regional** (de la Lista de Precios, canal `MAY REG`). Se completa **solo en registros de mayoristas regionales** (`Canal` = `MAY REGIONAL`); vacío en el resto. También vacío si el EAN no está en la lista. | `"6980"` |
+| `DIFF_VS_EDP` | Sí | Diferencia de `Precio_Regular` vs. el precio target EDP, como **porcentaje entero** (`"23%"`, `"-5%"`). Se usa el target del canal de la fila (`PRECIO_TGT_SPM`, `PRECIO_TGT_WHS` o `PRECIO_TGT_WHS_REG`; solo llega uno por canal). **Vacío (`""`)** si no hay `Precio_Regular` o no hay target. | `"6%"` |
 | `IDX_VS_COMPETENCIA` | Sí | Índice de precio del competidor vs. el producto Ayudín equivalente, como **porcentaje entero**. Se completa **solo en filas de competidor** (`NUEVA_CATEGORIZACION` termina en `A1`), dividiendo por el `Precio_Regular` del producto Ayudín (`…A`) en el **mismo supermercado y misma fecha** (si hay varios, el primero). **Vacío (`""`)** en filas Ayudín, sin precio, o sin equivalente. | `"8%"` |
 | `IX_TARGET_VS_COMPETENCIA` | Sí | Índice objetivo vs. competencia provisto por el cliente, hardcodeado y matcheado por EAN. **Vacío (`""`)** para los EAN que el cliente no clasificó. | `"100"` |
 | `PESO_PRODUCTO_EN_CATEGORIA` | Sí | Peso (participación) del producto dentro de su categoría, expresado como ratio (0 a 1). Dato de referencia provisto por el cliente y matcheado por EAN. **Vacío (`""`)** para los EAN que el cliente no clasificó. | `"0.18"` |
