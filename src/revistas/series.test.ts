@@ -15,10 +15,20 @@ describe('seriesKeyFromMakroFilename', () => {
     expect(seriesKeyFromMakroFilename('1-MM-JUL4.pdf')).toBe('mm');
     expect(seriesKeyFromMakroFilename('1-GT-V5-1.pdf')).toBe('gt');
     expect(seriesKeyFromMakroFilename('SPONSOR-JUL-3.pdf')).toBe('sponsor');
-    expect(seriesKeyFromMakroFilename('4-PROV-JUL4.pdf')).toBe('prov');
     expect(seriesKeyFromMakroFilename('MAKRONETTA-V6-17al19.pdf')).toBe('makroneta');
     expect(seriesKeyFromMakroFilename('ESPECIAL-dia-del-amigo-MK-V4-16al26.pdf')).toBe('especial');
     expect(seriesKeyFromMakroFilename('Flyer-MM-CORREGIDO-JUNIO-4.pdf')).toBe('mm');
+  });
+
+  // PROV and SPONSOR name the same weekly "Ofertas especiales" flyer, so they
+  // must land on ONE series or the new issue supersedes the wrong row and the
+  // expired one keeps carrying prices.
+  it('maps the PROV token onto the sponsor series', () => {
+    expect(seriesKeyFromMakroFilename('4-PROV-JUL4.pdf')).toBe('sponsor');
+    expect(seriesKeyFromMakroFilename('Flyer-PROV-AGO-1.pdf')).toBe('sponsor');
+    // Same flyer, third naming convention: no token at all → the title decides.
+    expect(seriesKeyFromMakroFilename('prove5jul.pdf')).toBeNull();
+    expect(seriesKeyFromMakroTitle('Ofertas especiales del 30/07 al 05/08')).toBe('sponsor');
   });
 });
 

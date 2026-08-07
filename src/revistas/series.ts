@@ -41,7 +41,15 @@ export function seriesKeyFromMakroFilename(filename: string): string | null {
   if (/\bmm\b/i.test(base) || /(?:^|-)mm(?:-|$)/i.test(base)) return 'mm';
   if (/\bgt\b/i.test(base) || /(?:^|-)gt(?:-|$)/i.test(base)) return 'gt';
   if (/sponsor/i.test(base)) return 'sponsor';
-  if (/\bprov\b/i.test(base) || /(?:^|-)prov(?:-|$)/i.test(base)) return 'prov';
+  // PROV and SPONSOR are the same weekly flyer ("Ofertas especiales"): Makro
+  // just renames the file. `SPONSOR-JUL-3.pdf` (16/07), `4-PROV-JUL4.pdf`
+  // (23/07), `prove5jul.pdf` (30/07 — no token matches, so the title decides),
+  // `Flyer-PROV-AGO-1.pdf` (06/08). Supersede is per series, so two keys for
+  // one flyer left the expired 30/07 issue current and still carrying prices
+  // while the new one superseded an unrelated empty row. Mapping PROV to
+  // 'sponsor' makes the filename agree with seriesKeyFromMakroTitle, which
+  // already returns 'sponsor' for "Ofertas especiales".
+  if (/\bprov\b/i.test(base) || /(?:^|-)prov(?:-|$)/i.test(base)) return 'sponsor';
   if (/makronet|neta/i.test(base)) return 'makroneta';
   if (/especial|dia.?del.?amigo/i.test(base)) return 'especial';
   return null;

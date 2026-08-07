@@ -19,7 +19,7 @@ import { db } from '../shared/db.js';
 import { logger, type Logger } from '../shared/logger.js';
 import { captureError } from '../shared/sentry.js';
 import { createAlert } from '../alerts/createAlert.js';
-import { revistaConfig } from './config.js';
+import { assertOpenAiKey, revistaConfig } from './config.js';
 import { discoverCandidates, candidateFromPdfUrl, type MagazineCandidate } from './sources.js';
 import type { PageSelection, RevistaStrategyConfig } from './sources-shared.js';
 import { extractProductsFromPage, type ExtractedProduct } from './extract.js';
@@ -408,6 +408,95 @@ function seriesAllowed(seriesKey: string, sm: RevistaSupermarket, opts: ProcessO
   });
 }
 
+/** Why a candidate is (not) worth the download + vision cost. */
+interface CandidateVerdict {
+  process: boolean;
+  /** In Spanish: it reaches the operator through the check log or the panel. */
+  reason: string;
+  /** Row already holding this exact hash, if any. */
+  existing: MagazineRow | null;
+  /** Current issue of the same series, if any. */
+  current: MagazineRow | null;
+  /** Null when the re-upload guard never ran (series skipped / hash known). */
+  reupload: ReturnType<typeof classifyReupload> | null;
+}
+
+/**
+ * The whole "should we spend on this flyer?" decision, in one place.
+ *
+ * Both callers that act on it — the daily check (`processSupermarket`) and the
+ * panel's Traer button (`ingestCandidatesByHash`) — go through here, for the
+ * same reason `decide.ts` is a separate module: a second copy of the rule is how
+ * the button stops predicting what the run does.
+ */
+async function evaluateCandidate(
+  sm: RevistaSupermarket,
+  c: MagazineCandidate,
+  opts: ProcessOptions,
+): Promise<CandidateVerdict> {
+  if (!seriesAllowed(c.seriesKey, sm, opts)) {
+    return {
+      process: false,
+      reason: `la serie "${c.seriesKey}" está filtrada (skipSeries / onlySeries)`,
+      existing: null,
+      current: null,
+      reupload: null,
+    };
+  }
+
+  const existing = await findMagazineByHash(sm.id, c.hash);
+  if (existing) {
+    const retry = wouldProcess(existing, opts.force);
+    return {
+      process: retry,
+      reason: retry
+        ? `ya está en base en estado "${existing.status}" → se reintenta`
+        : `ya está en base (${existing.status})`,
+      existing,
+      current: null,
+      reupload: null,
+    };
+  }
+  if (opts.force) {
+    // No lookup: forcing means the guard's inputs don't matter, and nothing
+    // downstream reads `current` on the processing path.
+    return {
+      process: true,
+      reason: 'forzado: se procesa sin aplicar la guarda de re-subida',
+      existing: null,
+      current: null,
+      reupload: null,
+    };
+  }
+
+  // Re-upload guard: the hash is new, but the chain may have simply re-exported
+  // the issue we already scanned. Vital republishes the same PDF several times
+  // a day and the hash keys off content-length/ETag, so without this every run
+  // would rescan at full vision cost AND supersede whatever the operator had
+  // already curated.
+  const current = await findCurrentMagazineInSeries(sm.id, c.seriesKey);
+  const reupload = classifyReupload({
+    strategy: sm.strategy.strategy,
+    candidate: {
+      label: c.label,
+      period: parseFlyerPeriod(c.label, new Date()),
+      fileSize: c.fileSize,
+      sourceUrl: c.sourceUrl,
+      pageCount: c.pageCount,
+    },
+    current: current
+      ? {
+          label: current.label,
+          period: magazinePeriod(current),
+          fileSize: current.file_size,
+          sourceUrl: current.source_url,
+          pageCount: current.page_count,
+        }
+      : null,
+  });
+  return { process: !reupload.reupload, reason: reupload.reason, existing: null, current, reupload };
+}
+
 /** Process one supermarket: discover, dedup, and process any new issues. */
 export async function processSupermarket(
   sm: RevistaSupermarket,
@@ -450,97 +539,59 @@ export async function processSupermarket(
   /** Candidates processed even though the series already had a current issue. */
   const rescanned: string[] = [];
   for (const c of candidates) {
-    // Series filter runs BEFORE download/render — saves the whole flyer cost.
-    if (!seriesAllowed(c.seriesKey, sm, opts)) {
-      log.info(
-        { label: c.label, seriesKey: c.seriesKey },
-        'revista: skipping series (skipSeries / onlySeries)',
-      );
-      summaries.push({
-        supermarketId: sm.id,
-        label: c.label,
-        status: 'skipped',
-        hash: c.hash,
-      });
-      continue;
-    }
+    // Runs BEFORE download/render — every skip here saves a whole flyer's cost.
+    const verdict = await evaluateCandidate(sm, c, opts);
 
-    const existing = await findMagazineByHash(sm.id, c.hash);
-    if (!wouldProcess(existing, opts.force)) {
-      summaries.push({
-        supermarketId: sm.id,
-        label: c.label,
-        status: 'skipped',
-        hash: c.hash,
-        magazineId: existing?.id ?? '',
-      });
-      continue;
-    }
-
-    // Re-upload guard: the hash is new, but the chain may have simply
-    // re-exported the issue we already scanned. Vital republishes the same PDF
-    // several times a day and the hash keys off content-length/ETag, so without
-    // this every run would rescan at full vision cost AND supersede whatever the
-    // operator had already curated.
-    if (!existing && !opts.force) {
-      const current = await findCurrentMagazineInSeries(sm.id, c.seriesKey);
-      const verdict = classifyReupload({
-        strategy: sm.strategy.strategy,
-        candidate: {
-          label: c.label,
-          period: parseFlyerPeriod(c.label, new Date()),
-          fileSize: c.fileSize,
-          sourceUrl: c.sourceUrl,
-          pageCount: c.pageCount,
-        },
-        current: current
-          ? {
-              label: current.label,
-              period: magazinePeriod(current),
-              fileSize: current.file_size,
-              sourceUrl: current.source_url,
-              pageCount: current.page_count,
-            }
-          : null,
-      });
-      if (verdict.reupload) {
+    if (!verdict.process) {
+      const magazineId = verdict.existing?.id ?? verdict.current?.id;
+      if (verdict.reupload?.reupload) {
         log.info(
           {
             label: c.label,
             seriesKey: c.seriesKey,
-            currentId: current?.id,
+            currentId: verdict.current?.id,
             reason: verdict.reason,
-            sizeDeltaPct: verdict.sizeDeltaPct,
+            sizeDeltaPct: verdict.reupload.sizeDeltaPct,
           },
           'revista: skipping re-upload of an issue already scanned',
         );
         reuploadsSkipped.push(`${c.label} (${verdict.reason})`);
-        await alertSuspiciousReupload(sm, c, current, verdict, log);
-        summaries.push({
-          supermarketId: sm.id,
-          label: c.label,
-          status: 'skipped',
-          hash: c.hash,
-          ...(current ? { magazineId: current.id } : {}),
-        });
-        continue;
-      }
-      // Declined to skip: say so. Until 2026-08-05 only the SKIP was logged, so
-      // a guard that let a re-export through ("size moved 1.26% → operator
-      // decides") left no trace anywhere and the rescan looked spontaneous.
-      if (current) {
+        await alertSuspiciousReupload(sm, c, verdict.current, verdict.reupload, log);
+      } else if (!verdict.existing) {
         log.info(
-          {
-            label: c.label,
-            seriesKey: c.seriesKey,
-            currentId: current.id,
-            reason: verdict.reason,
-            sizeDeltaPct: verdict.sizeDeltaPct,
-          },
-          'revista: processing despite a current issue in this series',
+          { label: c.label, seriesKey: c.seriesKey, reason: verdict.reason },
+          'revista: skipping series (skipSeries / onlySeries)',
         );
-        rescanned.push(`${c.label} (${verdict.reason})`);
       }
+      summaries.push({
+        supermarketId: sm.id,
+        label: c.label,
+        status: 'skipped',
+        hash: c.hash,
+        // The row this skip points at: the one already holding the hash, else
+        // the current issue of the series we declined to rescan. A filtered
+        // series points at nothing.
+        ...(magazineId ? { magazineId } : {}),
+      });
+      continue;
+    }
+
+    // Declined to skip a series that already has a current issue: say so. Until
+    // 2026-08-05 only the SKIP was logged, so a guard that let a re-export
+    // through ("size moved 1.26% → operator decides") left no trace anywhere
+    // and the rescan looked spontaneous.
+    if (verdict.current && verdict.reupload) {
+      log.info(
+        {
+          label: c.label,
+          seriesKey: c.seriesKey,
+          currentId: verdict.current.id,
+          reason: verdict.reason,
+          sizeDeltaPct: verdict.reupload.sizeDeltaPct,
+        },
+        'revista: processing despite a current issue in this series',
+      );
+      rescanned.push(`${c.label} (${verdict.reason})`);
     }
     toProcess.push(c);
   }
@@ -639,6 +690,192 @@ export async function ingestPdfUrl(
 
   const indexPromise = loadCatalog().then(buildCatalogIndex);
   return processCandidate(sm, candidate, opts, indexPromise);
+}
+
+/** One flyer the panel asked for, and what became of it. */
+export interface IngestOutcome {
+  hash: string;
+  label: string;
+  seriesKey: string;
+  sourceUrl: string;
+  status: 'processed' | 'skipped' | 'failed' | 'not_found';
+  /** In Spanish, ready to show in the panel. */
+  reason: string;
+  magazineId?: string;
+  matched?: number;
+  pages?: number;
+  error?: string;
+}
+
+export interface IngestProgress {
+  total: number;
+  done: number;
+  processed: number;
+  skipped: number;
+  failed: number;
+  /** Label of the flyer being read right now — the only slow step. */
+  current: string | null;
+}
+
+export interface IngestCandidateRef {
+  hash: string;
+  /**
+   * Fallback key. An html-pdf-links hash folds in content-length/ETag and Vital
+   * re-uploads the same file several times a day, so the hash the operator saw
+   * in the panel can be stale minutes later while the URL still names the flyer.
+   */
+  sourceUrl?: string;
+}
+
+/**
+ * Ingest the flyers the panel's check button listed, by hash.
+ *
+ * The button-facing half of the pipeline (docs/REVISTA_CHECK_BUTTON.md). Three
+ * things it must keep doing:
+ *
+ * 1. **Re-discover, don't trust the caller.** Only what the chain's own site
+ *    serves right now is ingestable. Taking a URL from the panel would make
+ *    this "download and vision-scan whatever I send you".
+ * 2. **Re-run the guards HERE, not at enqueue time.** Two clicks on the same
+ *    flyer, or a click landing while the 6am check is mid-run, must end in
+ *    "skipped" and not in two magazine rows.
+ * 3. **Never touch `revista_check_log`.** That table is the ledger of the
+ *    AUTOMATIC probe and the signal used to tell whether the daily run
+ *    happened; manual clicks would destroy that diagnostic. This is also why it
+ *    can't just call `processSupermarket`, which always records a check.
+ */
+export async function ingestCandidatesByHash(
+  supermarketId: string,
+  opts: {
+    candidates?: IngestCandidateRef[];
+    force?: boolean;
+    onProgress?: (p: IngestProgress) => void;
+  } = {},
+): Promise<IngestOutcome[]> {
+  // Loudly, before anything else. `runRevistaCheck` returns silently without a
+  // key — the exact failure this family of buttons exists to expose.
+  assertOpenAiKey();
+
+  const supers = await loadRevistaSupermarkets();
+  const sm = supers.find((s) => s.id === supermarketId);
+  if (!sm) {
+    throw new Error(
+      `No revista supermarket "${supermarketId}" (is config.source_type=revista and is_active=true?)`,
+    );
+  }
+  const log = logger.child({ supermarket: sm.id, phase: 'revista-ingest' });
+
+  const found = await withTimeout(
+    discoverCandidates(sm.strategy),
+    revistaConfig.discoverTimeoutMs,
+    `revista ingest discovery (${sm.id})`,
+  );
+
+  const wanted = opts.candidates ?? [];
+  const selected: MagazineCandidate[] = [];
+  const outcomes: IngestOutcome[] = [];
+
+  if (wanted.length === 0) {
+    // No explicit selection: everything the daily check would take.
+    selected.push(...found);
+  } else {
+    for (const ref of wanted) {
+      const byHash = found.find((c) => c.hash === ref.hash);
+      if (byHash) {
+        selected.push(byHash);
+        continue;
+      }
+      const byUrl = ref.sourceUrl
+        ? found.find((c) => c.sourceUrl === ref.sourceUrl)
+        : undefined;
+      if (byUrl) {
+        log.info({ hash: ref.hash, url: ref.sourceUrl }, 'revista ingest: hash moved, matched by URL');
+        selected.push(byUrl);
+        continue;
+      }
+      outcomes.push({
+        hash: ref.hash,
+        label: '(desconocido)',
+        seriesKey: '',
+        sourceUrl: ref.sourceUrl ?? '',
+        status: 'not_found',
+        reason: 'ya no está en el sitio de la cadena — volvé a chequear',
+      });
+    }
+  }
+
+  const progress: IngestProgress = {
+    total: selected.length,
+    done: 0,
+    processed: 0,
+    skipped: 0,
+    failed: 0,
+    current: null,
+  };
+  opts.onProgress?.({ ...progress });
+
+  // Built lazily and once: a selection that turns out to be all skips must not
+  // pay for the catalog. The rejection is swallowed here and surfaced by the
+  // real await inside processCandidate — an unawaited rejection exits Node.
+  let indexPromise: Promise<Awaited<ReturnType<typeof buildCatalogIndex>>> | null = null;
+  const catalogIndex = (): Promise<Awaited<ReturnType<typeof buildCatalogIndex>>> => {
+    if (!indexPromise) {
+      indexPromise = loadCatalog().then(buildCatalogIndex);
+      indexPromise.catch(() => {});
+    }
+    return indexPromise;
+  };
+
+  const processOpts: ProcessOptions = { scrapeRunId: null, force: opts.force ?? false };
+
+  for (const c of selected) {
+    progress.current = c.label;
+    opts.onProgress?.({ ...progress });
+
+    const verdict = await evaluateCandidate(sm, c, processOpts);
+    const base = { hash: c.hash, label: c.label, seriesKey: c.seriesKey, sourceUrl: c.sourceUrl };
+
+    if (!verdict.process) {
+      const magazineId = verdict.existing?.id ?? verdict.current?.id;
+      log.info({ label: c.label, reason: verdict.reason }, 'revista ingest: skipped');
+      outcomes.push({
+        ...base,
+        status: 'skipped',
+        reason: verdict.reason,
+        ...(magazineId ? { magazineId } : {}),
+      });
+      progress.skipped++;
+    } else {
+      const summary = await processCandidate(sm, c, processOpts, catalogIndex());
+      if (summary.status === 'processed') {
+        outcomes.push({
+          ...base,
+          status: 'processed',
+          reason: `traída: ${summary.matched ?? 0} producto(s) con match en ${summary.pages ?? 0} página(s)`,
+          ...(summary.magazineId ? { magazineId: summary.magazineId } : {}),
+          ...(summary.matched === undefined ? {} : { matched: summary.matched }),
+          ...(summary.pages === undefined ? {} : { pages: summary.pages }),
+        });
+        progress.processed++;
+      } else {
+        outcomes.push({
+          ...base,
+          status: 'failed',
+          reason: `falló el procesamiento: ${summary.error ?? 'error desconocido'}`,
+          ...(summary.magazineId ? { magazineId: summary.magazineId } : {}),
+          ...(summary.error ? { error: summary.error } : {}),
+        });
+        progress.failed++;
+      }
+    }
+
+    progress.done++;
+    progress.current = null;
+    opts.onProgress?.({ ...progress });
+  }
+
+  log.info({ progress, requested: wanted.length }, 'revista ingest complete');
+  return outcomes;
 }
 
 /**

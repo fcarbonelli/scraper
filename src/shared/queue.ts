@@ -68,6 +68,33 @@ export type DiscoveryJobName = 'discover';
 export const DISCOVERY_QUEUE_NAME = 'discovery';
 
 /**
+ * Revista ingest payload: bring one or more flyers the check button listed.
+ *
+ * Candidates travel as HASHES, never URLs. The job re-runs discovery against
+ * the chain's own site and only ingests what it finds there, so a caller can't
+ * turn this into "download and vision-scan this arbitrary PDF" — which is what
+ * accepting a URL from the panel would mean.
+ */
+export interface RevistaIngestJobData {
+  supermarketId: string;
+  /**
+   * Candidates from POST /v1/revistas/check. Empty = every ingestable one.
+   * `sourceUrl` is the fallback key: an html-pdf-links hash folds in
+   * content-length/ETag, and Vital re-uploads the same file several times a
+   * day, so the hash the operator saw can be stale minutes later while the URL
+   * still names the same flyer.
+   */
+  candidates?: { hash: string; sourceUrl?: string }[];
+  /** Rescan even if the guard says it's already stored / a re-upload. */
+  force?: boolean;
+}
+
+export type RevistaIngestJobName = 'ingest';
+
+/** Single shared queue for manual revista ingests (not per-supermarket). */
+export const REVISTA_INGEST_QUEUE_NAME = 'revista-ingest';
+
+/**
  * Naming convention: one queue per supermarket. This is intentional —
  * BullMQ rate-limits and concurrency are per-queue, so isolating per-site
  * gives us per-site control naturally.
@@ -142,6 +169,32 @@ export function getDiscoveryQueue(
   return discoveryQueue;
 }
 
+/**
+ * Revista ingest queue singleton. One shared queue, worker concurrency 1: an
+ * ingest renders a PDF and runs vision over every page, so two at once in the
+ * same process is how the orchestrator got OOM-killed for a week in July.
+ */
+let revistaIngestQueue: Queue<RevistaIngestJobData, unknown, RevistaIngestJobName> | null = null;
+
+export function getRevistaIngestQueue(
+  connection?: ConnectionOptions,
+): Queue<RevistaIngestJobData, unknown, RevistaIngestJobName> {
+  if (revistaIngestQueue) return revistaIngestQueue;
+  revistaIngestQueue = new Queue<RevistaIngestJobData, unknown, RevistaIngestJobName>(
+    REVISTA_INGEST_QUEUE_NAME,
+    {
+      connection: connection ?? createRedisConnection(),
+      defaultJobOptions: {
+        // Same reason as discovery: the status endpoint reads finished jobs
+        // back off the queue, so keep a window of them instead of a state table.
+        removeOnComplete: { age: 60 * 60 * 24, count: 500 },
+        removeOnFail: { age: 60 * 60 * 24 * 7 },
+      },
+    },
+  );
+  return revistaIngestQueue;
+}
+
 /** Cleanly close all queue connections (used on graceful shutdown). */
 export async function closeAllQueues(): Promise<void> {
   await Promise.all(Array.from(queues.values()).map((q) => q.close()));
@@ -149,5 +202,9 @@ export async function closeAllQueues(): Promise<void> {
   if (discoveryQueue) {
     await discoveryQueue.close();
     discoveryQueue = null;
+  }
+  if (revistaIngestQueue) {
+    await revistaIngestQueue.close();
+    revistaIngestQueue = null;
   }
 }

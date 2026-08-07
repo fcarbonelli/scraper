@@ -4,6 +4,9 @@
  *   GET    /v1/revistas/pending                  magazines awaiting review
  *   POST   /v1/revistas/check                    live discovery preview (read-only, no AI)
  *   GET    /v1/revistas/checks                   daily probe log
+ *   POST   /v1/revistas/ingest                   bring listed flyers (async job)
+ *   GET    /v1/revistas/ingest                   active / recent ingest jobs
+ *   GET    /v1/revistas/ingest/:jobId            one ingest job's progress
  *   GET    /v1/revistas/items                    cross-magazine item list (control view)
  *   GET    /v1/revistas/ean-collisions           same-EAN / distinct-product warnings
  *   GET    /v1/revistas/duplicates               same-mapping / same-day snapshot dupes
@@ -53,6 +56,8 @@ import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
 import { previewRevistaChains } from '../../revistas/preview.js';
+import type { IngestOutcome } from '../../revistas/pipeline.js';
+import { getRevistaIngestQueue, type RevistaIngestJobData } from '../../shared/queue.js';
 
 export const revistasRouter = Router();
 
@@ -377,6 +382,177 @@ revistasRouter.get('/checks', async (req: Request, res: Response) => {
   }
   const out = rows.map((r) => checkResponse(r, names.get(r.supermarket_id) ?? r.supermarket_id));
   res.json(paginated(out, count ?? 0, page, limit));
+});
+
+// =============================================================================
+// POST /v1/revistas/ingest — bring the flyers the check button listed
+//
+// The other half of POST /check: that one says what's missing, this one brings
+// it. Async on purpose — an ingest renders a PDF and runs vision over every
+// page, which is minutes of work and hundreds of MB, so it is enqueued and the
+// panel polls. The API process is capped at 300M and would be SIGKILLed doing
+// it inline. The job itself runs in the orchestrator; see
+// src/revistas/ingestWorker.ts.
+//
+// Candidates travel as HASHES (with the URL only as a fallback key): the job
+// re-discovers the chain and ingests what its site actually serves, so this
+// can't be used as "download and vision-scan this arbitrary PDF".
+//
+// Like POST /check, it never writes `revista_check_log`.
+// =============================================================================
+
+const IngestBody = z.object({
+  supermarket_id: z.string().trim().min(1).max(100),
+  /** Omit or leave empty to bring everything the daily check would bring. */
+  candidates: z
+    .array(
+      z.object({
+        hash: z.string().trim().min(1).max(200),
+        source_url: z.string().url().optional(),
+      }),
+    )
+    .max(20)
+    .optional(),
+  /**
+   * Rescan even if the guard says it's already stored or a re-upload. This is
+   * the only way to recover a price correction republished over the same URL —
+   * and it is also what supersedes curated work, so the panel asks for a
+   * confirmation before sending it.
+   */
+  force: z.boolean().optional(),
+});
+
+revistasRouter.post('/ingest', async (req: Request, res: Response) => {
+  const body = parseBody(req, IngestBody);
+
+  const job: RevistaIngestJobData = {
+    supermarketId: body.supermarket_id,
+    ...(body.candidates?.length
+      ? {
+          candidates: body.candidates.map((c) => ({
+            hash: c.hash,
+            ...(c.source_url ? { sourceUrl: c.source_url } : {}),
+          })),
+        }
+      : {}),
+    ...(body.force === undefined ? {} : { force: body.force }),
+  };
+
+  const enqueued = await getRevistaIngestQueue().add('ingest', job);
+  logger.info(
+    { jobId: enqueued.id, supermarket: job.supermarketId, requested: job.candidates?.length ?? 0 },
+    'revista ingest job enqueued',
+  );
+
+  res.status(201).json(
+    success({
+      jobId: enqueued.id,
+      supermarket_id: job.supermarketId,
+      requested: job.candidates?.length ?? 0,
+      force: Boolean(job.force),
+      status: 'queued',
+    }),
+  );
+});
+
+// =============================================================================
+// GET /v1/revistas/ingest      — active / recent ingest jobs
+// GET /v1/revistas/ingest/:id  — one job's progress + per-flyer outcomes
+//
+// State lives in the BullMQ job (progress + return value), same as discovery —
+// no state table to keep in sync. Finished jobs are retained 24h so the panel
+// can re-attach after a reload.
+// =============================================================================
+
+const IngestListQuery = z.object({
+  status: z.enum(['active', 'all']).default('active'),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+/** BullMQ's states, in the four the panel cares about. */
+function ingestStatus(state: string): 'queued' | 'running' | 'completed' | 'failed' {
+  if (state === 'completed') return 'completed';
+  if (state === 'failed') return 'failed';
+  if (state === 'active') return 'running';
+  return 'queued';
+}
+
+function ingestProgress(raw: unknown): Record<string, unknown> {
+  const p = (typeof raw === 'object' && raw ? raw : null) as Record<string, unknown> | null;
+  return {
+    total: p?.total ?? 0,
+    done: p?.done ?? 0,
+    processed: p?.processed ?? 0,
+    skipped: p?.skipped ?? 0,
+    failed: p?.failed ?? 0,
+    current: p?.current ?? null,
+  };
+}
+
+revistasRouter.get('/ingest', async (req: Request, res: Response) => {
+  const q = parseQuery(req, IngestListQuery);
+  const queue = getRevistaIngestQueue();
+
+  const types =
+    q.status === 'all'
+      ? (['active', 'waiting', 'delayed', 'completed', 'failed'] as const)
+      : (['active', 'waiting', 'delayed'] as const);
+
+  const jobs = await queue.getJobs([...types], 0, 200);
+  jobs.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
+  const trimmed = jobs.filter((j): j is NonNullable<typeof j> => Boolean(j)).slice(0, q.limit);
+
+  const out = await Promise.all(
+    trimmed.map(async (job) => {
+      const data = job.data as RevistaIngestJobData;
+      return {
+        jobId: job.id,
+        supermarket_id: data.supermarketId,
+        requested: data.candidates?.length ?? 0,
+        force: Boolean(data.force),
+        status: ingestStatus(await job.getState()),
+        progress: ingestProgress(job.progress),
+        created_at: new Date(job.timestamp).toISOString(),
+        finished_at: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+      };
+    }),
+  );
+  res.json(success(out));
+});
+
+revistasRouter.get('/ingest/:jobId', async (req: Request, res: Response) => {
+  const jobId = typeof req.params.jobId === 'string' ? req.params.jobId : '';
+  if (!jobId) throw ApiError.badRequest('Missing path parameter: jobId');
+
+  const job = await getRevistaIngestQueue().getJob(jobId);
+  if (!job) throw ApiError.notFound('Ingest job');
+
+  const data = job.data as RevistaIngestJobData;
+  const results = (job.returnvalue as IngestOutcome[] | undefined) ?? [];
+
+  res.json(
+    success({
+      jobId: job.id,
+      supermarket_id: data.supermarketId,
+      force: Boolean(data.force),
+      status: ingestStatus(await job.getState()),
+      progress: ingestProgress(job.progress),
+      results: results.map((r) => ({
+        hash: r.hash,
+        label: r.label,
+        series_key: r.seriesKey,
+        source_url: r.sourceUrl,
+        status: r.status,
+        reason: r.reason,
+        magazine_id: r.magazineId ?? null,
+        matched: r.matched ?? null,
+        pages: r.pages ?? null,
+      })),
+      failed_reason: job.failedReason ?? null,
+      created_at: new Date(job.timestamp).toISOString(),
+      finished_at: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
+    }),
+  );
 });
 
 // =============================================================================
