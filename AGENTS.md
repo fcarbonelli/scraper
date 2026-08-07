@@ -157,7 +157,7 @@ scraper/
             ├── runs.ts                ← list, detail with breakdown
             ├── alerts.ts              ← list, PATCH (ack/resolve)
             ├── revistas.ts            ← magazine review UI (/v1/revistas/*)
-            └── inStore.ts             ← in-store price entry (/v1/in-store/*): supermarkets, lookup, visits, photos, entries, review (full-access)
+            └── inStore.ts             ← in-store price entry (/v1/in-store/*): supermarkets, lookup, visits, photos, entries (create/edit), review (full-access)
 ```
 
 ## Commands cheat sheet

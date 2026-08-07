@@ -1938,6 +1938,24 @@ Price mapping into the export: `price` → **Precio_Regular**, `wholesale_price`
 Errors: `400 INVALID_REQUEST` (bad body, chain not enabled, or finished visit),
 `404 NOT_FOUND` (unknown store/visit, or EAN not in catalog).
 
+### `PATCH /v1/in-store/entries/:id`
+
+Edit an already-saved **pending** entry (fix a price / units / observaciones in the
+relevamiento view). Saves immediately — **no approval needed**. Works with the
+`in-store`-scoped app key. Send at least one field; omitted fields are unchanged,
+and `null` clears an optional field.
+
+| Field | Type | Description |
+|---|---|---|
+| `price` | number > 0 | Precio Regular (unitario) |
+| `wholesale_price` | number > 0 \| null | Precio con oferta (mayorista) |
+| `wholesale_min_units` | int > 0 \| null | Min units for the wholesale price |
+| `note` | string \| null | Observaciones |
+
+Returns the updated entry (same shape as the `POST /entries` **201** body). Errors:
+`404 NOT_FOUND` (unknown entry), `400 INVALID_REQUEST` (empty body, or the entry is
+already `approved`/`rejected` — edit those via the review flow).
+
 ### `GET /v1/in-store/entries`
 
 Recent submissions — powers the "today's entries" list and operator review.
