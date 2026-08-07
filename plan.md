@@ -241,20 +241,14 @@ api_keys (
 -- gate, so it does NOT depend on the daily run being published.
 --
 -- Revista chains have NO scraper adapter and are EXCLUDED from the daily
--- BullMQ enqueue (src/orchestrator/enqueue.ts). Instead a daily carry-forward
--- step (src/revistas/carryForward.ts) re-emits prices ONLY from approved items
--- on the current (non-superseded) magazine as fresh RUN-LESS snapshots dated
--- today. When a NEW issue B is ingested for a chain, previous magazines are
--- marked superseded_by=B (migration 014); carry-forward of A's prices stops
--- until a human approves B. Idempotent per day.
--- IMPORTANT: carry-forward runs FIRST and independently of the AI magazine check
--- in the orchestrator (src/orchestrator/index.ts) — a hung discovery must never
--- block it (that regression made prices vanish the day after approval). Because
--- of that order, supersede also purges today's run-less revista snapshots for
--- mappings not yet approved on B (same-day reset).
--- Migration 015: supersede / carry-forward scope to (supermarket_id, series_key).
--- Makro/Vital publish several concurrent flyer series (MM, GT, Folder, …);
--- a new MM must not kill GT / Folder prices.
+-- BullMQ enqueue (src/orchestrator/enqueue.ts). Approving a reviewed item writes
+-- a single RUN-LESS snapshot dated the approval day, so a magazine's prices
+-- publish ONLY on the day they're approved — there is NO carry-forward that
+-- re-emits them on later days. When a NEW issue B is ingested for a chain,
+-- previous magazines are marked superseded_by=B (migration 014).
+-- Migration 015: supersede scopes to (supermarket_id, series_key). Makro/Vital
+-- publish several concurrent flyer series (MM, GT, Folder, …); superseding one
+-- series must not affect another.
 -- revista_check_log (migration 011): one row per (chain, daily check), written
 -- whether or not a new issue was found, so the operator can SEE the probe ran on
 -- the (common) days nothing changed (GET /v1/revistas/checks). The AI check is
@@ -320,10 +314,10 @@ revista_review_items (
 -- 'instore') — trusted, always client-visible, no publish gate.
 --
 -- In-store chains/mappings are EXCLUDED from the daily BullMQ enqueue
--- (src/orchestrator/enqueue.ts). A daily carry-forward (src/instore/carryForward.ts)
--- re-emits each in-store mapping's latest price as a fresh snapshot dated today,
--- so prices persist in the export between visits (entered ~twice a week).
--- Idempotent per day. instore_price_entries is the audit log (who/what/when).
+-- (src/orchestrator/enqueue.ts). Each hand-entered price is a single snapshot
+-- dated the day it's approved, so a price publishes ONLY on that day — there is
+-- NO carry-forward re-emitting it between visits.
+-- instore_price_entries is the audit log (who/what/when).
 --
 -- Migration 010 (client review) adds a VISIT model: work is grouped as one worker
 -- at one store BRANCH on one occasion. The visit carries the branch location
@@ -341,8 +335,8 @@ revista_review_items (
 -- snapshot). A back-office operator reviews a finished visit and APPROVES it
 -- (per-visit, inline edits allowed) — only then is the run-less snapshot written
 -- (src/instore/review.ts → materializeInStoreEntry). A pending entry isn't a
--- snapshot, so client_base excludes it automatically (no view change) and
--- carry-forward only ever sees approved prices. Review endpoints require a
+-- snapshot, so client_base excludes it automatically (no view change) and only
+-- approved prices ever reach the export. Review endpoints require a
 -- FULL-ACCESS key (not the in-store-scoped app key).
 instore_visits (                    -- one PDV relevamiento (migration 010)
   id              uuid PK
@@ -866,8 +860,8 @@ Decisions locked in:
 - **In-store manual price entry** (migrations `009`+`010`; `src/instore/`; `/v1/in-store/*`): a
   mobile web tool for field workers who scan barcodes in physical (wholesale) stores and
   type prices. Trusted run-less snapshots (`tier_used='manual'`, `raw_data.source=
-  'instore'`) carried forward daily (`carryForwardInStorePrices`) so prices persist between
-  visits. Chains flagged via `config.instore.enabled`; pure in-store chains use
+  'instore'`) publish only on the day they're approved (no carry-forward — prices do NOT
+  persist between visits). Chains flagged via `config.instore.enabled`; pure in-store chains use
   `source_type='instore'` (Nini, Diarco, Yaguar, Don Gastón, Oscar David — plus Makro/Vital/
   Maxiconsumo which also keep their existing source). API key scoping (`api_keys.scopes`)
   lets the app embed a key limited to `/v1/in-store/*`. **Migration 010 (client review)**

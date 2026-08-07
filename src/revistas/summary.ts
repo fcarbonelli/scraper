@@ -42,7 +42,12 @@ export interface RevistaRunSummary {
   pending_magazines: number;
   /** Items approved on this day (fresh magazine prices). */
   approved_today: number;
-  /** Prices re-emitted by the daily carry-forward on this day. */
+  /**
+   * Prices re-emitted from a prior snapshot on this day (source
+   * 'revista-carry-forward'). The daily carry-forward was removed, so this now
+   * only counts operator re-emits (magazine reactivate) and legacy rows —
+   * normally 0.
+   */
   carried_today: number;
   /** Distinct magazine products present in today's export. */
   products_today: number;

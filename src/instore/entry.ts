@@ -24,7 +24,7 @@ export function inStoreExternalId(productId: string): string {
   return `instore-${productId}`;
 }
 
-/** Marks mappings/snapshots created by the in-store tool (used by enqueue + carry-forward). */
+/** Marks mappings/snapshots created by the in-store tool (used by enqueue + review). */
 export const IN_STORE_SOURCE = 'instore';
 
 /** A branch location, captured on the visit. */
@@ -216,9 +216,11 @@ export async function writeSnapshot(
 }
 
 /**
- * Drop any run-less in-store snapshot for this mapping already dated today (a
- * carry-forward re-emission, or an earlier approval), so an approved fresh price
- * is the single row for the day. Keeps the export clean (one row per mapping/day).
+ * Drop any run-less in-store snapshot for this mapping already dated today (an
+ * earlier approval, or a legacy carry-forward re-emission), so an approved fresh
+ * price is the single row for the day. Keeps the export clean (one row per
+ * mapping/day). The 'instore-carry-forward' source is matched only to clean up
+ * rows written before carry-forward was removed.
  */
 async function purgeSameDayInStoreSnapshots(supermarketProductId: string): Promise<void> {
   const { data, error } = await db

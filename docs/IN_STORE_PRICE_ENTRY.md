@@ -26,10 +26,10 @@ fixtures in [`examples/api/`](../examples/api/) (`in-store-*.json`).
   becomes a **run-less** snapshot in the client export.
 - The field worker's app still works exactly the same; their own "today's list"
   shows their entries with a `review_status` (`pending` at first).
-- Prices are entered only **every few days** (≈twice a week). The backend runs a
-  **daily carry-forward** that re-emits each product's latest in-store price as a
-  fresh row dated today — so a Monday price keeps exporting every day until the
-  next visit supersedes it. **The frontend does nothing for this.**
+- Prices are entered only **every few days** (≈twice a week). Each approved price
+  publishes **only on the day it's approved** — it is a single row dated that day.
+  There is **no carry-forward**: prices do NOT keep exporting on later days between
+  visits. **The frontend does nothing for this.**
 - The worker **never picks a date.** The server stamps every entry with the current
   time. There is no date field anywhere in the UI.
 - A **visit** groups the work: one worker at one **store branch** on one occasion.
@@ -377,6 +377,7 @@ Flow:
    rejecting discards it. Response: `{ visit_id, approved, rejected, snapshots }`.
    The visit then drops out of the pending queue.
 
-Once approved, the carry-forward keeps those prices exporting daily until the next
-visit supersedes them — no further action needed.
+Once approved, each price exports **only on its approval day** (a single run-less
+snapshot dated that day). There is no carry-forward, so the price does not re-appear
+in later days' exports — the next visit records fresh prices on its own day.
 

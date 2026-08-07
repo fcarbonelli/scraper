@@ -45,7 +45,6 @@
     "revistas:rekey": "tsx --env-file=.env scripts/revistas-rekey-series.ts",
     "revistas:dedupe-simulate": "tsx scripts/revistas-dedupe-simulate.ts",
     "revistas:dedupe-report": "tsx --env-file=.env scripts/revistas-dedupe-cleanup.ts",
-    "instore:carry-forward": "tsx --env-file=.env scripts/instore-carry-forward.ts",
     "lp:import": "tsx --env-file=.env scripts/import-price-list.ts",
     "anomalies:scan": "tsx --env-file=.env scripts/scan-price-anomalies.ts",
     "apikey:create": "tsx --env-file=.env scripts/create-api-key.ts"

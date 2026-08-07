@@ -33,8 +33,8 @@ interface SupermarketProductRow {
 
 /**
  * Supermarket source types that have no web scraper adapter — their prices come
- * from humans (magazine review / in-store scans) and are re-emitted daily by
- * their own carry-forward. Enqueueing them would just fail every job with
+ * from humans (magazine review / in-store scans) and are written on approval,
+ * publishing only for that day. Enqueueing them would just fail every job with
  * "No adapter registered".
  */
 const NON_SCRAPED_SOURCE_TYPES = new Set(['revista', 'instore']);
@@ -82,8 +82,8 @@ export async function runDailyScrape(
 
   // 2. Load active supermarkets (optionally filtered to a single id).
   //    Human-sourced chains (magazine "revista", in-store scans) are EXCLUDED:
-  //    they have no scraper adapter and are re-emitted daily by their own
-  //    carry-forward. Enqueueing them would just fail with "No adapter registered".
+  //    they have no scraper adapter — their prices are written on approval.
+  //    Enqueueing them would just fail with "No adapter registered".
   let smQuery = db
     .from('supermarkets')
     .select('id, name, config')
@@ -127,7 +127,7 @@ export async function runDailyScrape(
     }
     // Skip in-store mappings even on a web-scraped chain (e.g. Maxiconsumo can
     // have both): they have a synthetic external_id, not a real URL, so a scrape
-    // would always fail. Their prices are handled by carryForwardInStorePrices().
+    // would always fail. Their prices are written on approval (in-store review).
     const products = ((productsRes.data ?? []) as SupermarketProductRow[]).filter(
       (p) => p.metadata?.source !== 'instore',
     );

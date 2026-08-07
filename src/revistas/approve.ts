@@ -813,10 +813,9 @@ async function undoApprovalEffects(item: ReviewItemRow): Promise<boolean> {
  * approved on the superseded magazines of that series and are NOT yet approved
  * on `newMagazineId`.
  *
- * Scoped by series so a new Makro MM issue does not wipe GT / Folder prices
- * that were carried forward this morning. Needed because carry-forward runs
- * BEFORE discovery in the orchestrator, so A may already have been carried
- * today. History on prior days is kept.
+ * Scoped by series so a new Makro MM issue does not wipe GT / Folder prices.
+ * Clears any run-less snapshot the superseded issue's mappings already produced
+ * today (e.g. approved earlier the same day). History on prior days is kept.
  */
 export async function purgeTodayRevistaSnapshotsNotApprovedOn(
   supermarketId: string,
@@ -1215,8 +1214,7 @@ export async function deactivateMagazine(magazineId: string): Promise<MagazineTo
 /**
  * Reactivate a magazine: put its approved prices back in the client base. Sets
  * carry_active=true, re-activates the mappings it owns, and re-emits today's
- * price for each so the export shows them again immediately (instead of waiting
- * for tomorrow's carry-forward).
+ * price for each so the export shows them again immediately.
  */
 export async function reactivateMagazine(magazineId: string): Promise<MagazineToggleResult> {
   const mag = await loadMagazineForToggle(magazineId);
@@ -1230,7 +1228,7 @@ export async function reactivateMagazine(magazineId: string): Promise<MagazineTo
   const candidateSpIds = await approvedMappingIdsOnMagazine(magazineId);
   let affected = 0;
   for (const spId of candidateSpIds) {
-    // Re-activate the mapping (carry-forward + client_base need is_active=true).
+    // Re-activate the mapping (client_base needs is_active=true).
     const act = await db
       .from('supermarket_products')
       .update({ is_active: true })
@@ -1238,7 +1236,7 @@ export async function reactivateMagazine(magazineId: string): Promise<MagazineTo
       .eq('is_active', false);
     if (act.error) throw act.error;
 
-    // Re-emit today's price from the latest known snapshot (same as carry-forward).
+    // Re-emit today's price from the latest known snapshot.
     if (await reEmitTodayFromLatest(spId)) affected++;
   }
 

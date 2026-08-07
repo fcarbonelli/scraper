@@ -1256,7 +1256,8 @@ have no scrape jobs and write run-less snapshots, so they're **not** part of
 `coverage`/`gaps` and **never block publishing**. It reports, for the day the run
 covers: `pending_magazines` (magazines with items still awaiting review — these
 raise the review banner), `approved_today` (freshly approved magazine prices),
-`carried_today` (prices re-emitted by the daily carry-forward), `products_today`
+`carried_today` (legacy/operator re-emitted prices — magazine prices now publish
+only on their approval day, so this is normally 0), `products_today`
 (distinct magazine products present in today's export), and a `by_chain`
 breakdown (only chains with activity). Actual review happens via `/v1/revistas/*`.
 
@@ -1581,9 +1582,9 @@ Every magazine header also includes `series_key` (flyer series within the chain,
 e.g. `mm` / `gt` / `folder-resto` / `default`) and `superseded_by` /
 `superseded_at` (null while the issue is still current **for its series**). When
 a newer issue of the **same series** arrives, older magazines of that series get
-`superseded_by` set to the new magazine id — carry-forward of their approved
-prices stops until a human approves the new queue. Concurrent series
-(Makro MM vs GT, Vital Folder vs Nonfood) stay current independently.
+`superseded_by` set to the new magazine id, and mappings whose only approvals
+lived on them are paused. Concurrent series (Makro MM vs GT, Vital Folder vs
+Nonfood) stay current independently.
 
 ### `GET /v1/revistas/:magazineId`
 

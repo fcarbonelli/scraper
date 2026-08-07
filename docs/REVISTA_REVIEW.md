@@ -90,8 +90,8 @@ You    Open Daily Review → modal "nueva revista de Makro (8 productos)".
          • + Agregar producto   → AI missed one you can see → pick product + price
        Finish → magazine marked reviewed, drops out of "pending".
 
-       Approved prices are already live in the client export (run-less), and a
-       daily carry-forward re-emits them every day until the next issue.
+       Approved prices are live in the client export (run-less) for their
+       approval day only — there is no carry-forward to later days.
 ```
 
 ---
@@ -183,8 +183,8 @@ Drives the modal/badge. Magazines with unreviewed items.
 }
 ```
 
-`series_key` (e.g. `"mm"`, `"folder-resto"`, `"default"`) scopes supersede /
-carry-forward when a chain publishes several concurrent flyer series.
+`series_key` (e.g. `"mm"`, `"folder-resto"`, `"default"`) scopes supersede when
+a chain publishes several concurrent flyer series.
 
 ### `GET /v1/revistas/:magazineId`
 
@@ -316,10 +316,10 @@ effects + re-approve. See `examples/api/revista-update.json`. Errors: `400`,
 
 ### `DELETE /v1/revistas/items/:itemId`
 
-Undo an approval → item returns to `pending`. Deletes the approval snapshot +
-carry-forward chain (and today's revista row), pauses the mapping when no other
-approved item still points at it, and reopens a `reviewed` magazine to
-`in_review`. See `examples/api/revista-delete.json`.
+Undo an approval → item returns to `pending`. Deletes the approval snapshot (and
+any legacy carry-forward rows), pauses the mapping when no other approved item
+still points at it, and reopens a `reviewed` magazine to `in_review`. See
+`examples/api/revista-delete.json`.
 
 ### `GET /v1/revistas/ean-collisions`
 
@@ -591,7 +591,7 @@ show.
   `detail` (short summary / error text). See `examples/api/revista-checks.json`.
 - A row with `outcome: "error"` + a timeout `detail` means that site's probe is
   failing — surface it so an operator can flag it (it does **not** affect the
-  other chains or the carry-forward).
+  other chains).
 
 ---
 
@@ -613,63 +613,38 @@ show.
   down, and `promo_text` → `Promocion_1`. The frontend just sends what the
   reviewer confirms (`price` + optional `promo_price`/`promo_text`); the backend
   maps it onto the columns.
-- **Price persistence (carry‑forward).** A regular product gets a fresh snapshot
-  every day from the daily scrape, but a magazine product only gets one **when you
-  approve it**. So the backend runs a daily **carry‑forward** step
-  (`src/revistas/carryForward.ts`, in the orchestrator): it re‑emits each product
-  **approved on the current (non‑superseded) magazine** as a fresh **run-less**
-  snapshot dated today. Run-less = always client-visible, so it does **not**
-  depend on any daily run being published (a day left in `pending_review` would
-  otherwise hide it). That's why an approved magazine price keeps appearing in
-  the daily export/compare **every day until the next revista supersedes it**.
-  Revista chains are excluded from the scraper queue (they have no adapter).
-  **Frontend impact: none** — the data flows through the same snapshots the
-  export/compare/history already read.
+- **Price publishing (approval day only).** A regular product gets a fresh
+  snapshot every day from the daily scrape, but a magazine product only gets one
+  **when you approve it** — a single **run-less** snapshot dated the approval day.
+  Run-less = always client-visible, so it does **not** depend on any daily run
+  being published (a day left in `pending_review` would otherwise hide it). There
+  is **no carry-forward**: an approved magazine price appears in the export/compare
+  **only for its approval day**, not on later days. Revista chains are excluded
+  from the scraper queue (they have no adapter). **Frontend impact: none** — the
+  data flows through the same snapshots the export/compare/history already read.
   > **Supersede on new issue (per SERIES):** Makro/Vital publish several
   > concurrent flyer series (MM weekly, GT gastronomic, Folder, Nonfood, …).
   > Each magazine has a `series_key`. When the pipeline finishes ingesting
   > magazine **B**, only prior magazines **A of the same series** are marked
-  > `superseded_by = B` (`superseded_at` set). Concurrent series stay current
-  > and keep carrying. Carry-forward sources approvals on every current
-  > (non-superseded) magazine — one per series. A's prices for that series stop
-  > appearing in today's export until a human approves B's queue. Same-day:
-  > today's run-less revista snapshots for mappings approved on the superseded
-  > magazines of that series (and not yet on B) are purged (carry-forward runs
-  > *before* discovery in the orchestrator, so A may already have been carried
-  > that morning). **Mappings** whose only approvals lived on the superseded
-  > magazines (and that are not also approved on another CURRENT magazine of
-  > the chain) are **paused** (`is_active=false`) so `client_base` drops them
-  > immediately — not only via the snapshot purge. Approving on B reactivates
-  > the mapping. History on prior days is kept. Magazines expose `series_key`,
-  > `superseded_by` / `superseded_at` so the UI can show "Folleto superado"
-  > without date heuristics.
-  > **Reliability:** carry-forward runs **first and independently** of the AI
-  > magazine check in the orchestrator's daily cycle. Earlier it ran *after* the
-  > check, so a slow/hung discovery (Playwright, network) could block it and make
-  > magazine prices vanish the day after approval — that's fixed. The check
-  > itself is now timeout-guarded and each site's probe is logged.
+  > `superseded_by = B` (`superseded_at` set). **Mappings** whose only approvals
+  > lived on the superseded magazines (and that are not also approved on another
+  > CURRENT magazine of the chain) are **paused** (`is_active=false`) so
+  > `client_base` drops them. Approving on B reactivates the mapping. History on
+  > prior days is kept. Magazines expose `series_key`, `superseded_by` /
+  > `superseded_at` so the UI can show "Folleto superado" without date heuristics.
   > **Rosental silent republish:** Rosental reuses the same PubHTML5 URL across
   > quincenas; discovery hashes `config.js` (page file list). If they swap prices
   > *without* changing those page hashes, the issue looks "already known". Force
   > a reprocess with `npm run revistas:run -- --super=rosental --force` when you
   > know content changed but doctor still shows the same hash.
-  > **Operational note:** carry-forward still only fires when the **orchestrator**
-  > runs its daily cycle. If magazine prices stop appearing on new days, the
-  > orchestrator isn't running the current build — redeploy/restart it, or run
-  > `npm run revistas:run -- --carry-forward` to backfill today by hand (no AI
-  > cost). After deploying pause-on-supersede, also run
-  > `npm run revistas:reconcile -- --dry-run` once against prod to pause
-  > leftover mappings from flyers that were already superseded before this
-  > change existed; then drop `--dry-run` to apply.
 - **Idempotency.** Re‑approving/rejecting an already‑reviewed item returns
   `409 CONFLICT`. Re‑running the same unchanged magazine never creates a new one
-  (dedup by content hash), so the queue is stable. The carry‑forward step is
-  idempotent per day (skips a product that already has a snapshot dated today).
+  (dedup by content hash), so the queue is stable.
 - **One chain, many concurrent series.** A chain can publish several folletos at
   once (e.g. Makro MM + GT + Sponsor). Each becomes its own magazine row with a
-  distinct `series_key`. Supersede / carry-forward are per series, so a new MM
-  does not kill GT prices. Within one magazine, `page_number` and
-  `page_image_url` keep pages straight.
+  distinct `series_key`. Supersede is per series, so a new MM does not kill GT
+  prices. Within one magazine, `page_number` and `page_image_url` keep pages
+  straight.
 - **Skipping irrelevant series.** Discovery can ignore whole flyer series so we
   never download/render/vision them. Configure per chain in
   `supermarkets.config.revista.skipSeries` (e.g. `["gt"]` to ignore Makro's
