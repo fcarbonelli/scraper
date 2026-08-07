@@ -26,6 +26,7 @@ import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
 import { checkRevistaConfigHealth, checkStuckMagazines } from '../revistas/health.js';
+import { createRevistaIngestWorker } from '../revistas/ingestWorker.js';
 import { withTimeout } from '../revistas/pool.js';
 import { revistaConfig } from '../revistas/config.js';
 
@@ -215,10 +216,19 @@ async function main(): Promise<void> {
     FINALIZER_INTERVAL_MS,
   );
 
+  // 2b. Revista ingest worker — the panel's "Traer" button. It lives here and
+  // not in the worker process because rendering a flyer + running vision over
+  // it is what the 1G ceiling on THIS process was raised for, and here it
+  // doesn't share that heap with Playwright. See src/revistas/ingestWorker.ts.
+  const ingestWorker = createRevistaIngestWorker();
+
   // 3. Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'orchestrator shutting down');
     clearInterval(finalizerHandle);
+    // Close the worker first: it lets an ingest in flight finish its current
+    // step instead of leaving a magazine row stuck in 'processing'.
+    await ingestWorker.close();
     await closeAllQueues();
     process.exit(0);
   };

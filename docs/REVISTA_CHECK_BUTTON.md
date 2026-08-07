@@ -2,11 +2,13 @@
 
 > Compañero de [`REVISTA_REVIEW.md`](./REVISTA_REVIEW.md) (el modal de aprobación) y
 > de [`REVISTA_DEBUG.md`](./REVISTA_DEBUG.md) (la vista de análisis). **Este** doc
-> describe un botón que contesta una sola pregunta, en segundos y sin gastar un
-> peso de OpenAI:
+> describe dos botones que van juntos:
 >
-> _"¿Qué folletos hay hoy en cada cadena, y qué haría el chequeo automático si
-> corriera ahora?"_
+> 1. **Chequear** — contesta, en segundos y sin gastar un peso de OpenAI: _"¿Qué
+>    folletos hay hoy en cada cadena, y qué haría el chequeo automático si
+>    corriera ahora?"_
+> 2. **Traer** — trae los que faltan, desde la plataforma. Ese es el que gasta
+>    visión, y está descrito en la segunda mitad del doc.
 
 ---
 
@@ -190,11 +192,8 @@ que la guarda solo saltee y nunca procese de más.
 
 Dos cosas que el operador tiene:
 
-1. **Traerla a mano** — es lo único que fuerza el re-escaneo:
-   ```
-   npm run revistas:run -- --super=vital --force
-   ```
-   El botón nunca ingesta (ver abajo).
+1. **Traerla igual**, con el botón de Traer y `force: true` (ver más abajo). Es
+   lo único que fuerza el re-escaneo, y por eso pide confirmación.
 2. **La alerta automática.** Cuando la guarda saltea algo cuyo archivo se movió
    **más de 5%**, se abre un alerta `revista_review` de severidad `info` en el
    Daily Review, con el porcentaje y la URL — deduplicada por hash, así que
@@ -215,11 +214,158 @@ pasa a `ya_en_base`.
 
 ## Lo que este botón NO hace
 
-- **No ingesta.** Solo muestra. Traer un folleto sigue siendo
-  `npm run revistas:run -- --super=<id>`, que es donde está el costo de visión.
+- **No ingesta.** Solo muestra. Traer es el otro botón, el de acá abajo.
 - **No escribe en `revista_check_log`.** Esa tabla es el libro mayor de la
   corrida *automática* y es la señal con la que se diagnostica si el cron corrió.
-  Ensuciarla con clicks manuales rompería ese diagnóstico.
+  Ensuciarla con clicks manuales rompería ese diagnóstico. Vale igual para el
+  botón de Traer.
 - **No tiene rate limiting.** No existe middleware para eso en la API. Cada click
   son hasta 3 ráfagas concurrentes contra los sitios de los súper: barato, pero
   clickear en loop les pega. Si molesta, un cache en memoria de 30 s alcanza.
+
+---
+
+# Traer un folleto (el segundo botón)
+
+El chequeo contesta *qué falta*; esto lo trae, desde la plataforma y sin CLI.
+
+**Es asincrónico y no se puede hacer sincrónico.** Traer un folleto es
+descargarlo, renderizar cada página a imagen y leerlas con visión: minutos de
+trabajo y cientos de MB. El proceso de la API está capado en 300M — el mismo
+techo que del 28/07 al 03/08 mató al orchestrator 138 veces haciendo exactamente
+esto, en silencio. Así que el request encola un job y devuelve al toque; el
+trabajo corre en el orchestrator (1 G) y el panel pollea.
+
+## Encolar
+
+```
+POST /v1/revistas/ingest          X-API-Key: ...
+Content-Type: application/json
+
+{
+  "supermarket_id": "makro",
+  "candidates": [
+    { "hash": "bbeadb54cb79edee", "source_url": "https://…/Flyer-MM-AGO-1.pdf" }
+  ]
+}
+```
+
+- `candidates` sale tal cual de las filas del chequeo (`hash` y `source_url`).
+  Máximo 20. **Omitirlo trae todo lo que traería el chequeo automático** — el
+  equivalente a "traer los N".
+- `force` (opcional, ver abajo).
+
+Respuesta `201`:
+
+```json
+{ "jobId": "42", "supermarket_id": "makro", "requested": 1, "force": false, "status": "queued" }
+```
+
+**Se manda el `hash`, no la URL sola.** El job vuelve a descubrir en el sitio de
+la cadena y solo ingesta lo que ese sitio está sirviendo; si aceptara una URL
+suelta sería un "descargá y leé con visión lo que te mande". La `source_url` va
+como clave de respaldo: el hash de `html-pdf-links` incluye el `content-length`,
+y Vital re-sube el mismo archivo varias veces por día, así que el hash que viste
+en la tabla puede estar viejo diez minutos después mientras la URL sigue siendo
+la misma. Si no matchea ninguno de los dos, esa fila vuelve como `not_found`
+("ya no está en el sitio de la cadena — volvé a chequear"), no como error.
+
+## Pollear
+
+```
+GET /v1/revistas/ingest/:jobId
+GET /v1/revistas/ingest?status=active|all&limit=20
+```
+
+```ts
+interface IngestJob {
+  jobId: string;
+  supermarket_id: string;
+  force: boolean;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: {
+    total: number;
+    done: number;
+    processed: number;
+    skipped: number;
+    failed: number;
+    current: string | null;   // label del folleto que está leyendo AHORA
+  };
+  results: {
+    hash: string;
+    label: string;
+    series_key: string;
+    source_url: string;
+    status: 'processed' | 'skipped' | 'failed' | 'not_found';
+    reason: string;           // en español, listo para mostrar
+    magazine_id: string | null;
+    matched: number | null;   // productos con match, en 'processed'
+    pages: number | null;
+  }[];
+  failed_reason: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+```
+
+Pollear cada 3-5 s mientras `status` sea `queued` o `running`. `progress.current`
+es lo único que se mueve durante minutos: mostrarlo. Un folleto de 18 páginas
+tarda del orden de 3 minutos.
+
+`GET /v1/revistas/ingest` (sin id) existe para **re-enganchar después de un
+reload**: si el operador refresca el panel a mitad de una ingesta, la lista de
+jobs activos devuelve el `jobId` que estaba mirando.
+
+Cuando `status` es `completed`, la revista ya está en la cola de revisión: el
+link natural del `results[].magazine_id` es la vista de aprobación
+(`REVISTA_REVIEW.md`).
+
+## Qué mostrar por cada resultado
+
+| `status` | Qué pasó |
+|---|---|
+| `processed` | Entró. `matched` dice cuántos productos quedaron para aprobar — **`matched: 0` es normal y no es un error**: los folletos son de almacén y el catálogo es de limpieza. |
+| `skipped` | La guarda lo frenó (ya está en base, re-subida, serie filtrada). El `reason` dice cuál. |
+| `failed` | Falló el procesamiento; `reason` trae el detalle. La revista queda marcada `failed` y el chequeo la reintenta sola. |
+| `not_found` | Ya no está en el sitio. Volver a chequear. |
+
+## `force`
+
+```json
+{ "supermarket_id": "vital", "candidates": [ … ], "force": true }
+```
+
+Saltea la guarda: re-escanea aunque el folleto ya esté en base o parezca
+re-subida. Es lo único que recupera una **corrección de precios** publicada sobre
+la misma URL y el mismo período.
+
+**Pedir confirmación explícita antes de mandarlo.** Forzar re-escanea a costo
+completo de visión y supersedea lo que el operador ya curó: el 05/08 eso costó
+178 páginas de visión y 112 mappings caídos de la base del cliente. La
+confirmación tiene que decir eso, no un "¿estás seguro?".
+
+Ofrecerlo solo en filas `re_subida` / `ya_en_base`. En una fila `nuevo` o
+`nueva_edicion` no cambia nada y solo agrega riesgo.
+
+## Detalles de operación
+
+- **Un job por vez.** La cola corre con concurrencia 1: dos ingestas en paralelo
+  renderizando PDFs en el mismo proceso es cómo se llega al techo de memoria.
+  Encolar de a varias está bien; se procesan en fila.
+- **Doble click es inofensivo.** Las guardas se re-evalúan adentro del job, no al
+  encolar, así que el segundo termina en `skipped` con el motivo — nunca en dos
+  revistas iguales. Vale igual si el click cae justo mientras corre el chequeo
+  de las 6am.
+- **Sin `OPENAI_API_KEY` el job falla fuerte**, con `status: 'failed'` y el
+  motivo en `failed_reason`. A propósito: el chequeo automático en ese caso se
+  apaga en silencio, y esa es justamente la falla que estos botones existen para
+  mostrar.
+- Los jobs terminados se retienen **24 h** (los fallidos, 7 días). Después, un
+  `GET` con ese `jobId` devuelve 404: no es un error, es el historial que se
+  vació. El historial real de revistas está en `GET /v1/revistas`.
+- **Al deployar hay que reiniciar los DOS procesos**, no solo la API: la ruta
+  vive en `api` y quien hace el trabajo vive en `orchestrator`
+  (`npm run build && pm2 reload api orchestrator`). Si se reinicia solo la API,
+  cada `POST` devuelve un `jobId` que se queda en `queued` para siempre — sin
+  error, sin log, solo un spinner que no termina. La confirmación de que está
+  bien es la línea `revista ingest worker ready` en el log del orchestrator.
