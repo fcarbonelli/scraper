@@ -1814,6 +1814,49 @@ anything. Use it to show the operator the product name before they type a price.
 `found: false` means the EAN is in neither our products nor the client catalog —
 the UI should let the operator skip it. Errors: `400 INVALID_REQUEST` (bad EAN).
 
+### `GET /v1/in-store/catalog`
+
+The **whole** catalog in one response, so the field app can store it on the
+device and keep showing product names while offline. Read-only; never creates
+anything.
+
+Why it exists: `lookup` needs connectivity. Inside a wholesale store with no
+signal the worker could still enter a price, but only against a bare barcode —
+no way to confirm they scanned the right item. With the catalog cached locally
+the scan screen shows name and brand regardless of signal.
+
+No pagination, on purpose: it's meant to be stored whole (~238 rows, ~90 KB).
+
+```ts
+{
+  data: Array<{
+    product_id: string | null;   // null when it exists only in the catalog (not yet created)
+    ean: string;
+    name: string;
+    brand: string | null;
+    manufacturer: string | null;
+    category: string | null;
+    subcategory: string | null;
+    format: string | null;
+    variety: string | null;
+    image_url: string | null;
+    source: "products" | "catalog";
+  }>;                             // same item shape as lookup's `product`, sorted by ean
+  meta: { ts: string; total: number };
+}
+```
+
+Each row is exactly the `product` shape returned by `lookup`, so a client can
+reuse one type for both. Rows are sorted by `ean` — the order is stable so the
+`ETag` doesn't churn.
+
+**Revalidate with `ETag`.** The response carries a weak `ETag` over its body;
+send it back as `If-None-Match` and an unchanged catalog answers `304 Not
+Modified` with no payload. The catalog only moves when someone adds a
+`catalog_extra_eans` row, so refreshing on every app open is cheap.
+
+Fixture: [`examples/api/in-store-catalog.json`](examples/api/in-store-catalog.json).
+
 ### `POST /v1/in-store/visits`
 
 Start a PDV relevamiento. Captures the chain and the specific branch location.

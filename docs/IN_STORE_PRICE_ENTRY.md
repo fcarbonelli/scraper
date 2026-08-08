@@ -172,7 +172,8 @@ and show the saved counts (`X productos, Y fotos`).
 
 | Topic | Decision |
 |---|---|
-| **Barcode scanner** | Native `BarcodeDetector` on Android; **ZXing-WASM ponyfill** fallback on iOS (see §6). Responsive mobile web, no PWA for now. |
+| **Barcode scanner** | **ZXing-WASM ponyfill** en todos los navegadores (ver §6). |
+| **PWA** | **Sí, ya está** (era "no PWA for now"). Manifest + service worker acotados a `/instore`: sin eso la app ni siquiera abría sin señal y la cola de §7 nunca llegaba a correr. |
 | **Location per PDV** | Captured once when starting a visit (provincia / localidad / dirección). Prepopulate from the last visit to the same store. |
 | **Four fields** | Regular (unit) required; wholesale price, wholesale min-units, and observations optional. |
 | **Promotions** | Handled via **flyer photos** on the visit — not a per-product promo flag. |
@@ -186,19 +187,24 @@ and show the saved counts (`X productos, Y fotos`).
 
 ## 6. Barcode scanning (the key UX piece)
 
-**You do NOT need a PWA.** Camera access (`getUserMedia`) and barcode decoding both
-work in a plain mobile browser tab over HTTPS. A PWA would only add a home-screen
-icon / fullscreen — nice later, not required now.
+> **Corregido.** Este apartado decía "You do NOT need a PWA" y que el ponyfill usa
+> el `BarcodeDetector` nativo en Android. Las dos cosas eran falsas:
+>
+> 1. **Sí hace falta la PWA**, no por el ícono sino porque sin service worker la
+>    app no abre sin señal (ver §7 y §11).
+> 2. **`barcode-detector/ponyfill` usa ZXing SIEMPRE**, en todos los navegadores.
+>    El que hace feature-detect del nativo es el entry point `/polyfill`.
+>    Verificado en `node_modules`.
 
-Recommended approach — **one feature-detecting interface**:
+Se usa [`barcode-detector`](https://github.com/Sec-ant/barcode-detector) (ZXing-C++
+compilado a WASM), que expone la misma interfaz `BarcodeDetector` en todos lados.
 
-- **Android / Chrome:** the native `BarcodeDetector` API (fast, accurate, handles
-  angled codes). ~94% of Chrome installs support it.
-- **iOS Safari (no native support):** fall back to a WebAssembly decoder. Use the
-  [`barcode-detector`](https://github.com/Sec-ant/barcode-detector) ponyfill
-  (ZXing-C++ WASM under the hood) — it exposes the *same* `BarcodeDetector` API, so
-  your code calls one interface and the ponyfill uses native when present, WASM
-  otherwise.
+**El `.wasm` hay que auto-hostearlo.** `zxing-wasm` trae `locateFile` apuntado por
+defecto al CDN de jsDelivr (~1 MB). Sin señal no se puede bajar y el fallo es
+**mudo**: el `catch` del loop de detección se come la excepción y la cámara nunca
+pitea, sin ningún cartel. Se copia a `public/` en el build y se precachea en el
+service worker; el override se registra con `prepareZXingModule({ overrides:
+{ locateFile } })`.
 
 ```ts
 import { BarcodeDetector } from 'barcode-detector/ponyfill';
@@ -241,6 +247,11 @@ Physical wholesale stores frequently have bad signal. Don't lose a worker's scan
   `entry_id`).
 - The `lookup` call needs connectivity; if offline, allow submitting anyway with the
   raw EAN (the backend resolves it on upload) — show the EAN until it syncs.
+  **Mejorado:** con `GET /v1/in-store/catalog` bajado de antemano (§8), el escaneo
+  offline igual muestra nombre y marca; el EAN crudo queda sólo como último
+  recurso cuando el catálogo local todavía está vacío. Bajarlo **al abrir la app**
+  con señal, no al iniciar el relevamiento: el peor caso es alguien que instala la
+  app y se va derecho a la tienda.
 - **Start-visit and finish-visit** need connectivity. If offline at start, allow a
   provisional local visit and create it (POST /visits) as soon as you're online,
   then backfill `visit_id` on the queued entries. Photos should also queue.
@@ -269,6 +280,14 @@ Resolve a scan (read-only). →
   } | null }
 ```
 `found: false` → not in catalog → let the worker skip.
+
+### `GET /v1/in-store/catalog`
+El catálogo entero (~238 filas, ~90 KB) en una sola respuesta, para guardarlo en
+el dispositivo y poder mostrar nombre/marca al escanear **sin conexión**. Cada
+item tiene la misma forma que el `product` de `lookup`, ordenado por `ean`. Sin
+paginación a propósito. Trae `ETag`: mandalo como `If-None-Match` y si el
+catálogo no cambió responde `304` sin cuerpo, así refrescar en cada apertura de
+la app sale gratis.
 
 ### `POST /v1/in-store/visits`
 Start a PDV relevamiento. Body:
@@ -337,9 +356,12 @@ wholesale_min_units, note, entered_by, review_status, created_at }`.
 6. Visit list (from `GET /entries?visit_id=`), with the "ya cargado" guard.
 7. Finish-visit action (`POST /visits/:id/finish`) → clear active visit → back to
    start-visit. (Do **not** use the top-right Edit for this.)
-8. Offline queue + retry + pending indicator (entries, visit create, photos).
+8. Offline queue + retry + pending indicator (entries, visit create, photos, **finish**).
 9. Error/empty states: not-in-catalog skip, network errors, camera-permission denied.
-10. (Optional, later) PWA manifest + service worker for install/fullscreen.
+10. ~~(Optional, later)~~ **PWA manifest + service worker — hecho, y NO era opcional:
+    sin service worker la app no abre sin señal y nada de §7 llega a ejecutarse.**
+11. Catálogo bajado al abrir la app (`GET /catalog`), guardado en IndexedDB, para
+    ver nombre/marca al escanear offline.
 
 ---
 
