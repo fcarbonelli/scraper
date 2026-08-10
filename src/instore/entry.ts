@@ -40,12 +40,17 @@ export interface InStoreEntryInput {
   /** Required when there's no visitId. */
   supermarketId?: string;
   ean: string;
-  /** Precio Regular (unitario). */
-  price: number;
+  /** Precio Regular (unitario). Omit (with noPrice=true) when the price is unknown. */
+  price?: number | null;
   /** Precio con oferta (precio mayorista). */
   wholesalePrice?: number | null;
   /** A partir de cuántas unidades aplica el precio mayorista. */
   wholesaleMinUnits?: number | null;
+  /**
+   * "Sin precio / hay stock": the worker saw the product but couldn't read a
+   * price. Records a price-less entry that publishes as a marker on approval.
+   */
+  noPrice?: boolean;
   /** Worker name. Required when there's no visitId (else inherited from the visit). */
   enteredBy?: string;
   /** Observaciones. */
@@ -61,9 +66,11 @@ export interface InStoreEntryResult {
   ean: string;
   productId: string | null;
   productName: string | null;
-  price: number;
+  /** null for "sin precio" entries. */
+  price: number | null;
   wholesalePrice: number | null;
   wholesaleMinUnits: number | null;
+  noPrice: boolean;
   note: string | null;
   enteredBy: string;
   reviewStatus: string;
@@ -150,9 +157,12 @@ export async function ensureInStoreMapping(
 }
 
 interface SnapshotInput {
-  price: number;
+  /** null when noPrice is true. */
+  price: number | null;
   wholesalePrice: number | null;
   wholesaleMinUnits: number | null;
+  /** "Sin precio / hay stock" — write a price-less marker row. */
+  noPrice: boolean;
 }
 
 /**
@@ -161,6 +171,10 @@ interface SnapshotInput {
  * Price semantics keep the client_base export correct without touching the view:
  * `price` = regular unit price (→ Precio_Regular), `offer_price_1` = wholesale
  * price (→ Precio_c_Oferta_1), min-units → promo text (→ Promocion_1).
+ *
+ * "Sin precio" entries (noPrice) write a MARKER row exactly like the scraper's
+ * out_of_stock markers: status='no_price', price/offers all NULL, in_stock=true.
+ * The export shows the product with Estado="En stock sin precio" and no price.
  */
 export async function writeSnapshot(
   supermarketProductId: string,
@@ -174,8 +188,11 @@ export async function writeSnapshot(
     location: VisitLocation | null;
   },
 ): Promise<number> {
-  const wholesale = prices.wholesalePrice != null && prices.wholesalePrice > 0 ? prices.wholesalePrice : null;
-  const minUnits = prices.wholesaleMinUnits ?? null;
+  const wholesale =
+    !prices.noPrice && prices.wholesalePrice != null && prices.wholesalePrice > 0
+      ? prices.wholesalePrice
+      : null;
+  const minUnits = prices.noPrice ? null : prices.wholesaleMinUnits ?? null;
   const promoText = wholesalePromoText(wholesale, minUnits);
   const promotions = promoText
     ? [{ type: 'wholesale', description: promoText, min_units: minUnits }]
@@ -187,13 +204,13 @@ export async function writeSnapshot(
       supermarket_product_id: supermarketProductId,
       scrape_run_id: null,
       scraped_at: new Date().toISOString(),
-      price: prices.price,
+      price: prices.noPrice ? null : prices.price,
       list_price: null,
       offer_price_1: wholesale,
       in_stock: true,
       currency: 'ARS',
       tier_used: 'manual',
-      status: 'ok',
+      status: prices.noPrice ? 'no_price' : 'ok',
       promotions,
       promotion_1: promoText,
       raw_data: {
@@ -203,6 +220,7 @@ export async function writeSnapshot(
         api_key_id: meta.apiKeyId,
         note: meta.note,
         visit_id: meta.visitId,
+        no_price: prices.noPrice,
         wholesale_min_units: minUnits,
         provincia: meta.location?.provincia ?? null,
         localidad: meta.location?.localidad ?? null,
@@ -249,9 +267,11 @@ async function purgeSameDayInStoreSnapshots(supermarketProductId: string): Promi
 export interface MaterializeInput {
   supermarketId: string;
   ean: string;
-  price: number;
+  /** null when noPrice is true. */
+  price: number | null;
   wholesalePrice: number | null;
   wholesaleMinUnits: number | null;
+  noPrice: boolean;
   enteredBy: string;
   note: string | null;
   visitId: string | null;
@@ -279,7 +299,12 @@ export async function materializeInStoreEntry(input: MaterializeInput): Promise<
   await purgeSameDayInStoreSnapshots(spId);
   const snapshotId = await writeSnapshot(
     spId,
-    { price: input.price, wholesalePrice: input.wholesalePrice, wholesaleMinUnits: input.wholesaleMinUnits },
+    {
+      price: input.noPrice ? null : input.price,
+      wholesalePrice: input.wholesalePrice,
+      wholesaleMinUnits: input.wholesaleMinUnits,
+      noPrice: input.noPrice,
+    },
     {
       enteredBy: input.enteredBy,
       ean: input.ean,
@@ -343,9 +368,17 @@ export async function recordInStoreEntry(
     throw new InStoreError('not_found', `EAN ${input.ean} is not in the catalog`);
   }
 
+  // "Sin precio / hay stock": price-less marker. Otherwise a real price is
+  // required (validated at the route too, but guard here for direct callers).
+  const noPrice = input.noPrice === true;
+  if (!noPrice && (input.price == null || input.price <= 0)) {
+    throw new InStoreError('invalid', 'A positive price is required (or set no_price=true)');
+  }
+
+  const price = noPrice ? null : (input.price as number);
   const wholesalePrice =
-    input.wholesalePrice != null && input.wholesalePrice > 0 ? input.wholesalePrice : null;
-  const wholesaleMinUnits = input.wholesaleMinUnits ?? null;
+    !noPrice && input.wholesalePrice != null && input.wholesalePrice > 0 ? input.wholesalePrice : null;
+  const wholesaleMinUnits = noPrice ? null : input.wholesaleMinUnits ?? null;
   const promoText = wholesalePromoText(wholesalePrice, wholesaleMinUnits);
 
   const entryInsert = await db
@@ -356,7 +389,8 @@ export async function recordInStoreEntry(
       ean: input.ean,
       product_id: resolved.productId,
       product_name: resolved.name,
-      price: input.price,
+      price,
+      no_price: noPrice,
       list_price: null,
       promo_price: wholesalePrice,
       promo_min_units: wholesaleMinUnits,
@@ -371,7 +405,7 @@ export async function recordInStoreEntry(
   if (entryInsert.error) throw entryInsert.error;
 
   logger.info(
-    { visitId: input.visitId ?? null, supermarketId: ctx.supermarketId, ean: input.ean, enteredBy: ctx.enteredBy },
+    { visitId: input.visitId ?? null, supermarketId: ctx.supermarketId, ean: input.ean, enteredBy: ctx.enteredBy, noPrice },
     'instore: pending price entry recorded',
   );
 
@@ -382,9 +416,10 @@ export async function recordInStoreEntry(
     ean: input.ean,
     productId: resolved.productId,
     productName: resolved.name,
-    price: input.price,
+    price,
     wholesalePrice,
     wholesaleMinUnits,
+    noPrice,
     note: input.note ?? null,
     enteredBy: ctx.enteredBy,
     reviewStatus: entryInsert.data.review_status as string,
@@ -394,12 +429,14 @@ export async function recordInStoreEntry(
 
 /** Editable fields on a saved entry. Any omitted field is left unchanged. */
 export interface UpdateEntryInput {
-  /** Precio Regular (unitario). */
+  /** Precio Regular (unitario). Providing a price clears the no_price flag. */
   price?: number;
   /** Precio con oferta (precio mayorista). null clears it. */
   wholesalePrice?: number | null;
   /** A partir de cuántas unidades aplica el precio mayorista. null clears it. */
   wholesaleMinUnits?: number | null;
+  /** "Sin precio / hay stock". Setting true clears the price + wholesale fields. */
+  noPrice?: boolean;
   /** Observaciones. null clears it. */
   note?: string | null;
 }
@@ -411,7 +448,8 @@ interface EntryRow {
   ean: string;
   product_id: string | null;
   product_name: string | null;
-  price: number;
+  price: number | null;
+  no_price: boolean;
   promo_price: number | null;
   promo_min_units: number | null;
   note: string | null;
@@ -435,7 +473,7 @@ export async function updatePendingEntry(
   const { data, error } = await db
     .from('instore_price_entries')
     .select(
-      'id, visit_id, supermarket_id, ean, product_id, product_name, price, promo_price, promo_min_units, note, entered_by, review_status, created_at',
+      'id, visit_id, supermarket_id, ean, product_id, product_name, price, no_price, promo_price, promo_min_units, note, entered_by, review_status, created_at',
     )
     .eq('id', entryId)
     .maybeSingle();
@@ -446,22 +484,42 @@ export async function updatePendingEntry(
     throw new InStoreError('invalid', `Cannot edit a ${entry.review_status} entry`);
   }
 
-  const price = patch.price ?? entry.price;
-  const wholesalePrice =
-    patch.wholesalePrice !== undefined
-      ? patch.wholesalePrice != null && patch.wholesalePrice > 0
-        ? patch.wholesalePrice
-        : null
-      : entry.promo_price;
-  const wholesaleMinUnits =
-    patch.wholesaleMinUnits !== undefined ? patch.wholesaleMinUnits : entry.promo_min_units;
+  // Resolve the target no_price state: explicit flag wins; else providing a
+  // price implies a real price (clears no_price); else keep as-is.
+  const noPrice =
+    patch.noPrice !== undefined ? patch.noPrice : patch.price !== undefined ? false : entry.no_price;
+
   const note = patch.note !== undefined ? patch.note : entry.note;
+
+  let price: number | null;
+  let wholesalePrice: number | null;
+  let wholesaleMinUnits: number | null;
+  if (noPrice) {
+    // Marker entry — no price/wholesale.
+    price = null;
+    wholesalePrice = null;
+    wholesaleMinUnits = null;
+  } else {
+    price = patch.price ?? entry.price;
+    if (price == null || price <= 0) {
+      throw new InStoreError('invalid', 'A positive price is required (or set no_price=true)');
+    }
+    wholesalePrice =
+      patch.wholesalePrice !== undefined
+        ? patch.wholesalePrice != null && patch.wholesalePrice > 0
+          ? patch.wholesalePrice
+          : null
+        : entry.promo_price;
+    wholesaleMinUnits =
+      patch.wholesaleMinUnits !== undefined ? patch.wholesaleMinUnits : entry.promo_min_units;
+  }
   const promoText = wholesalePromoText(wholesalePrice, wholesaleMinUnits);
 
   const upd = await db
     .from('instore_price_entries')
     .update({
       price,
+      no_price: noPrice,
       promo_price: wholesalePrice,
       promo_min_units: wholesaleMinUnits,
       promo_text: promoText,
@@ -472,7 +530,7 @@ export async function updatePendingEntry(
     .single();
   if (upd.error) throw upd.error;
 
-  logger.info({ entryId, visitId: entry.visit_id }, 'instore: pending entry updated');
+  logger.info({ entryId, visitId: entry.visit_id, noPrice }, 'instore: pending entry updated');
 
   return {
     entryId: entry.id,
@@ -484,6 +542,7 @@ export async function updatePendingEntry(
     price,
     wholesalePrice,
     wholesaleMinUnits,
+    noPrice,
     note,
     enteredBy: entry.entered_by,
     reviewStatus: upd.data.review_status as string,

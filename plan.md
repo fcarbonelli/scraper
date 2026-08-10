@@ -129,9 +129,10 @@ CREATE INDEX ON price_snapshots (supermarket_product_id, scraped_at DESC);
 -- twin `client_base_preview` in 020 — same columns minus the publish gate,
 -- powering GET /v1/data/export?preview=true; EAN-required guard in 021 — both
 -- views drop EAN-less products so no blank-EAN row ever reaches export/API;
--- Spanish `Estado` labels in 022 — the internal status code is translated at the
--- view layer only, DB values stay English: ok→Disponible, out_of_stock→Sin stock,
--- not_found→No encontrado, delisted→Discontinuado) maps these
+-- Spanish `Estado` labels in 022, extended in 024 — the internal status code is
+-- translated at the view layer only, DB values stay English: ok→Disponible,
+-- out_of_stock→Sin stock, not_found→No encontrado, delisted→Discontinuado,
+-- no_price→En stock sin precio (in-store "sin precio" marker)) maps these
 -- to the client's columns: Precio_Regular = COALESCE(list_price, price),
 -- Precio_c_Oferta_1 = the sale price when marked down, and Descuento_Unitario =
 -- max(named-promo discount, markdown gap). Do NOT change `price` to mean the
@@ -364,7 +365,8 @@ instore_price_entries (
   product_name                      text           -- display name captured at scan (migration 019)
   resulting_supermarket_product_id  uuid FK        -- set on approval
   resulting_snapshot_id             bigint         -- set on approval
-  price                             numeric(12,2)  -- Precio Regular (unitario)
+  price                             numeric(12,2)  -- Precio Regular (unitario); NULL when no_price (migration 024)
+  no_price                          boolean        -- "sin precio / hay stock" — publishes a no_price marker (migration 024)
   list_price                        numeric(12,2)  -- legacy; unused by the new flow
   promo_price                       numeric(12,2)  -- Precio con oferta (precio mayorista)
   promo_min_units                   integer        -- a partir de cuántas u. es mayorista (mig 010)
@@ -875,6 +877,11 @@ Decisions locked in:
   and a back-office operator approves each finished visit (`src/instore/review.ts`,
   per-visit with inline edits) to materialize the snapshots — so nothing reaches the client
   base until reviewed. Review endpoints (`/v1/in-store/review/*`) require a full-access key.
+  **Migration 024** adds a **"sin precio / hay stock"** path (`instore_price_entries.no_price`,
+  nullable `price`): when a worker sees the product but can't read the price, they flag it
+  instead of typing a fake $1/$0. On approval it writes a MARKER snapshot
+  (`status='no_price'`, price NULL) so the export shows `Estado='En stock sin precio'` with
+  blank prices — same pattern as the scraper's out_of_stock markers.
   Frontend contract: `docs/IN_STORE_PRICE_ENTRY.md`.
 
 ---

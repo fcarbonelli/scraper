@@ -32,6 +32,10 @@ fixtures in [`examples/api/`](../examples/api/) (`in-store-*.json`).
   visits. **The frontend does nothing for this.**
 - The worker **never picks a date.** The server stamps every entry with the current
   time. There is no date field anywhere in the UI.
+- If the product is on the shelf but the **price is unreadable**, the worker records
+  it with **"Sin precio / hay stock"** (`no_price`) instead of a fake $1/$0. On
+  approval it publishes as a **marker** (`Estado = "En stock sin precio"`, price
+  columns blank) — the client sees the product is stocked, price unknown.
 - A **visit** groups the work: one worker at one **store branch** on one occasion.
   It holds the branch **location** (address / locality / province — a chain has
   many branches) and owns the product entries and flyer photos taken there.
@@ -128,8 +132,18 @@ back to scanner**, minimal taps.
    other three are optional (the wholesale price + min-units usually travel
    together). `POST /v1/in-store/entries` with `{ visit_id, ean, price,
    wholesale_price?, wholesale_min_units?, note? }`.
-5. On success: toast `✓ Guardado (#N)`, bump the counter, return to live scanner.
-6. **If not found** (`found: false`) → `No está en el catálogo` + one-tap **Omitir**.
+5. **"Sin precio / hay stock" button.** When the worker sees the product on the
+   shelf but can't read its price, they tap this instead of typing a fake $1/$0.
+   It submits `POST /v1/in-store/entries` with `{ visit_id, ean, no_price: true }`
+   (**no** `price` — sending both is a `400`). The product still gets recorded and,
+   on approval, appears in the client export as a **marker**: `Estado = "En stock
+   sin precio"` with the price columns blank. This keeps garbage prices out of the
+   data and means the reviewer doesn't have to second-guess a suspicious $1.
+   Style it as a secondary action next to **Guardar** (e.g. `Sin precio`), and skip
+   the price fields entirely when it's used.
+6. On success (either path): toast `✓ Guardado (#N)` — for a no-price entry show
+   `✓ Sin precio (#N)` — bump the counter, return to live scanner.
+7. **If not found** (`found: false`) → `No está en el catálogo` + one-tap **Omitir**.
 
 Header (persistent): store + location chip · worker name · counter
 (`N cargados en este PDV`).
@@ -154,11 +168,14 @@ photos`). PNG/JPEG/WebP/GIF up to 15 MB.
 A collapsible list of everything uploaded **in the active visit** (or today for the
 store) from `GET /v1/in-store/entries?visit_id=` (or default = today). Each row:
 product name, regular price, wholesale price + min-units (if any), observations,
-time, and `review_status`.
+time, and `review_status`. When `no_price` is `true`, show a `Sin precio` chip
+instead of a price (the `price` field is `null`).
 
 **Editing a saved entry.** Each still-`pending` row is editable in place: tap it,
 change the price / wholesale / min-units / observaciones, and save with
 `PATCH /v1/in-store/entries/:id`. It persists immediately — **no approval needed**.
+You can also fix a no-price case here: send `no_price: true` to flag one, or send a
+`price` to convert a `Sin precio` row into a real price (that clears the flag).
 This is the fix-a-mistake flow the client asked for (don't require re-scanning or
 re-approving). Once an entry is `approved` the PATCH returns `400`, so hide/disable
 edit for non-pending rows (in practice everything the field worker sees is
@@ -184,6 +201,7 @@ and show the saved counts (`X productos, Y fotos`).
 | **PWA** | **Sí, ya está** (era "no PWA for now"). Manifest + service worker acotados a `/instore`: sin eso la app ni siquiera abría sin señal y la cola de §7 nunca llegaba a correr. |
 | **Location per PDV** | Captured once when starting a visit (provincia / localidad / dirección). Prepopulate from the last visit to the same store. |
 | **Four fields** | Regular (unit) required; wholesale price, wholesale min-units, and observations optional. |
+| **Price unreadable** | A **"Sin precio / hay stock"** action (`no_price: true`, no price) instead of a fake $1/$0. Publishes as a marker (`Estado = "En stock sin precio"`, price blank), so no garbage prices and nothing to second-guess in review. |
 | **Promotions** | Handled via **flyer photos** on the visit — not a per-product promo flag. |
 | **Finish visit** | Explicit "Finalizar relevamiento" saves & exits; not the top-right Edit. |
 | **Duplicate scan same day** | **Warn and update.** If the product is already in the visit list, show `Ya cargaste este — ¿actualizar?` and let them re-submit (new snapshot). Don't silently double-log; don't hard-block. |
@@ -331,32 +349,36 @@ Submit one price. Body:
   visit_id: string;          // preferred — inherits store/worker/location
   // ...or, without a visit: supermarket_id + entered_by
   ean: string;               // required, 8–14 digits
-  price: number;             // required, > 0 — Precio Regular (unitario)
+  price?: number;            // > 0 — Precio Regular (unitario); omit when no_price
   wholesale_price?: number|null;      // Precio con oferta (precio mayorista)
   wholesale_min_units?: number|null;  // Promoción: min units for the wholesale price
+  no_price?: boolean;                 // "Sin precio / hay stock" (omit price)
   note?: string|null;                 // Observaciones
 }
 ```
-→ **201** `{ entry_id, visit_id, supermarket_id, ean, product_id, product_name,
-price, wholesale_price, wholesale_min_units, note, entered_by, review_status,
-created_at }`. **No snapshot yet** — the entry is `pending` until approved (§10).
-Errors: `400` (bad body / chain not enabled / finished visit), `404` (unknown
-store/visit / EAN not in catalog).
+Provide **either** `price` **or** `no_price: true` (not both). → **201** `{ entry_id,
+visit_id, supermarket_id, ean, product_id, product_name, price, wholesale_price,
+wholesale_min_units, no_price, note, entered_by, review_status, created_at }`
+(`price` is `null` for a no-price entry). **No snapshot yet** — the entry is
+`pending` until approved (§10). Errors: `400` (bad body / missing price without
+`no_price` / chain not enabled / finished visit), `404` (unknown store/visit / EAN
+not in catalog).
 
 ### `PATCH /v1/in-store/entries/:id`
-Edit a saved **pending** entry (fix price / units / observaciones); saves without
-approval. Body (≥1 field; omitted = unchanged, `null` clears):
+Edit a saved **pending** entry (fix price / units / observaciones / no_price); saves
+without approval. Body (≥1 field; omitted = unchanged, `null` clears):
 ```ts
-{ price?: number; wholesale_price?: number|null; wholesale_min_units?: number|null; note?: string|null }
+{ price?: number; wholesale_price?: number|null; wholesale_min_units?: number|null; no_price?: boolean; note?: string|null }
 ```
-→ **200** with the updated entry (same shape as the `POST /entries` 201 body).
-`404` unknown entry; `400` empty body or entry already approved/rejected.
+Sending `no_price: true` clears the price/wholesale; sending a `price` clears
+`no_price`. → **200** with the updated entry (same shape as the `POST /entries` 201
+body). `404` unknown entry; `400` empty body or entry already approved/rejected.
 
 ### `GET /v1/in-store/entries?visit_id=&date=&supermarket_id=&entered_by=&review_status=&page=&limit=`
 Recent submissions (defaults to today, Buenos Aires; `date` is ignored when
 `visit_id` is set). Paginated. Item: `{ id, visit_id, supermarket_id,
 supermarket_name, ean, product_id, product_name, brand, price, wholesale_price,
-wholesale_min_units, note, entered_by, review_status, created_at }`.
+wholesale_min_units, no_price, note, entered_by, review_status, created_at }`.
 
 ---
 
@@ -397,8 +419,9 @@ Flow:
    and `pending_entries` count. Filter by `supermarket_id`.
 2. **Review a visit** — `GET /v1/in-store/review/visits/:id` returns the visit +
    all its entries (with `product_name`, `brand`, `image_url`, the four price
-   fields, and `review_status`). Show the flyer photos too via
-   `GET /v1/in-store/visits/:id/photos`.
+   fields, `no_price`, and `review_status`). Entries with `no_price: true` show a
+   `Sin precio` chip (no price to check — they publish as an "En stock sin precio"
+   marker). Show the flyer photos too via `GET /v1/in-store/visits/:id/photos`.
 3. **Approve** — `POST /v1/in-store/review/visits/:id/approve`:
    ```ts
    {
@@ -406,9 +429,10 @@ Flow:
      decisions?: {          // omit an entry → approved as-is; omit all → approve everything
        entry_id: string;
        action: 'approve' | 'reject';
-       price?: number;                    // inline edits, on approve
+       price?: number;                    // inline edits, on approve; clears no_price
        wholesale_price?: number | null;
        wholesale_min_units?: number | null;
+       no_price?: boolean;                // flip to/from "sin precio" during review
        note?: string | null;
      }[];
    }

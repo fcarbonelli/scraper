@@ -1947,12 +1947,18 @@ store/worker/location are inherited from it. (For one-off use you may instead pa
 | `supermarket_id` | string | yes* | Chain — only if no `visit_id` |
 | `entered_by` | string (1–120) | yes* | Worker name — only if no `visit_id` |
 | `ean` | string (8–14 digits) | yes | Scanned barcode |
-| `price` | number > 0 | yes | **Precio Regular (unitario)** |
+| `price` | number > 0 | yes* | **Precio Regular (unitario)** — omit when `no_price` |
 | `wholesale_price` | number > 0 \| null | no | **Precio con oferta (precio mayorista)** |
 | `wholesale_min_units` | int > 0 \| null | no | **Promoción**: min units for the wholesale price |
+| `no_price` | boolean | no | **"Sin precio / hay stock"** — product seen but price unreadable |
 | `note` | string \| null | no | **Observaciones** |
 
 \* Provide **either** `visit_id`, **or** both `supermarket_id` and `entered_by`.
+Also provide **either** `price` (a positive number) **or** `no_price: true` — not
+both. Use `no_price: true` when the worker sees the product in stock but can't read
+the price (instead of typing a fake $1/$0). Such entries carry no price/wholesale
+and publish as a **marker** on approval: `Estado = "En stock sin precio"` with the
+price columns blank (same idea as the scraper's out-of-stock rows).
 
 Price mapping into the export: `price` → **Precio_Regular**, `wholesale_price` →
 **Precio_c_Oferta_1**, and `wholesale_min_units` becomes the **Promocion_1** text
@@ -1968,9 +1974,10 @@ Price mapping into the export: `price` → **Precio_Regular**, `wholesale_price`
   ean: string;
   product_id: string | null;            // null when the EAN is catalog-only (created on approval)
   product_name: string | null;          // captured for the review screen
-  price: number;                        // Precio Regular (unitario)
+  price: number | null;                 // Precio Regular (unitario); null when no_price
   wholesale_price: number | null;       // Precio con oferta (mayorista)
   wholesale_min_units: number | null;   // min units for the wholesale price
+  no_price: boolean;                    // "Sin precio / hay stock"
   note: string | null;                  // Observaciones
   entered_by: string;
   review_status: "pending";
@@ -1978,8 +1985,9 @@ Price mapping into the export: `price` → **Precio_Regular**, `wholesale_price`
 }
 ```
 
-Errors: `400 INVALID_REQUEST` (bad body, chain not enabled, or finished visit),
-`404 NOT_FOUND` (unknown store/visit, or EAN not in catalog).
+Errors: `400 INVALID_REQUEST` (bad body, chain not enabled, finished visit, or
+missing price without `no_price`), `404 NOT_FOUND` (unknown store/visit, or EAN not
+in catalog).
 
 ### `PATCH /v1/in-store/entries/:id`
 
@@ -1990,9 +1998,10 @@ and `null` clears an optional field.
 
 | Field | Type | Description |
 |---|---|---|
-| `price` | number > 0 | Precio Regular (unitario) |
+| `price` | number > 0 | Precio Regular (unitario) — also clears `no_price` |
 | `wholesale_price` | number > 0 \| null | Precio con oferta (mayorista) |
 | `wholesale_min_units` | int > 0 \| null | Min units for the wholesale price |
+| `no_price` | boolean | Toggle "Sin precio / hay stock" (true clears price + wholesale) |
 | `note` | string \| null | Observaciones |
 
 Returns the updated entry (same shape as the `POST /entries` **201** body). Errors:
@@ -2025,9 +2034,10 @@ Each item:
   product_id: string | null;
   product_name: string | null;
   brand: string | null;
-  price: number;                        // Precio Regular (unitario)
+  price: number | null;                 // Precio Regular (unitario); null when no_price
   wholesale_price: number | null;       // Precio con oferta (mayorista)
   wholesale_min_units: number | null;   // min units for the wholesale price
+  no_price: boolean;                    // "Sin precio / hay stock"
   note: string | null;                  // Observaciones
   entered_by: string;
   review_status: "pending" | "approved" | "rejected";
@@ -2056,7 +2066,8 @@ One visit + all its entries, for the review screen:
   entries: {
     id: string; ean: string; product_id: string | null;
     product_name: string | null; brand: string | null; image_url: string | null;
-    price: number; wholesale_price: number | null; wholesale_min_units: number | null;
+    price: number | null; wholesale_price: number | null; wholesale_min_units: number | null;
+    no_price: boolean;                  // "En stock sin precio" — publishes as a marker
     note: string | null; review_status: string; created_at: string;
   }[];
 }
@@ -2075,9 +2086,10 @@ snapshot (reaches the client base); rejecting discards it. Marks the visit
   decisions?: {
     entry_id: string;
     action: "approve" | "reject";
-    price?: number;                     // inline edits (approve only)
+    price?: number;                     // inline edits (approve only); clears no_price
     wholesale_price?: number | null;
     wholesale_min_units?: number | null;
+    no_price?: boolean;                 // flip to/from "sin precio" during review
     note?: string | null;
   }[];
 }

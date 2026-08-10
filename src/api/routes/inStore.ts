@@ -374,18 +374,23 @@ const EntryBody = z
     visit_id: z.string().uuid().optional(),
     supermarket_id: z.string().trim().min(1).optional(),
     ean: z.string().trim().regex(/^\d{8,14}$/, 'EAN must be 8–14 digits'),
-    // Precio Regular (unitario)
-    price: z.number().positive(),
+    // Precio Regular (unitario). Omit when no_price=true.
+    price: z.number().positive().optional(),
     // Precio con oferta (precio mayorista)
     wholesale_price: z.number().positive().nullable().optional(),
     // A partir de cuántas unidades es precio mayorista
     wholesale_min_units: z.number().int().positive().nullable().optional(),
+    // "Sin precio / hay stock": product seen but price unreadable.
+    no_price: z.boolean().optional(),
     entered_by: z.string().trim().min(1).max(120).optional(),
     // Observaciones
     note: z.string().trim().max(1000).nullable().optional(),
   })
   .refine((b) => b.visit_id != null || (b.supermarket_id != null && b.entered_by != null), {
     message: 'Provide visit_id, or both supermarket_id and entered_by',
+  })
+  .refine((b) => (b.no_price === true) !== (b.price !== undefined), {
+    message: 'Provide a price, or set no_price=true (not both)',
   });
 
 inStoreRouter.post('/entries', async (req: Request, res: Response) => {
@@ -395,9 +400,10 @@ inStoreRouter.post('/entries', async (req: Request, res: Response) => {
       visitId: body.visit_id ?? null,
       supermarketId: body.supermarket_id,
       ean: body.ean,
-      price: body.price,
+      price: body.price ?? null,
       wholesalePrice: body.wholesale_price ?? null,
       wholesaleMinUnits: body.wholesale_min_units ?? null,
+      noPrice: body.no_price ?? false,
       enteredBy: body.entered_by,
       note: body.note ?? null,
       apiKeyId: req.apiKey?.id ?? null,
@@ -413,6 +419,7 @@ inStoreRouter.post('/entries', async (req: Request, res: Response) => {
         price: result.price,
         wholesale_price: result.wholesalePrice,
         wholesale_min_units: result.wholesaleMinUnits,
+        no_price: result.noPrice,
         note: result.note,
         entered_by: result.enteredBy,
         review_status: result.reviewStatus,
@@ -436,6 +443,8 @@ const UpdateEntryBody = z
     price: z.number().positive().optional(),
     wholesale_price: z.number().positive().nullable().optional(),
     wholesale_min_units: z.number().int().positive().nullable().optional(),
+    // Toggle "sin precio / hay stock" on a saved entry.
+    no_price: z.boolean().optional(),
     note: z.string().trim().max(1000).nullable().optional(),
   })
   .refine(
@@ -443,6 +452,7 @@ const UpdateEntryBody = z
       b.price !== undefined ||
       b.wholesale_price !== undefined ||
       b.wholesale_min_units !== undefined ||
+      b.no_price !== undefined ||
       b.note !== undefined,
     { message: 'At least one field is required' },
   );
@@ -455,6 +465,7 @@ inStoreRouter.patch('/entries/:id', async (req: Request, res: Response) => {
       price: body.price,
       wholesalePrice: body.wholesale_price,
       wholesaleMinUnits: body.wholesale_min_units,
+      noPrice: body.no_price,
       note: body.note,
     });
     res.json(
@@ -468,6 +479,7 @@ inStoreRouter.patch('/entries/:id', async (req: Request, res: Response) => {
         price: result.price,
         wholesale_price: result.wholesalePrice,
         wholesale_min_units: result.wholesaleMinUnits,
+        no_price: result.noPrice,
         note: result.note,
         entered_by: result.enteredBy,
         review_status: result.reviewStatus,
@@ -497,7 +509,8 @@ interface EntryRow {
   ean: string;
   product_id: string | null;
   product_name: string | null;
-  price: number;
+  price: number | null;
+  no_price: boolean;
   promo_price: number | null;
   promo_min_units: number | null;
   note: string | null;
@@ -517,7 +530,7 @@ inStoreRouter.get('/entries', async (req: Request, res: Response) => {
   let query = db
     .from('instore_price_entries')
     .select(
-      'id, visit_id, supermarket_id, ean, product_id, product_name, price, promo_price, promo_min_units, note, entered_by, review_status, created_at, products(name, brand), supermarkets(name, cadena_display_name)',
+      'id, visit_id, supermarket_id, ean, product_id, product_name, price, no_price, promo_price, promo_min_units, note, entered_by, review_status, created_at, products(name, brand), supermarkets(name, cadena_display_name)',
       { count: 'exact' },
     )
     .order('created_at', { ascending: false })
@@ -550,6 +563,7 @@ inStoreRouter.get('/entries', async (req: Request, res: Response) => {
     price: row.price,
     wholesale_price: row.promo_price,
     wholesale_min_units: row.promo_min_units,
+    no_price: row.no_price,
     note: row.note,
     entered_by: row.entered_by,
     review_status: row.review_status,
@@ -648,7 +662,8 @@ interface ReviewEntryRow {
   ean: string;
   product_id: string | null;
   product_name: string | null;
-  price: number;
+  price: number | null;
+  no_price: boolean;
   promo_price: number | null;
   promo_min_units: number | null;
   note: string | null;
@@ -666,7 +681,7 @@ inStoreRouter.get('/review/visits/:id', async (req: Request, res: Response) => {
   const entriesRes = await db
     .from('instore_price_entries')
     .select(
-      'id, ean, product_id, product_name, price, promo_price, promo_min_units, note, review_status, created_at, products(name, brand, metadata)',
+      'id, ean, product_id, product_name, price, no_price, promo_price, promo_min_units, note, review_status, created_at, products(name, brand, metadata)',
       { count: 'exact' },
     )
     .eq('visit_id', id)
@@ -683,6 +698,7 @@ inStoreRouter.get('/review/visits/:id', async (req: Request, res: Response) => {
     price: e.price,
     wholesale_price: e.promo_price,
     wholesale_min_units: e.promo_min_units,
+    no_price: e.no_price,
     note: e.note,
     review_status: e.review_status,
     created_at: e.created_at,
@@ -702,6 +718,7 @@ const ApproveBody = z.object({
         price: z.number().positive().optional(),
         wholesale_price: z.number().positive().nullable().optional(),
         wholesale_min_units: z.number().int().positive().nullable().optional(),
+        no_price: z.boolean().optional(),
         note: z.string().trim().max(1000).nullable().optional(),
       }),
     )
@@ -719,6 +736,7 @@ inStoreRouter.post('/review/visits/:id/approve', async (req: Request, res: Respo
     price: d.price,
     wholesalePrice: d.wholesale_price,
     wholesaleMinUnits: d.wholesale_min_units,
+    noPrice: d.no_price,
     note: d.note,
   }));
 

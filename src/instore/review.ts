@@ -28,6 +28,8 @@ export interface ReviewDecision {
   price?: number;
   wholesalePrice?: number | null;
   wholesaleMinUnits?: number | null;
+  /** Flip the entry to/from "sin precio" during review. */
+  noPrice?: boolean;
   note?: string | null;
 }
 
@@ -61,7 +63,8 @@ interface VisitRow {
 interface PendingEntryRow {
   id: string;
   ean: string;
-  price: number;
+  price: number | null;
+  no_price: boolean;
   promo_price: number | null;
   promo_min_units: number | null;
   note: string | null;
@@ -96,7 +99,7 @@ export async function approveVisit(
 
   const entriesRes = await db
     .from('instore_price_entries')
-    .select('id, ean, price, promo_price, promo_min_units, note, api_key_id')
+    .select('id, ean, price, no_price, promo_price, promo_min_units, note, api_key_id')
     .eq('visit_id', visitId)
     .eq('review_status', 'pending');
   if (entriesRes.error) throw entriesRes.error;
@@ -125,14 +128,38 @@ export async function approveVisit(
     }
 
     // Approve — apply any inline edits, else keep the entered values.
-    const price = decision?.price ?? entry.price;
-    const wholesalePrice =
-      decision && decision.wholesalePrice !== undefined ? decision.wholesalePrice : entry.promo_price;
-    const wholesaleMinUnits =
-      decision && decision.wholesaleMinUnits !== undefined
-        ? decision.wholesaleMinUnits
-        : entry.promo_min_units;
+    // Resolve no_price: explicit flag wins; else a provided price implies a
+    // real price; else keep the entered state.
     const note = decision && decision.note !== undefined ? decision.note : entry.note;
+    const noPrice =
+      decision?.noPrice !== undefined
+        ? decision.noPrice
+        : decision?.price !== undefined
+          ? false
+          : entry.no_price;
+
+    let price: number | null;
+    let wholesalePrice: number | null;
+    let wholesaleMinUnits: number | null;
+    if (noPrice) {
+      price = null;
+      wholesalePrice = null;
+      wholesaleMinUnits = null;
+    } else {
+      price = decision?.price ?? entry.price;
+      if (price == null || price <= 0) {
+        throw new InStoreError(
+          'invalid',
+          `Entry ${entry.id} has no price — set a price or mark it no_price`,
+        );
+      }
+      wholesalePrice =
+        decision && decision.wholesalePrice !== undefined ? decision.wholesalePrice : entry.promo_price;
+      wholesaleMinUnits =
+        decision && decision.wholesaleMinUnits !== undefined
+          ? decision.wholesaleMinUnits
+          : entry.promo_min_units;
+    }
 
     const mat = await materializeInStoreEntry({
       supermarketId: visit.supermarket_id,
@@ -140,6 +167,7 @@ export async function approveVisit(
       price,
       wholesalePrice,
       wholesaleMinUnits,
+      noPrice,
       enteredBy: visit.entered_by,
       note,
       visitId,
@@ -151,6 +179,7 @@ export async function approveVisit(
       .from('instore_price_entries')
       .update({
         price,
+        no_price: noPrice,
         promo_price: wholesalePrice,
         promo_min_units: wholesaleMinUnits,
         promo_text: wholesalePromoText(wholesalePrice, wholesaleMinUnits),

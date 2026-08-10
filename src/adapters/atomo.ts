@@ -320,6 +320,29 @@ export const atomoAdapter: SupermarketAdapter = {
   },
 };
 
+/**
+ * Parse Átomo's JSON-LD `offers.price`.
+ *
+ * schema.org prices are meant to be machine numbers, and Átomo normally emits a
+ * clean integer string ("2276"). But during slug/theme transitions their theme
+ * has been observed to leak a LOCALE-formatted value that uses '.' as a
+ * THOUSANDS separator ("2.276" = 2276, "12.500" = 12500). Parsed naively that
+ * becomes 2.276 → stored as $2.28, poisoning the price.
+ *
+ * A real ARS decimal price would carry at most 2 fractional digits, so a value
+ * made of digit groups separated by dots with EXACTLY 3 digits after each dot
+ * (`2.276`, `12.500`, `1.234.567`) is unambiguously thousands-formatted — strip
+ * the dots. Everything else (integers, genuine 2-decimal prices like `158.77`)
+ * is parsed as-is.
+ */
+export function parseAtomoPrice(raw: string | number | undefined): number {
+  if (typeof raw === 'number') return raw;
+  if (typeof raw !== 'string') return NaN;
+  const s = raw.trim();
+  if (/^\d{1,3}(\.\d{3})+$/.test(s)) return Number(s.replace(/\./g, ''));
+  return Number(s);
+}
+
 // =============================================================================
 // Pure parser — split for unit testing against saved HTML fixtures.
 // =============================================================================
@@ -342,13 +365,7 @@ export function parseAtomoHtml(
     : product.offers;
 
   // -- Price ---------------------------------------------------------------
-  const priceRaw = offer?.price;
-  const price =
-    typeof priceRaw === 'number'
-      ? priceRaw
-      : typeof priceRaw === 'string'
-        ? Number(priceRaw)
-        : NaN;
+  const price = parseAtomoPrice(offer?.price);
   if (!Number.isFinite(price) || price <= 0) {
     throw new ScrapeError(
       'price_missing',
