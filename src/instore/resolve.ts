@@ -26,7 +26,7 @@
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
-import { lookupCatalog } from '../shared/catalog.js';
+import { getCatalogEans, lookupCatalog } from '../shared/catalog.js';
 import { MARCA_TO_FABRICANTE, type TaxonomyEntry } from '../shared/taxonomy.js';
 
 /** Where a matched product came from. */
@@ -121,6 +121,75 @@ export async function resolveEan(ean: string): Promise<ResolvedProduct | null> {
   }
 
   return taxonomyToResolved(ean, catalog);
+}
+
+/** Batch version of findProductByEan — one query instead of N. */
+async function findProductsByEans(
+  eans: string[],
+): Promise<Map<string, ProductRow & { ean: string }>> {
+  const byEan = new Map<string, ProductRow & { ean: string }>();
+  if (eans.length === 0) return byEan;
+
+  // Postgrest mete los valores del `in` en la URL; se corta en lotes para no
+  // pasarse del largo máximo si el catálogo crece.
+  const CHUNK = 200;
+  for (let i = 0; i < eans.length; i += CHUNK) {
+    const chunk = eans.slice(i, i + CHUNK);
+    const { data, error } = await db
+      .from('products')
+      .select(`${PRODUCT_COLS}, ean`)
+      .in('ean', chunk);
+    if (error) throw error;
+    for (const row of (data ?? []) as Array<ProductRow & { ean: string }>) {
+      byEan.set(row.ean, row);
+    }
+  }
+  return byEan;
+}
+
+/**
+ * Resolve the WHOLE catalog for offline use by the in-store app.
+ *
+ * Por qué existe: sin señal, `resolveEan` no se puede llamar, así que el
+ * relevador cargaba el precio contra el EAN crudo sin ver qué producto era. Con
+ * el catálogo bajado de antemano, escanear sin conexión igual muestra nombre y
+ * marca, y se equivoca menos.
+ *
+ * Misma regla que `resolveEan`, aplicada a todo el catálogo de una: la
+ * pertenencia al catálogo oficial es lo que habilita un EAN, y la fila de
+ * `products` sólo aporta id e imagen cuando existe. Es de SOLO LECTURA — nunca
+ * crea filas, igual que el lookup.
+ */
+export async function resolveCatalog(): Promise<ResolvedProduct[]> {
+  const catalog = await getCatalogEans();
+  const eans = [...catalog.keys()];
+  const products = await findProductsByEans(eans);
+
+  const out: ResolvedProduct[] = [];
+  for (const [ean, entry] of catalog) {
+    const existing = products.get(ean);
+    if (existing) {
+      out.push({
+        productId: existing.id,
+        ean,
+        name: existing.name,
+        brand: existing.brand,
+        manufacturer: existing.manufacturer,
+        category: existing.category,
+        subcategory: existing.subcategory,
+        format: existing.format,
+        variety: existing.variety,
+        imageUrl: existing.metadata?.imageUrl ?? null,
+        source: 'products',
+      });
+    } else {
+      out.push(taxonomyToResolved(ean, entry));
+    }
+  }
+  // Orden estable: el ETag depende del cuerpo, así que un orden aleatorio
+  // invalidaría la caché del cliente en cada request.
+  out.sort((a, b) => a.ean.localeCompare(b.ean));
+  return out;
 }
 
 /**

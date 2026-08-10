@@ -44,7 +44,13 @@ export function buildApp(): Express {
       origin: true,         // reflect the request origin (any)
       credentials: false,   // API key auth, no cookies
       maxAge: 86_400,
-      allowedHeaders: ['Content-Type', 'X-API-Key', 'x-api-key'],
+      allowedHeaders: ['Content-Type', 'X-API-Key', 'x-api-key', 'If-None-Match'],
+      // ETag no es un "simple response header": cross-origin, el navegador no
+      // deja que el JS lo lea salvo que se exponga explícitamente. Sin esto, la
+      // revalidación con If-None-Match de GET /v1/in-store/catalog nunca
+      // funciona desde el dashboard y la app se rebaja el catálogo entero cada
+      // vez, en el celular de un relevador.
+      exposedHeaders: ['ETag'],
     }),
   );
 

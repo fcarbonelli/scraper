@@ -3,6 +3,7 @@
  *
  *   GET  /v1/in-store/supermarkets        chains to show in the store dropdown
  *   GET  /v1/in-store/lookup?ean=         resolve a scanned EAN to a catalog product
+ *   GET  /v1/in-store/catalog             the whole catalog, cached on-device for offline scanning
  *
  *   POST /v1/in-store/visits              start a PDV relevamiento (store + location)
  *   GET  /v1/in-store/visits              list visits (today by default)
@@ -20,13 +21,18 @@
  * docs/IN_STORE_PRICE_ENTRY.md.
  */
 
+import { createHash } from 'node:crypto';
 import express, { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '../../shared/db.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
-import { resolveEan, type ResolvedProduct } from '../../instore/resolve.js';
+import {
+  resolveCatalog,
+  resolveEan,
+  type ResolvedProduct,
+} from '../../instore/resolve.js';
 import { recordInStoreEntry, updatePendingEntry, InStoreError } from '../../instore/entry.js';
 import { createVisit, finishVisit, getVisit, countVisit, type Visit, type VisitCounts } from '../../instore/visits.js';
 import { uploadVisitPhoto } from '../../instore/storage.js';
@@ -136,6 +142,32 @@ inStoreRouter.get('/lookup', async (req: Request, res: Response) => {
       product: product ? toApiProduct(product) : null,
     }),
   );
+});
+
+// =============================================================================
+// GET /v1/in-store/catalog — the whole catalog, for offline scanning
+//
+// The field app downloads this once (and revalidates cheaply via ETag) so that
+// a worker inside a wholesale store with no signal still sees the product's
+// name/brand when scanning, instead of a bare EAN. Read-only, ~240 rows — no
+// pagination on purpose: it's meant to be stored whole on the device.
+// =============================================================================
+inStoreRouter.get('/catalog', async (req: Request, res: Response) => {
+  const products = (await resolveCatalog()).map(toApiProduct);
+  const body = success(products, { total: products.length });
+
+  // Weak ETag over the payload: the catalog changes rarely (a handful of
+  // catalog_extra_eans rows), so most revalidations cost a 304 and no bytes.
+  const etag = `W/"${createHash('sha256')
+    .update(JSON.stringify(body.data))
+    .digest('hex')
+    .slice(0, 32)}"`;
+  res.setHeader('ETag', etag);
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+  res.json(body);
 });
 
 // =============================================================================

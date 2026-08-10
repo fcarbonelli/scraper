@@ -1,0 +1,47 @@
+﻿{
+    "data":  [
+                 {
+                     "product_id":  "711d75d4-1996-47e5-a108-f6aee36135f1",
+                     "ean":  "757037512449",
+                     "name":  "Quitamanchas 5 en 1 Oxiclean Max Force en spray 354 ml",
+                     "brand":  "Oxi Clean",
+                     "manufacturer":  "Church \u0026 Dwight Co., Inc.",
+                     "category":  "LAD",
+                     "subcategory":  "PRETRAT",
+                     "format":  "354ml",
+                     "variety":  null,
+                     "image_url":  "https://carrefourar.vteximg.com.br/arquivos/ids/787062/757037512449_01.jpg?v=639026339321900000",
+                     "source":  "products"
+                 },
+                 {
+                     "product_id":  "4e21b542-a759-49fa-9152-940be8ff1a86",
+                     "ean":  "757037515235",
+                     "name":  "Quitamanchas OXI CLEAN Versatile En Polvo X1,37kg",
+                     "brand":  "Oxi Clean",
+                     "manufacturer":  "Church \u0026 Dwight Co., Inc.",
+                     "category":  "LAD",
+                     "subcategory":  "POLVOS",
+                     "format":  "4/3LB",
+                     "variety":  null,
+                     "image_url":  "https://static.cotodigital3.com.ar/sitios/fotos/medium/00573400/00573423.jpg",
+                     "source":  "products"
+                 },
+                 {
+                     "product_id":  null,
+                     "ean":  "7797470197691",
+                     "name":  "LAVANDINAS REG ESENCIAL 1L",
+                     "brand":  "ESENCIAL",
+                     "manufacturer":  "MAXICONSUMO S.A.",
+                     "category":  "LAVANDINAS",
+                     "subcategory":  "REG",
+                     "format":  "1L",
+                     "variety":  null,
+                     "image_url":  null,
+                     "source":  "catalog"
+                 }
+             ],
+    "meta":  {
+                 "ts":  "2026-08-07T21:47:38.815Z",
+                 "total":  238
+             }
+}
