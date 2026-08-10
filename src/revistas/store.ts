@@ -25,13 +25,13 @@ export interface MagazineRow {
   superseded_at: string | null;
   /**
    * Flyer series within the chain (e.g. 'mm', 'gt', 'folder-resto').
-   * Supersede / carry-forward scope to (supermarket_id, series_key).
+   * Supersede scopes to (supermarket_id, series_key).
    */
   series_key: string;
   /**
-   * Manual on/off switch (migration 018). false = this issue is excluded from
-   * the daily carry-forward and its approved prices are dropped from the client
-   * base, without un-approving each product. Orthogonal to superseded_by.
+   * Manual on/off switch (migration 018). false = operator deactivated this
+   * issue; its approved prices are dropped from the client base, without
+   * un-approving each product. Orthogonal to superseded_by.
    */
   carry_active: boolean;
   /**

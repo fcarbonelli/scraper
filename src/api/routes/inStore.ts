@@ -33,7 +33,7 @@ import {
   resolveEan,
   type ResolvedProduct,
 } from '../../instore/resolve.js';
-import { recordInStoreEntry, InStoreError } from '../../instore/entry.js';
+import { recordInStoreEntry, updatePendingEntry, InStoreError } from '../../instore/entry.js';
 import { createVisit, finishVisit, getVisit, countVisit, type Visit, type VisitCounts } from '../../instore/visits.js';
 import { uploadVisitPhoto } from '../../instore/storage.js';
 import { approveVisit, type ReviewDecision } from '../../instore/review.js';
@@ -403,6 +403,61 @@ inStoreRouter.post('/entries', async (req: Request, res: Response) => {
       apiKeyId: req.apiKey?.id ?? null,
     });
     res.status(201).json(
+      success({
+        entry_id: result.entryId,
+        visit_id: result.visitId,
+        supermarket_id: result.supermarketId,
+        ean: result.ean,
+        product_id: result.productId,
+        product_name: result.productName,
+        price: result.price,
+        wholesale_price: result.wholesalePrice,
+        wholesale_min_units: result.wholesaleMinUnits,
+        note: result.note,
+        entered_by: result.enteredBy,
+        review_status: result.reviewStatus,
+        created_at: result.createdAt,
+      }),
+    );
+  } catch (err) {
+    toApiError(err);
+  }
+});
+
+// =============================================================================
+// PATCH /v1/in-store/entries/:id — edit an already-saved (pending) entry
+//
+// Fix a price / units / observaciones in the relevamiento view; saves without
+// approving the day. Only pending entries are editable (approved ones have a
+// live snapshot — those corrections go through the review flow).
+// =============================================================================
+const UpdateEntryBody = z
+  .object({
+    price: z.number().positive().optional(),
+    wholesale_price: z.number().positive().nullable().optional(),
+    wholesale_min_units: z.number().int().positive().nullable().optional(),
+    note: z.string().trim().max(1000).nullable().optional(),
+  })
+  .refine(
+    (b) =>
+      b.price !== undefined ||
+      b.wholesale_price !== undefined ||
+      b.wholesale_min_units !== undefined ||
+      b.note !== undefined,
+    { message: 'At least one field is required' },
+  );
+
+inStoreRouter.patch('/entries/:id', async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const body = parseBody(req, UpdateEntryBody);
+  try {
+    const result = await updatePendingEntry(id, {
+      price: body.price,
+      wholesalePrice: body.wholesale_price,
+      wholesaleMinUnits: body.wholesale_min_units,
+      note: body.note,
+    });
+    res.json(
       success({
         entry_id: result.entryId,
         visit_id: result.visitId,

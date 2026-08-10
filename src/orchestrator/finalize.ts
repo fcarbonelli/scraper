@@ -19,6 +19,7 @@ import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { generateAlertsForRun, updateSupermarketHealth } from '../alerts/aggregate.js';
 import { loadRunDiagnostics, type RunProgress } from '../shared/runDiagnostics.js';
+import { runAnomalySuppression } from '../shared/priceAnomaly.js';
 
 /**
  * Short guard for brand-new runs whose total_jobs has not been stamped yet.
@@ -96,6 +97,21 @@ async function finalizeRun(
     .eq('id', run.id)
     .eq('status', 'running'); // guard against double-finalize
   if (updateErr) throw updateErr;
+
+  // 1.5. Suppress bogus low prices before the day can be published. Some sites
+  //       return a garbage low price for an out-of-stock item WITHOUT an
+  //       availability flag (so the persist-layer OOS guard misses it). We
+  //       detect those statistical outliers (channel-scoped cross-store /
+  //       self-history median) and rewrite them to `out_of_stock` markers so the
+  //       client never sees the fake price. Best-effort: never blocks finalize.
+  try {
+    const flags = await runAnomalySuppression({ runId: run.id });
+    if (flags.length > 0) {
+      log.warn({ suppressed: flags.length }, 'suppressed anomalous low prices');
+    }
+  } catch (err) {
+    log.error({ err }, 'price-anomaly suppression failed (run still finalized)');
+  }
 
   // 2. Generate aggregated alerts (1 per supermarket, max). Transient
   //    whole-site failures schedule a delayed recovery run instead of alerting;

@@ -27,8 +27,6 @@ import { finalizePendingRuns } from './finalize.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
 import { checkRevistaConfigHealth, checkStuckMagazines } from '../revistas/health.js';
 import { createRevistaIngestWorker } from '../revistas/ingestWorker.js';
-import { carryForwardRevistaPrices } from '../revistas/carryForward.js';
-import { carryForwardInStorePrices } from '../instore/carryForward.js';
 import { withTimeout } from '../revistas/pool.js';
 import { revistaConfig } from '../revistas/config.js';
 
@@ -73,29 +71,7 @@ async function runScrapeWithErrorHandling(
 async function runRevistaCheckWithErrorHandling(
   scrapeRunId: string | null,
 ): Promise<void> {
-  // 1. Carry-forwards run FIRST and independently of the AI magazine check.
-  //    They're cheap (DB-only) and MUST run every day so approved magazine /
-  //    in-store prices persist in the export. Running them before the check
-  //    means a slow or hung discovery (Playwright, network) can never block
-  //    them — that wedge is what made magazine prices vanish the day after
-  //    approval.
-  try {
-    const carry = await carryForwardRevistaPrices();
-    if (carry.carried > 0) logger.info({ carry }, 'revista carry-forward complete');
-  } catch (err) {
-    logger.error({ err }, 'revista carry-forward failed');
-    captureError(err, { phase: 'revista-carry-forward' });
-  }
-
-  try {
-    const carry = await carryForwardInStorePrices();
-    if (carry.carried > 0) logger.info({ carry }, 'instore carry-forward complete');
-  } catch (err) {
-    logger.error({ err }, 'instore carry-forward failed');
-    captureError(err, { phase: 'instore-carry-forward' });
-  }
-
-  // 2. Health probes BEFORE the check, because the check itself cannot report
+  // 1. Health probes BEFORE the check, because the check itself cannot report
   //    these: it early-returns without writing a single row when it is disabled
   //    or unconfigured, and a killed run leaves a magazine pinned in
   //    'processing' with nothing to show for it. Both alert on state change
@@ -108,7 +84,7 @@ async function runRevistaCheckWithErrorHandling(
     captureError(err, { phase: 'revista-health' });
   }
 
-  // 3. The magazine check (discovery + vision AI) runs LAST and is
+  // 2. The magazine check (discovery + vision AI) runs LAST and is
   //    timeout-guarded, so a wedged site can't stall the orchestrator. Each
   //    site also logs a check row (revista_check_log) so the operator can see
   //    the probe ran even on the (common) days nothing changed.

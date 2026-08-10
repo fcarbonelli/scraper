@@ -7,8 +7,8 @@
  * base), with inline edits allowed; rejected entries are discarded.
  *
  * This mirrors the revista review pattern (approve-then-materialize), so the
- * client_base export needs no gating logic and carry-forward only ever sees
- * approved prices.
+ * client_base export needs no gating logic and only approved prices ever reach
+ * it. Each approved entry publishes on its approval day only (no carry-forward).
  */
 
 import { db } from '../shared/db.js';

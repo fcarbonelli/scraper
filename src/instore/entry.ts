@@ -24,7 +24,7 @@ export function inStoreExternalId(productId: string): string {
   return `instore-${productId}`;
 }
 
-/** Marks mappings/snapshots created by the in-store tool (used by enqueue + carry-forward). */
+/** Marks mappings/snapshots created by the in-store tool (used by enqueue + review). */
 export const IN_STORE_SOURCE = 'instore';
 
 /** A branch location, captured on the visit. */
@@ -216,9 +216,11 @@ export async function writeSnapshot(
 }
 
 /**
- * Drop any run-less in-store snapshot for this mapping already dated today (a
- * carry-forward re-emission, or an earlier approval), so an approved fresh price
- * is the single row for the day. Keeps the export clean (one row per mapping/day).
+ * Drop any run-less in-store snapshot for this mapping already dated today (an
+ * earlier approval, or a legacy carry-forward re-emission), so an approved fresh
+ * price is the single row for the day. Keeps the export clean (one row per
+ * mapping/day). The 'instore-carry-forward' source is matched only to clean up
+ * rows written before carry-forward was removed.
  */
 async function purgeSameDayInStoreSnapshots(supermarketProductId: string): Promise<void> {
   const { data, error } = await db
@@ -387,5 +389,104 @@ export async function recordInStoreEntry(
     enteredBy: ctx.enteredBy,
     reviewStatus: entryInsert.data.review_status as string,
     createdAt: entryInsert.data.created_at as string,
+  };
+}
+
+/** Editable fields on a saved entry. Any omitted field is left unchanged. */
+export interface UpdateEntryInput {
+  /** Precio Regular (unitario). */
+  price?: number;
+  /** Precio con oferta (precio mayorista). null clears it. */
+  wholesalePrice?: number | null;
+  /** A partir de cuántas unidades aplica el precio mayorista. null clears it. */
+  wholesaleMinUnits?: number | null;
+  /** Observaciones. null clears it. */
+  note?: string | null;
+}
+
+interface EntryRow {
+  id: string;
+  visit_id: string | null;
+  supermarket_id: string;
+  ean: string;
+  product_id: string | null;
+  product_name: string | null;
+  price: number;
+  promo_price: number | null;
+  promo_min_units: number | null;
+  note: string | null;
+  entered_by: string;
+  review_status: string;
+  created_at: string;
+}
+
+/**
+ * Edit a still-PENDING entry in place (price / wholesale / min-units /
+ * observaciones) and persist it — no approval needed. This powers the "fix a
+ * price I already saved" flow in the relevamiento view.
+ *
+ * Only pending entries are editable here: once a visit is approved the entry has
+ * materialized a live snapshot, so corrections then go through the review flow.
+ */
+export async function updatePendingEntry(
+  entryId: string,
+  patch: UpdateEntryInput,
+): Promise<InStoreEntryResult> {
+  const { data, error } = await db
+    .from('instore_price_entries')
+    .select(
+      'id, visit_id, supermarket_id, ean, product_id, product_name, price, promo_price, promo_min_units, note, entered_by, review_status, created_at',
+    )
+    .eq('id', entryId)
+    .maybeSingle();
+  if (error) throw error;
+  const entry = data as EntryRow | null;
+  if (!entry) throw new InStoreError('not_found', 'Entry not found');
+  if (entry.review_status !== 'pending') {
+    throw new InStoreError('invalid', `Cannot edit a ${entry.review_status} entry`);
+  }
+
+  const price = patch.price ?? entry.price;
+  const wholesalePrice =
+    patch.wholesalePrice !== undefined
+      ? patch.wholesalePrice != null && patch.wholesalePrice > 0
+        ? patch.wholesalePrice
+        : null
+      : entry.promo_price;
+  const wholesaleMinUnits =
+    patch.wholesaleMinUnits !== undefined ? patch.wholesaleMinUnits : entry.promo_min_units;
+  const note = patch.note !== undefined ? patch.note : entry.note;
+  const promoText = wholesalePromoText(wholesalePrice, wholesaleMinUnits);
+
+  const upd = await db
+    .from('instore_price_entries')
+    .update({
+      price,
+      promo_price: wholesalePrice,
+      promo_min_units: wholesaleMinUnits,
+      promo_text: promoText,
+      note,
+    })
+    .eq('id', entryId)
+    .select('id, review_status, created_at')
+    .single();
+  if (upd.error) throw upd.error;
+
+  logger.info({ entryId, visitId: entry.visit_id }, 'instore: pending entry updated');
+
+  return {
+    entryId: entry.id,
+    visitId: entry.visit_id,
+    supermarketId: entry.supermarket_id,
+    ean: entry.ean,
+    productId: entry.product_id,
+    productName: entry.product_name,
+    price,
+    wholesalePrice,
+    wholesaleMinUnits,
+    note,
+    enteredBy: entry.entered_by,
+    reviewStatus: upd.data.review_status as string,
+    createdAt: upd.data.created_at as string,
   };
 }

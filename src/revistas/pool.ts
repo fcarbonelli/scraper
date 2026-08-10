@@ -26,8 +26,7 @@ export async function mapPool<T, R>(
 /**
  * Reject with a timeout error if `p` doesn't settle within `ms`. Used to stop a
  * hung magazine discovery (e.g. a stalled Playwright/network call) from wedging
- * the whole daily revista check — and, in turn, blocking the carry-forward step
- * that runs after it.
+ * the whole daily revista check.
  *
  * Note: this races the promise; it does not cancel the underlying work (the
  * caller's error path just moves on). The dangling work is harmless.

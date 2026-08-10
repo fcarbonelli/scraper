@@ -89,14 +89,37 @@ Vea/Jumbo/Disco) return a **sentinel low price** for out-of-stock items (e.g.
 that as an `ok` reading would poison the price history and leak a fake price to
 the client. The raw site response is still kept in `raw_data` for audit.
 
-**Residual case + safety net.** Some sites return a bogus low price while
-reporting the product as *available* (no OOS flag to key off). Those slip past
-the rule above, so before approving a day run
-`scripts/scan-price-anomalies.ts` (`npm run anomalies:scan`): it flags any row
-whose price is a tiny fraction of the same-EAN cross-store median (or the
-mapping's own recent median). The operator reviews and flags the real ones via
-the flag endpoint. Real promotions rarely exceed ~50% off, so the default
-threshold (price < 35% of baseline) has a low false-positive rate.
+**Residual case — auto-suppressed at finalize.** Some sites return a bogus low
+price while reporting the product as *available* (no OOS flag to key off). Those
+slip past the rule above, so the **run-finalizer** runs a statistical outlier
+check (`src/shared/priceAnomaly.ts`, called from `orchestrator/finalize.ts`)
+before a day is ever publishable, and **auto-suppresses** the outliers: each
+flagged snapshot is rewritten to an `out_of_stock` marker (NULL price), with the
+original value + detection metadata kept under `raw_data.priceSuspect` for audit.
+The client therefore never sees the fake price, even if nobody reviews that day.
+
+Detection uses three rules, in priority order, and is designed to avoid false
+positives:
+
+1. **EDP target (peer-independent).** The client's target price for the EAN +
+   channel (`price_targets`). If the scraped price is **< 25% of the target**,
+   it's bogus regardless of peers. This is the ONLY rule that catches *uniform
+   sentinels* — where every store shares the same bad value (Vea+Disco+Jumbo all
+   $158.77), so the cross-store median is itself bogus.
+2. **Cross-store median (fallback).** Same-EAN median **within the same channel
+   family** (supermarket vs. mayorista — wholesale prices are structurally lower,
+   so they're never compared against retail). Flags a **< 35% of baseline** (65%+)
+   collapse.
+3. **Self-history median (fallback).** The mapping's own recent median, for
+   single-store products with no same-channel peers today.
+
+Only **scraped** snapshots are ever touched — trusted in-store/manual (run-less)
+entries are exempt. `Precio_Regular` is the *list* price (real promos live in the
+offer fields), so a collapsed regular price is almost always a data error.
+
+`scripts/scan-price-anomalies.ts` (`npm run anomalies:scan`) wraps the same core
+for inspection (read-only by default) or to retroactively clean a day scraped
+before auto-suppression existed (`--apply`).
 
 **Guarantee:** when a run is published, **every active mapping has exactly one
 row** for that day — a real price or a marker row. Internally the grid is always

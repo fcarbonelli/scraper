@@ -26,10 +26,10 @@ fixtures in [`examples/api/`](../examples/api/) (`in-store-*.json`).
   becomes a **run-less** snapshot in the client export.
 - The field worker's app still works exactly the same; their own "today's list"
   shows their entries with a `review_status` (`pending` at first).
-- Prices are entered only **every few days** (≈twice a week). The backend runs a
-  **daily carry-forward** that re-emits each product's latest in-store price as a
-  fresh row dated today — so a Monday price keeps exporting every day until the
-  next visit supersedes it. **The frontend does nothing for this.**
+- Prices are entered only **every few days** (≈twice a week). Each approved price
+  publishes **only on the day it's approved** — it is a single row dated that day.
+  There is **no carry-forward**: prices do NOT keep exporting on later days between
+  visits. **The frontend does nothing for this.**
 - The worker **never picks a date.** The server stamps every entry with the current
   time. There is no date field anywhere in the UI.
 - A **visit** groups the work: one worker at one **store branch** on one occasion.
@@ -150,11 +150,19 @@ await fetch(`${BASE}/in-store/visits/${visitId}/photos?caption=${encodeURICompon
 Show a small thumbnail strip of the visit's photos (`GET /v1/in-store/visits/:id/
 photos`). PNG/JPEG/WebP/GIF up to 15 MB.
 
-### 4.5 Today's list
+### 4.5 Today's list (with in-place edit)
 A collapsible list of everything uploaded **in the active visit** (or today for the
 store) from `GET /v1/in-store/entries?visit_id=` (or default = today). Each row:
 product name, regular price, wholesale price + min-units (if any), observations,
-time. Lets the worker spot/fix a mistake (re-submitting is just another `POST`).
+time, and `review_status`.
+
+**Editing a saved entry.** Each still-`pending` row is editable in place: tap it,
+change the price / wholesale / min-units / observaciones, and save with
+`PATCH /v1/in-store/entries/:id`. It persists immediately — **no approval needed**.
+This is the fix-a-mistake flow the client asked for (don't require re-scanning or
+re-approving). Once an entry is `approved` the PATCH returns `400`, so hide/disable
+edit for non-pending rows (in practice everything the field worker sees is
+pending).
 
 ### 4.6 Finish the visit (save & exit) — replaces "Edit"
 When done at a PDV, a clear primary action **"Finalizar relevamiento"** →
@@ -335,6 +343,15 @@ created_at }`. **No snapshot yet** — the entry is `pending` until approved (§
 Errors: `400` (bad body / chain not enabled / finished visit), `404` (unknown
 store/visit / EAN not in catalog).
 
+### `PATCH /v1/in-store/entries/:id`
+Edit a saved **pending** entry (fix price / units / observaciones); saves without
+approval. Body (≥1 field; omitted = unchanged, `null` clears):
+```ts
+{ price?: number; wholesale_price?: number|null; wholesale_min_units?: number|null; note?: string|null }
+```
+→ **200** with the updated entry (same shape as the `POST /entries` 201 body).
+`404` unknown entry; `400` empty body or entry already approved/rejected.
+
 ### `GET /v1/in-store/entries?visit_id=&date=&supermarket_id=&entered_by=&review_status=&page=&limit=`
 Recent submissions (defaults to today, Buenos Aires; `date` is ignored when
 `visit_id` is set). Paginated. Item: `{ id, visit_id, supermarket_id,
@@ -353,7 +370,8 @@ wholesale_min_units, note, entered_by, review_status, created_at }`.
 4. Scan loop: lookup (name + image) → four fields → `POST /entries { visit_id }` →
    back to scanner.
 5. Flyer photos: capture/upload to the visit; thumbnail strip.
-6. Visit list (from `GET /entries?visit_id=`), with the "ya cargado" guard.
+6. Visit list (from `GET /entries?visit_id=`), with the "ya cargado" guard **and
+   in-place edit of pending rows** (`PATCH /entries/:id`).
 7. Finish-visit action (`POST /visits/:id/finish`) → clear active visit → back to
    start-visit. (Do **not** use the top-right Edit for this.)
 8. Offline queue + retry + pending indicator (entries, visit create, photos, **finish**).
@@ -399,6 +417,7 @@ Flow:
    rejecting discards it. Response: `{ visit_id, approved, rejected, snapshots }`.
    The visit then drops out of the pending queue.
 
-Once approved, the carry-forward keeps those prices exporting daily until the next
-visit supersedes them — no further action needed.
+Once approved, each price exports **only on its approval day** (a single run-less
+snapshot dated that day). There is no carry-forward, so the price does not re-appear
+in later days' exports — the next visit records fresh prices on its own day.
 

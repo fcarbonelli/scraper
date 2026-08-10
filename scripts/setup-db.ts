@@ -152,8 +152,9 @@ const SUPERMARKETS: SupermarketSeed[] = [
 
   // --- IN-STORE ONLY (mayorista; prices come from field workers scanning ------
   //     barcodes on-site — no web adapter, no revista). Excluded from the daily
-  //     scrape; re-emitted daily by carryForwardInStorePrices(). Geography
-  //     below is a best-guess default — adjust provincia/zona/canal as needed.
+  //     scrape; each approved price publishes on its approval day only (no
+  //     carry-forward). Geography below is a best-guess default — adjust
+  //     provincia/zona/canal as needed.
   {
     id: 'diarco',
     name: 'Diarco',
