@@ -23,6 +23,7 @@ import {
   toCsv,
   writeXlsx,
   todayInBuenosAires,
+  CLIENT_DATA_FLOOR_DATE,
 } from '../lib/exportClientBase.js';
 import {
   toPriceData,
@@ -67,6 +68,8 @@ dataRouter.get('/pricing', async (req: Request, res: Response) => {
     .order('ID', { ascending: false })
     .range(offset, offset + limit - 1);
 
+  // Hard client-data floor (hide everything on/before 2026-07-30).
+  query = query.gte('Fecha_Relevamiento', CLIENT_DATA_FLOOR_DATE);
   if (q.from) query = query.gte('Fecha_Relevamiento', q.from);
   if (q.to) query = query.lte('Fecha_Relevamiento', q.to);
 

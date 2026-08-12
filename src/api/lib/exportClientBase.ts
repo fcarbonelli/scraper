@@ -29,6 +29,18 @@ import {
   ayudinEans,
 } from '../../shared/priceIndicators.js';
 
+/**
+ * Client-facing data floor. The client only wants to see data from this date
+ * onward — everything on/before 2026-07-30 is hidden from BOTH the pricing API
+ * and the export. Applied as a `Fecha_Relevamiento >= floor` filter on every
+ * client-facing query (kept here at the query layer, so we don't have to
+ * recreate the whole client_base view just to add one WHERE condition).
+ *
+ * NB: combined with any caller `from`, Supabase applies both, so the effective
+ * lower bound is always MAX(from, floor) — the floor can never be bypassed.
+ */
+export const CLIENT_DATA_FLOOR_DATE = '2026-07-31';
+
 /** Filters shared by the pricing and export endpoints. */
 export interface ClientBaseFilters {
   from?: string | undefined;
@@ -141,6 +153,8 @@ export async function fetchAllClientBase(
       .order('ID', { ascending: false })
       .range(offset, offset + pageSize - 1);
 
+    // Hard client-data floor (hide everything on/before 2026-07-30).
+    query = query.gte('Fecha_Relevamiento', CLIENT_DATA_FLOOR_DATE);
     if (filters.from) query = query.gte('Fecha_Relevamiento', filters.from);
     if (filters.to) query = query.lte('Fecha_Relevamiento', filters.to);
     if (filters.canal) query = query.eq('Canal', filters.canal);
@@ -218,6 +232,9 @@ export async function loadAyudinPriceRef(
       .order('Fecha_Relevamiento', { ascending: false })
       .order('ID', { ascending: false })
       .range(from, to);
+    // Same client-data floor as fetchAllClientBase so the Ayudín reference can't
+    // pull a pre-floor price.
+    query = query.gte('Fecha_Relevamiento', CLIENT_DATA_FLOOR_DATE);
     if (filters.from) query = query.gte('Fecha_Relevamiento', filters.from);
     if (filters.to) query = query.lte('Fecha_Relevamiento', filters.to);
     if (filters.canal) query = query.eq('Canal', filters.canal);
