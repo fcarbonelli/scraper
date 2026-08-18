@@ -250,7 +250,7 @@ export type Tier         = 'api' | 'html' | 'ai' | 'manual' | 'marker';
 export type RunStatus    = 'running' | 'completed' | 'failed';
 export type ReviewStatus = 'pending_review' | 'published';
 /** Per-snapshot outcome. 'scrape_failed' is internal-only (never in client_base). */
-export type SnapshotStatus = 'ok' | 'out_of_stock' | 'not_found' | 'delisted' | 'scrape_failed';
+export type SnapshotStatus = 'ok' | 'out_of_stock' | 'not_found' | 'delisted' | 'scrape_failed' | 'no_price';
 export type LifecycleStatus = 'active' | 'out_of_stock' | 'delisted';
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
@@ -1260,6 +1260,71 @@ raise the review banner), `approved_today` (freshly approved magazine prices),
 only on their approval day, so this is normally 0), `products_today`
 (distinct magazine products present in today's export), and a `by_chain`
 breakdown (only chains with activity). Actual review happens via `/v1/revistas/*`.
+
+---
+
+### `GET /v1/runs/:id/price-outliers`
+
+Pre-publish operator panel for the **publicación** view: products in this run's
+day whose scraped price deviates by **≥ 30%** from a baseline, so promo-driven or
+suspicious swings can be eyeballed before publishing.
+
+Reads the raw snapshots for the run **and its recovery runs**, so it sees the
+**pending/unapproved** day exactly like `GET /v1/data/export?preview=true` — no
+publish gate. Only `status='ok'`, positively-priced rows are considered (the
+latest snapshot per mapping).
+
+**Baseline** = each mapping's OWN median price over the last `window` days
+(default 30), computed strictly **before** the run's day (self-history). This
+catches "the price changed today"; the median is robust to a single prior promo
+day. A mapping with fewer than `min_history` prior points (default 2) is skipped.
+`deviation_pct = (price - baseline) / baseline * 100`, sign kept (negative =
+drop, positive = spike). Rows with `|deviation_pct| >= threshold` are returned.
+
+Extreme low outliers already detected + suppressed by the finalizer
+(`out_of_stock`) are **excluded**, so this only surfaces "normal" deviations and
+never double-reports what's flagged elsewhere.
+
+#### Query
+
+| Param         | Default | Meaning                                          |
+| ------------- | ------- | ------------------------------------------------ |
+| `threshold`   | `30`    | Min `|deviation_pct|` (percent) to include.      |
+| `window`      | `30`    | Days of self-history feeding the baseline median.|
+| `min_history` | `2`     | Min prior history points before trusting a baseline. |
+
+#### Response — 200
+
+```json
+{
+  "data": {
+    "run_id": "...",
+    "date": "2026-08-18",
+    "baseline": { "method": "self-history-median", "windowDays": 30, "minHistory": 2 },
+    "threshold": 30,
+    "count": 2,
+    "priceOutliers": [
+      {
+        "supermarket_product_id": "...",
+        "ean": "7790001",
+        "name": "Lavandina 2 L",
+        "supermarket_id": "carrefour",
+        "price": 2100,
+        "baseline": 1500,
+        "deviation_pct": 40,
+        "promotions": [
+          { "type": "discount", "description": "20% off", "discountPct": 20 }
+        ]
+      }
+    ]
+  },
+  "meta": { "ts": "..." }
+}
+```
+
+`priceOutliers` is sorted by `|deviation_pct|` descending. `promotions` is
+present only when the scraped snapshot carried promotions. `date` is `null` (and
+`priceOutliers` empty) if the run produced no snapshots yet.
 
 ---
 

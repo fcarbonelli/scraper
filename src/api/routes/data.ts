@@ -133,11 +133,12 @@ const ExportQuery = z.object({
   canal: z.string().trim().min(1).optional(),
   ean: z.string().trim().min(1).optional(),
   /**
-   * Operator preview: include pending_review (not-yet-approved) days so today's
-   * data can be downloaded and checked before publishing. Truthy only for
-   * `preview=true` / `preview=1` (anything else is false — avoids
-   * z.coerce.boolean's "any non-empty string is true" trap). Export-only — the
-   * /pricing client contract ignores it.
+   * Operator preview: include pending_review (not-yet-approved) scrape days AND
+   * not-yet-approved in-store entries (migration 025) so today's data can be
+   * downloaded and checked before publishing. Truthy only for `preview=true` /
+   * `preview=1` (anything else is false — avoids z.coerce.boolean's "any
+   * non-empty string is true" trap). Export-only — the /pricing client contract
+   * ignores it.
    */
   preview: z
     .preprocess((v) => v === 'true' || v === '1' || v === true, z.boolean())

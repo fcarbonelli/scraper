@@ -127,7 +127,9 @@ CREATE INDEX ON price_snapshots (supermarket_product_id, scraped_at DESC);
 -- The client-facing `client_base` view (migration 002, fixed in 003; publication
 -- layer in 005; active-filter in 008; target-prices in 012; operator preview
 -- twin `client_base_preview` in 020 — same columns minus the publish gate,
--- powering GET /v1/data/export?preview=true; EAN-required guard in 021 — both
+-- powering GET /v1/data/export?preview=true; migration 025 adds a UNION branch
+-- to the preview so it ALSO surfaces not-yet-approved in-store entries
+-- (pending instore_price_entries, which have no snapshot yet); EAN-required guard in 021 — both
 -- views drop EAN-less products so no blank-EAN row ever reaches export/API;
 -- Spanish `Estado` labels in 022, extended in 024 — the internal status code is
 -- translated at the view layer only, DB values stay English: ok→Disponible,

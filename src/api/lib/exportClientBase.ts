@@ -50,9 +50,9 @@ export interface ClientBaseFilters {
   ean?: string | undefined;
   /**
    * Operator preview: read from `client_base_preview` (includes pending_review
-   * days) instead of the published-only `client_base`. Lets an operator
-   * download today's data BEFORE approving it. Never used by the client
-   * pricing contract — export-only.
+   * scrape days AND not-yet-approved in-store entries — migration 025) instead
+   * of the published-only `client_base`. Lets an operator download today's data
+   * BEFORE approving it. Never used by the client pricing contract — export-only.
    */
   includeUnpublished?: boolean | undefined;
 }

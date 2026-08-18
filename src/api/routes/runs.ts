@@ -25,6 +25,7 @@ import {
   insertMarkerRows,
   FLAGGABLE_STATUSES,
 } from '../../orchestrator/publish.js';
+import { computeRunPriceOutliers } from '../../shared/priceOutliers.js';
 
 export const runsRouter = Router();
 
@@ -480,6 +481,35 @@ runsRouter.get('/:id/review', async (req: Request, res: Response) => {
   const runId = pathParam(req, 'id');
   const review = await computeRunReview(runId);
   res.json(success(review));
+});
+
+// =============================================================================
+// GET /v1/runs/:id/price-outliers
+//
+// Pre-publish operator panel: products in this run's day whose scraped price
+// deviates >= threshold% from the mapping's own recent median (self-history).
+// Reads raw snapshots (run + recovery runs), so it sees the pending/unapproved
+// day just like the preview export. Signed deviation (drops vs spikes) and the
+// snapshot's promotions are returned so the front can flag known promos.
+// =============================================================================
+
+const PriceOutliersQuery = z.object({
+  threshold: z.coerce.number().min(0).max(1000).optional(),
+  window: z.coerce.number().int().min(1).max(365).optional(),
+  min_history: z.coerce.number().int().min(1).max(365).optional(),
+});
+
+runsRouter.get('/:id/price-outliers', async (req: Request, res: Response) => {
+  const runId = pathParam(req, 'id');
+  const q = parseQuery(req, PriceOutliersQuery);
+
+  const result = await computeRunPriceOutliers(runId, {
+    ...(q.threshold !== undefined ? { threshold: q.threshold } : {}),
+    ...(q.window !== undefined ? { windowDays: q.window } : {}),
+    ...(q.min_history !== undefined ? { minHistory: q.min_history } : {}),
+  });
+
+  res.json(success(result));
 });
 
 // =============================================================================
