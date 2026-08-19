@@ -56,6 +56,8 @@ export interface PriceOutlier {
   ean: string | null;
   name: string;
   supermarket_id: string;
+  /** Product URL at the supermarket (same source as RunReviewGap.external_url). */
+  external_url: string | null;
   /** Today's scraped price for this mapping. */
   price: number;
   /** The self-history median it's compared against. */
@@ -82,6 +84,7 @@ export interface RunPriceOutliers {
 
 interface SpJoin {
   supermarket_id: string;
+  external_url: string | null;
   products:
     | { ean: string | null; name: string | null }
     | { ean: string | null; name: string | null }[]
@@ -144,7 +147,7 @@ async function loadRunOkSnapshots(runIds: string[]): Promise<RunSnapRow[]> {
     db
       .from('price_snapshots')
       .select(
-        'id, supermarket_product_id, scraped_at, price, promotions, supermarket_products:supermarket_product_id ( supermarket_id, products:product_id ( ean, name ) )',
+        'id, supermarket_product_id, scraped_at, price, promotions, supermarket_products:supermarket_product_id ( supermarket_id, external_url, products:product_id ( ean, name ) )',
       )
       .in('scrape_run_id', runIds)
       .eq('status', 'ok')
@@ -270,6 +273,7 @@ export async function computeRunPriceOutliers(
       ean: prod?.ean ?? null,
       name: prod?.name ?? '',
       supermarket_id: sp?.supermarket_id ?? 'unknown',
+      external_url: sp?.external_url ?? null,
       price: snap.price,
       baseline: Number(baseline.toFixed(2)),
       deviation_pct: Number(deviationPct.toFixed(1)),

@@ -1309,6 +1309,7 @@ never double-reports what's flagged elsewhere.
         "ean": "7790001",
         "name": "Lavandina 2 L",
         "supermarket_id": "carrefour",
+        "external_url": "https://www.carrefour.com.ar/lavandina-2-l/p",
         "price": 2100,
         "baseline": 1500,
         "deviation_pct": 40,
@@ -1322,8 +1323,10 @@ never double-reports what's flagged elsewhere.
 }
 ```
 
-`priceOutliers` is sorted by `|deviation_pct|` descending. `promotions` is
-present only when the scraped snapshot carried promotions. `date` is `null` (and
+`priceOutliers` is sorted by `|deviation_pct|` descending. `external_url` is the
+product's page at the chain (same source as `RunReviewGap.external_url`), or
+`null` if the mapping has none. `promotions` is present only when the scraped
+snapshot carried promotions. `date` is `null` (and
 `priceOutliers` empty) if the run produced no snapshots yet.
 
 ---
