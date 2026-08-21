@@ -39,6 +39,16 @@ interface SupermarketProductRow {
  */
 const NON_SCRAPED_SOURCE_TYPES = new Set(['revista', 'instore']);
 
+/**
+ * Per-mapping `metadata.source` values with no web scraper. These live on
+ * otherwise web-scraped chains but are written outside the scrape:
+ *   - 'instore'  — hand-entered prices (in-store review), written on approval.
+ *   - 'phantom'  — catalog products the store never publishes online; a daily
+ *                  run-less "not_found" marker is emitted instead (phantomMarkers.ts).
+ * Enqueueing either would just fail every job with no real URL to fetch.
+ */
+const NON_SCRAPED_MAPPING_SOURCES = new Set(['instore', 'phantom']);
+
 /** Result summary for logs/observability. */
 export interface RunDailyResult {
   scrapeRunId: string;
@@ -125,11 +135,15 @@ export async function runDailyScrape(
       );
       continue;
     }
-    // Skip in-store mappings even on a web-scraped chain (e.g. Maxiconsumo can
-    // have both): they have a synthetic external_id, not a real URL, so a scrape
-    // would always fail. Their prices are written on approval (in-store review).
+    // Skip mappings that have no web scraper even on a web-scraped chain (e.g.
+    // Maxiconsumo can host in-store rows too). They have a synthetic external_id,
+    // not a real URL, so a scrape would always fail:
+    //   - 'instore'  → prices written on approval (in-store review)
+    //   - 'phantom'  → run-less "No encontrado" markers written by the phantom
+    //                  emitter (see phantomMarkers.ts) for catalog products the
+    //                  store never publishes online.
     const products = ((productsRes.data ?? []) as SupermarketProductRow[]).filter(
-      (p) => p.metadata?.source !== 'instore',
+      (p) => !NON_SCRAPED_MAPPING_SOURCES.has(p.metadata?.source ?? ''),
     );
     if (products.length === 0) {
       log.info({ supermarket: sm.id }, 'no active products for supermarket, skipping');

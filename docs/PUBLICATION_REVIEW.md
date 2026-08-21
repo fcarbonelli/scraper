@@ -129,6 +129,30 @@ row except `scrape_failed`, so its series is complete for all *verified* outcome
 publish time is simply absent from the client feed for that day — the incentive
 is to resolve it during review.
 
+### 2.2b Phantom "siempre No encontrado" products
+
+Some catalog products must be **reported to the client every day** even though
+they have **no scrapeable URL** — the chain carries the item but never publishes
+it online (e.g. DÍA lavandina en gel 700 ml, EAN `8480017163226`, absent from
+diaonline). We model these as ordinary `supermarket_products` mappings tagged
+`metadata.source = 'phantom'`:
+
+- The daily enqueue **skips** them (like in-store rows) — no adapter could scrape
+  them, so a job would only ever fail. See `NON_SCRAPED_MAPPING_SOURCES` in
+  `src/orchestrator/enqueue.ts`.
+- `src/orchestrator/phantomMarkers.ts` (`emitPhantomMarkers`) instead writes ONE
+  **run-less** `not_found` snapshot per phantom per day. It runs in the daily cron
+  right after the scrape + revista check, and can be triggered on demand with
+  `node dist/src/orchestrator/index.js --phantom-now`. Idempotent per UTC day.
+
+Because the snapshot is run-less (`scrape_run_id NULL`), it **publishes
+immediately** (the `client_base` gate is `r.id IS NULL OR review_status =
+'published'`) and shows as "No encontrado" with no price and no operator action —
+identical to how in-store / revista carry-forward markers surface. Add a new
+phantom by inserting an active mapping with `metadata.source='phantom'` pointing
+at the product master (a real EAN is required, else the client_base EAN guard
+hides it).
+
 ### 2.3 Product lifecycle — `supermarket_products.lifecycle_status`
 
 For products that are *officially* gone (not a one-day failure):

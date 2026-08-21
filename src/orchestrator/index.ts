@@ -24,6 +24,7 @@ import { initSentry, captureError } from '../shared/sentry.js';
 import { closeAllQueues, getDiscoveryQueue } from '../shared/queue.js';
 import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
+import { emitPhantomMarkers } from './phantomMarkers.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
 import { checkRevistaConfigHealth, checkStuckMagazines } from '../revistas/health.js';
 import { createRevistaIngestWorker } from '../revistas/ingestWorker.js';
@@ -132,6 +133,21 @@ async function enqueueCoverageSweep(): Promise<void> {
   }
 }
 
+/**
+ * Emit the daily run-less "No encontrado" markers for phantom products (catalog
+ * items with no scrapeable URL — see phantomMarkers.ts). Isolated so a failure
+ * here never affects the scrape. Idempotent per day.
+ */
+async function runPhantomMarkersWithErrorHandling(): Promise<void> {
+  try {
+    const result = await emitPhantomMarkers();
+    if (result.emitted > 0) logger.info({ result }, 'phantom markers emitted');
+  } catch (err) {
+    logger.error({ err }, 'phantom marker emission failed');
+    captureError(err, { phase: 'phantom-markers' });
+  }
+}
+
 async function runFinalizerWithErrorHandling(): Promise<void> {
   try {
     const finalized = await finalizePendingRuns();
@@ -162,6 +178,7 @@ async function main(): Promise<void> {
     );
     const runId = await runScrapeWithErrorHandling(onlySupermarket);
     await runRevistaCheckWithErrorHandling(runId);
+    await runPhantomMarkersWithErrorHandling();
     await runFinalizerWithErrorHandling();
     process.exit(0);
   }
@@ -170,6 +187,14 @@ async function main(): Promise<void> {
   if (process.argv.includes('--sweep-now')) {
     logger.info('--sweep-now: enqueuing coverage sweep');
     await enqueueCoverageSweep();
+    process.exit(0);
+  }
+
+  // Manual one-shot phantom-marker emission (handy for emitting today's "No
+  // encontrado" markers on demand, e.g. right after adding a phantom mapping).
+  if (process.argv.includes('--phantom-now')) {
+    logger.info('--phantom-now: emitting phantom markers');
+    await runPhantomMarkersWithErrorHandling();
     process.exit(0);
   }
 
@@ -197,9 +222,9 @@ async function main(): Promise<void> {
   cron.schedule(
     env.SCRAPE_CRON,
     () =>
-      void runScrapeWithErrorHandling().then((runId) =>
-        runRevistaCheckWithErrorHandling(runId),
-      ),
+      void runScrapeWithErrorHandling()
+        .then((runId) => runRevistaCheckWithErrorHandling(runId))
+        .then(() => runPhantomMarkersWithErrorHandling()),
     { timezone: env.TZ },
   );
 
