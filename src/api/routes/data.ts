@@ -32,6 +32,7 @@ import {
 } from '../lib/clientPricing.js';
 import { isCompetitorEan } from '../../shared/priceIndicators.js';
 import { buildCatalogOverview, type CatalogProduct } from '../lib/catalogOverview.js';
+import { buildAnalyticsOverview } from '../lib/analyticsOverview.js';
 
 export const dataRouter = Router();
 
@@ -466,6 +467,39 @@ dataRouter.get('/catalog', async (req: Request, res: Response) => {
     },
     meta: { ts: new Date().toISOString(), summary },
   });
+});
+
+// =============================================================================
+// GET /v1/data/analytics/overview
+//
+// Pre-aggregated, catalog-wide analytics for the "Resumen" landing dashboard:
+// basket price index, availability/out-of-stock patterns, biggest movers,
+// per-category inflation, promotion intensity, and cross-chain competitiveness.
+// Built server-side from the published snapshot set so the front never pages
+// through the raw history. See docs/ANALYTICS_API_GUIDE.md (dashboard).
+//
+//   ?from=YYYY-MM-DD    first day (BA), inclusive (default today − 119d)
+//   ?to=YYYY-MM-DD      last day (BA), inclusive (default today)
+//   ?window=30          look-back for "biggest movers", in days (clamped 1..days-1)
+//   ?supermarket=coto   comma-separated chains to restrict every rollup to
+// =============================================================================
+
+const AnalyticsOverviewQuery = z.object({
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  window: z.coerce.number().int().min(1).max(365).default(30),
+  supermarket: z.string().trim().min(1).optional(),
+});
+
+dataRouter.get('/analytics/overview', async (req: Request, res: Response) => {
+  const q = parseQuery(req, AnalyticsOverviewQuery);
+  const overview = await buildAnalyticsOverview({
+    from: q.from,
+    to: q.to,
+    window: q.window,
+    supermarket: q.supermarket,
+  });
+  res.json(success(overview));
 });
 
 // =============================================================================
