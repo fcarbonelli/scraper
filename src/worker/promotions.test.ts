@@ -62,6 +62,17 @@ describe('flattenPromotions', () => {
     expect(flat.offer_price_1).toBe(850);
   });
 
+  it('prefers an exact published offerPrice over a rounded percentage', () => {
+    // Coto publishes both "20%Dto" and the exact "$1520.00" — trust the exact
+    // price for Precio_c_Oferta_1, but still derive unit_discount from the %.
+    const flat = flattenPromotions(
+      [promo({ description: '20%Dto', discountPct: 20, offerPrice: 1520 })],
+      1900,
+    );
+    expect(flat.offer_price_1).toBe(1520);
+    expect(flat.unit_discount).toBe(0.2);
+  });
+
   it('computes offer price from an absolute discount amount', () => {
     const flat = flattenPromotions(
       [promo({ description: '$200 off', discountAmount: 200 })],

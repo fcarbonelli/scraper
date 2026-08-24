@@ -56,6 +56,13 @@ export interface Promotion {
   discountPct?: number;
   /** Absolute discount in the product's currency (e.g. 500 means "$500 off"). */
   discountAmount?: number;
+  /**
+   * The exact, already-discounted price in the product's currency, when the
+   * site publishes it directly (e.g. Coto's `precioDescuento`). Preferred over
+   * `discountPct`/`discountAmount` when computing the offer price, so we never
+   * lose precision to a rounded percentage.
+   */
+  offerPrice?: number;
   /** E.g. ["galicia", "santander"] for payment-method offers. */
   validPaymentMethods?: string[];
   /** Original site-specific blob — kept for forensics/UI fidelity. */

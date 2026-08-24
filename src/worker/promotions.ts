@@ -63,6 +63,15 @@ export function flattenPromotions(
 
   const computeOfferPrice = (promo: Promotion | undefined): number | null => {
     if (!promo) return null;
+    // Prefer the exact discounted price when the site published it directly
+    // (e.g. Coto's `precioDescuento`) — no rounding from a percentage.
+    if (
+      promo.offerPrice != null &&
+      Number.isFinite(promo.offerPrice) &&
+      promo.offerPrice > 0
+    ) {
+      return round2(promo.offerPrice);
+    }
     // discountPct is a percentage (0-100) -> convert to a fraction for math.
     if (promo.discountPct != null && promo.discountPct > 0) {
       const frac = Math.min(promo.discountPct / 100, 1);

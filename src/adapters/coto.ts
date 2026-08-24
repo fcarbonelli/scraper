@@ -165,29 +165,51 @@ function getJsonStr<T = unknown>(attrs: Attrs, key: string): T | undefined {
 
 // =============================================================================
 // Promotion extraction
+//
+// Coto's REAL discount payloads (verified against the live `?format=json`
+// endpoint, 2026-08) — the field names are NOT the ones you'd guess:
+//
+//   product.dtoDescuentos: [{
+//     "id": "37206663",
+//     "textoVigencia": " ",
+//     "textoPrecioRegular": "Precio Contado: $1900",
+//     "precioRegular": "",
+//     "textoDescuento": "20%Dto",
+//     "precioDescuento": "$1520.00",
+//     "imagenDescuento": " ",
+//     "comentarios": " No acumulable con otras promos"
+//   }]
+//   product.dtoDescuentosMediosPago: [{
+//     "id": "80372620",
+//     "precioCuota": "$7791.58",
+//     "cantidadCuotas": "12",
+//     "imagenDescuento": "/content/images/cdigi/ofertas/…png"
+//   }]
+//
+// The previous implementation looked for `descripcion` / `porcentaje` / `monto`
+// (fields Coto never emits), so EVERY Coto discount was silently dropped:
+// `discountPct` and the offer price came back undefined, and the client_base
+// export showed the product at full price with no `Precio_c_Oferta_1` and no
+// `Descuento_Unitario`. We now parse the actual fields.
 // =============================================================================
 
 /**
  * Normalize Coto's two promotion arrays into our shared `Promotion` shape.
- * - `dtoDescuentos`            -> generic discounts
- * - `dtoDescuentosMediosPago`  -> payment-method-specific discounts
+ * - `dtoDescuentos`            -> generic price discounts (the "%Dto" offers)
+ * - `dtoDescuentosMediosPago`  -> financing (cuotas) offers
  *
- * Coto's exact shape for a real, in-flight promo isn't documented; we keep
- * the original blob in `raw` so we never lose information, and best-effort
- * fill the structured fields.
+ * `regularPrice` is the product's list price (`dtoPrice.precioLista`); we use
+ * it to sanity-check the parsed discounted price and to derive the absolute
+ * discount when a percentage isn't published.
  */
-function extractPromotions(attrs: Attrs): Promotion[] {
+function extractPromotions(attrs: Attrs, regularPrice: number): Promotion[] {
   const promotions: Promotion[] = [];
 
   const generic = getJsonStr<unknown[]>(attrs, 'product.dtoDescuentos');
   if (Array.isArray(generic)) {
     for (const entry of generic) {
-      promotions.push({
-        type: 'discount',
-        description: describePromo(entry) ?? 'Descuento',
-        ...numericPromoFields(entry),
-        raw: entry,
-      });
+      const promo = cotoDiscountPromo(entry, regularPrice);
+      if (promo) promotions.push(promo);
     }
   }
 
@@ -197,84 +219,112 @@ function extractPromotions(attrs: Attrs): Promotion[] {
   );
   if (Array.isArray(payment)) {
     for (const entry of payment) {
-      promotions.push({
-        type: 'payment_method',
-        description: describePromo(entry) ?? 'Descuento con medio de pago',
-        ...numericPromoFields(entry),
-        validPaymentMethods: extractPaymentMethods(entry),
-        raw: entry,
-      });
+      const promo = cotoPaymentPromo(entry);
+      if (promo) promotions.push(promo);
     }
   }
 
   return promotions;
 }
 
-/** Best-effort human description from a raw promo blob. */
-function describePromo(entry: unknown): string | undefined {
-  if (!entry || typeof entry !== 'object') return undefined;
-  const o = entry as Record<string, unknown>;
-  return (
-    pickString(o, 'descripcion') ??
-    pickString(o, 'description') ??
-    pickString(o, 'nombre') ??
-    pickString(o, 'name') ??
-    pickString(o, 'leyenda')
-  );
+/** Round to 2 decimals (currency). */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
-function numericPromoFields(entry: unknown): {
-  discountPct?: number;
-  discountAmount?: number;
-} {
-  if (!entry || typeof entry !== 'object') return {};
-  const o = entry as Record<string, unknown>;
-  const out: { discountPct?: number; discountAmount?: number } = {};
-  const pct =
-    pickNumber(o, 'porcentaje') ??
-    pickNumber(o, 'porcentajeDescuento') ??
-    pickNumber(o, 'descuentoPorcentaje');
-  if (pct !== undefined) out.discountPct = pct;
-  const amt =
-    pickNumber(o, 'monto') ??
-    pickNumber(o, 'descuento') ??
-    pickNumber(o, 'descuentoMonto');
-  if (amt !== undefined) out.discountAmount = amt;
-  return out;
-}
+/**
+ * Parse a Coto money string into a number. Handles both "$1520.00" (dot
+ * decimal, as Coto's promo strings use today) and the Argentine "$1.520,00"
+ * (dot thousands, comma decimal) form defensively.
+ */
+function parseMoney(raw: unknown): number | undefined {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : undefined;
+  if (typeof raw !== 'string') return undefined;
+  const cleaned = raw.replace(/[^\d.,]/g, '');
+  if (!cleaned) return undefined;
 
-function extractPaymentMethods(entry: unknown): string[] | undefined {
-  if (!entry || typeof entry !== 'object') return undefined;
-  const o = entry as Record<string, unknown>;
-  const candidates = [
-    o['mediosPago'],
-    o['mediosDePago'],
-    o['paymentMethods'],
-    o['banco'],
-    o['banks'],
-  ].filter(Boolean);
-  for (const c of candidates) {
-    if (Array.isArray(c) && c.every((x) => typeof x === 'string')) {
-      return c as string[];
-    }
-    if (typeof c === 'string') return [c];
+  const hasDot = cleaned.includes('.');
+  const hasComma = cleaned.includes(',');
+  let normalized = cleaned;
+  if (hasDot && hasComma) {
+    // The last-appearing separator is the decimal one.
+    normalized =
+      cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')
+        ? cleaned.replace(/\./g, '').replace(',', '.')
+        : cleaned.replace(/,/g, '');
+  } else if (hasComma) {
+    normalized = cleaned.replace(',', '.');
   }
-  return undefined;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : undefined;
 }
 
+/** Parse a percentage out of a "20%Dto" / "35 % Dto" style string. */
+function parsePercent(raw: unknown): number | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const m = raw.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (!m?.[1]) return undefined;
+  const n = Number(m[1].replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** Non-empty trimmed string value, or undefined. */
 function pickString(o: Record<string, unknown>, key: string): string | undefined {
   const v = o[key];
-  return typeof v === 'string' && v.trim() !== '' ? v : undefined;
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 }
 
-function pickNumber(o: Record<string, unknown>, key: string): number | undefined {
-  const v = o[key];
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string' && v.trim() !== '') {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
+/** Turn one `dtoDescuentos` entry into a Promotion (null if it carries nothing). */
+function cotoDiscountPromo(entry: unknown, regularPrice: number): Promotion | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const o = entry as Record<string, unknown>;
+
+  const pct = parsePercent(o['textoDescuento']);
+  const offer = parseMoney(o['precioDescuento']);
+  const texto = pickString(o, 'textoDescuento');
+  const comentarios = pickString(o, 'comentarios');
+  const description =
+    [texto, comentarios].filter(Boolean).join(' — ') || 'Descuento';
+
+  const promo: Promotion = { type: 'discount', description, raw: entry };
+  if (pct !== undefined) promo.discountPct = pct;
+  // Only trust the parsed discounted price when it's below the list price —
+  // guards against a mis-parse or a sentinel producing a bogus "offer".
+  if (offer !== undefined && offer > 0 && regularPrice > 0 && offer < regularPrice) {
+    promo.offerPrice = offer;
+    if (promo.discountPct === undefined) {
+      promo.discountAmount = round2(regularPrice - offer);
+    }
   }
-  return undefined;
+
+  // Drop entries that carry no usable discount AND no distinctive text (an
+  // empty `[]` never reaches here, but a blank object shouldn't become a promo).
+  if (
+    promo.discountPct === undefined &&
+    promo.offerPrice === undefined &&
+    promo.discountAmount === undefined &&
+    description === 'Descuento'
+  ) {
+    return null;
+  }
+  return promo;
+}
+
+/** Turn one `dtoDescuentosMediosPago` entry into a financing Promotion. */
+function cotoPaymentPromo(entry: unknown): Promotion | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const o = entry as Record<string, unknown>;
+
+  const cuotas = pickString(o, 'cantidadCuotas');
+  const precioCuota = pickString(o, 'precioCuota');
+  let description: string;
+  if (cuotas && precioCuota) description = `${cuotas} cuotas de ${precioCuota}`;
+  else if (cuotas) description = `${cuotas} cuotas`;
+  else description = 'Descuento con medio de pago';
+
+  // Financing is not a price cut, so no discountPct/offerPrice — this is
+  // informational (it fills Promocion_1/2, never the offer price columns).
+  return { type: 'payment_method', description, raw: entry };
 }
 
 // =============================================================================
@@ -597,7 +647,7 @@ export function parseCotoResponse(
   }
 
   // -- Promotions ------------------------------------------------------------
-  const promotions = extractPromotions(attrs);
+  const promotions = extractPromotions(attrs, price);
 
   // -- Master catalog data ---------------------------------------------------
   const name = getStr(attrs, 'product.displayName');
