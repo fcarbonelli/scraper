@@ -882,6 +882,10 @@ Decisions locked in:
   and a back-office operator approves each finished visit (`src/instore/review.ts`,
   per-visit with inline edits) to materialize the snapshots — so nothing reaches the client
   base until reviewed. Review endpoints (`/v1/in-store/review/*`) require a full-access key.
+  Back-office extras on that tab: `GET /v1/in-store/review/export` (Excel/CSV of
+  the day's PDV entries) and `GET /v1/in-store/review/price-outliers` (typed
+  prices that deviate ≥30% from self-history / other stores / EDP target — the
+  in-store analogue of `GET /v1/runs/:id/price-outliers`).
   **Migration 024** adds a **"sin precio / hay stock"** path (`instore_price_entries.no_price`,
   nullable `price`): when a worker sees the product but can't read the price, they flag it
   instead of typing a fake $1/$0. On approval it writes a MARKER snapshot

@@ -380,6 +380,20 @@ Recent submissions (defaults to today, Buenos Aires; `date` is ignored when
 supermarket_name, ean, product_id, product_name, brand, price, wholesale_price,
 wholesale_min_units, no_price, note, entered_by, review_status, created_at }`.
 
+### `GET /v1/in-store/review/export?date=&from=&to=&supermarket_id=&visit_id=&review_status=&format=`
+Back-office Excel/CSV of the relevamiento (full-access key). Defaults to today
+(Buenos Aires). File: `relevamiento-presencial_YYYY-MM-DD.xlsx`. Columns:
+Fecha, Cadena, Provincia, Localidad, Direccion, Relevador, EAN, Producto,
+Marca, Precio_Regular, Precio_Mayorista, Unidades_Mayorista, Sin_precio,
+Observaciones, Estado_revision, Visit_id, Entry_id.
+
+### `GET /v1/in-store/review/price-outliers?date=&supermarket_id=&threshold=&window=&min_history=`
+Back-office "precios desviados" panel (full-access key). Same idea as
+`GET /v1/runs/:id/price-outliers`. Defaults: today, threshold 30%, window 90
+days, min_history 1. Response: `{ date, supermarket_id, baseline, threshold,
+count, priceOutliers }` — each outlier has `field`, signed `deviation_pct`,
+and `source` (`self-history` | `cross-store` | `target`).
+
 ---
 
 ## 9. Suggested build checklist
@@ -422,7 +436,21 @@ Flow:
    fields, `no_price`, and `review_status`). Entries with `no_price: true` show a
    `Sin precio` chip (no price to check — they publish as an "En stock sin precio"
    marker). Show the flyer photos too via `GET /v1/in-store/visits/:id/photos`.
-3. **Approve** — `POST /v1/in-store/review/visits/:id/approve`:
+3. **Precios desviados** — `GET /v1/in-store/review/price-outliers?date=`
+   (same idea as the online publicación panel). Lists typed prices that
+   deviate ≥30% from a baseline so extra/missing-zero typos jump out before
+   approval. Each row has `field` (`price` \| `wholesale_price`), signed
+   `deviation_pct`, and `source` (`self-history` \| `cross-store` \| `target`).
+   Default window is **90 days** (visits are ~twice a week). Skip `no_price`
+   rows — nothing to judge. Clicking a row should open that visit's review
+   (`GET /v1/in-store/review/visits/:id`) with the entry highlighted.
+4. **Descargar Excel** — `GET /v1/in-store/review/export?date=` returns a
+   `.xlsx` (or `?format=csv`) of the day's entries: cadena, sucursal,
+   relevador, EAN, product, both prices, sin-precio, observaciones,
+   estado de revisión. Optional `supermarket_id` / `visit_id` /
+   `review_status`. Filename
+   `relevamiento-presencial_YYYY-MM-DD.xlsx`.
+5. **Approve** — `POST /v1/in-store/review/visits/:id/approve`:
    ```ts
    {
      reviewed_by: string;   // required — who signed off

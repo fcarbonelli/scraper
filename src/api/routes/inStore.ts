@@ -15,6 +15,9 @@
  *   POST /v1/in-store/entries             submit a scanned price (mapping + snapshot)
  *   GET  /v1/in-store/entries             recent submissions (today's list / review)
  *
+ *   GET  /v1/in-store/review/export       Excel/CSV of the day's relevamiento (full-access)
+ *   GET  /v1/in-store/review/price-outliers  typed-price outliers (full-access)
+ *
  * These power a mobile web tool used by field workers in physical (mostly
  * wholesale) stores. Auth is the platform-standard X-API-Key; the app embeds a
  * key scoped to `in-store` (see enforceScopes). Contract + UX:
@@ -37,26 +40,11 @@ import { recordInStoreEntry, updatePendingEntry, InStoreError } from '../../inst
 import { createVisit, finishVisit, getVisit, countVisit, type Visit, type VisitCounts } from '../../instore/visits.js';
 import { uploadVisitPhoto } from '../../instore/storage.js';
 import { approveVisit, type ReviewDecision } from '../../instore/review.js';
+import { baDayRangeUtc, todayInBuenosAires } from '../../instore/dates.js';
+import { fetchInStoreExportRows, toInStoreCsv, writeInStoreXlsx } from '../../instore/export.js';
+import { computeInStorePriceOutliers } from '../../instore/priceOutliers.js';
 
 export const inStoreRouter = Router();
-
-/** Argentina is UTC-3 year-round (no DST) — the offset the export's day uses. */
-const AR_OFFSET = '-03:00';
-
-/** Today's date (YYYY-MM-DD) in Buenos Aires. */
-function todayInBuenosAires(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Argentina/Buenos_Aires',
-  }).format(new Date());
-}
-
-/** UTC [from, to) range covering one Buenos Aires calendar day. */
-function baDayRangeUtc(date: string): { fromUtc: string; toUtc: string } {
-  const fromUtc = new Date(`${date}T00:00:00${AR_OFFSET}`).toISOString();
-  const toUtc = new Date(`${date}T00:00:00${AR_OFFSET}`);
-  toUtc.setUTCDate(toUtc.getUTCDate() + 1);
-  return { fromUtc, toUtc: toUtc.toISOString() };
-}
 
 /** Map an InStoreError to the matching HTTP error. */
 function toApiError(err: unknown): never {
@@ -576,6 +564,81 @@ inStoreRouter.get('/entries', async (req: Request, res: Response) => {
 // =============================================================================
 // Daily review (back-office) — requires a full-access API key
 // =============================================================================
+
+// GET /v1/in-store/review/export — Excel/CSV of the relevamiento (not client_base).
+//
+// Same idea as GET /v1/data/export, but the rows are the field-worker entries
+// (who typed what, where, review status) so the "relevamiento presencial"
+// tab can download the day's PDV work. Full-access only — this is a
+// back-office dump, not something the field app should pull.
+const ReviewExportQuery = z.object({
+  format: z.enum(['xlsx', 'csv']).default('xlsx'),
+  date: z.iso.date().optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  supermarket_id: z.string().trim().min(1).optional(),
+  visit_id: z.string().uuid().optional(),
+  review_status: z.enum(['pending', 'approved', 'rejected']).optional(),
+});
+
+inStoreRouter.get('/review/export', async (req: Request, res: Response) => {
+  requireFullAccess(req);
+  const q = parseQuery(req, ReviewExportQuery);
+
+  const today = todayInBuenosAires();
+  const from = q.date ?? q.from ?? q.to ?? today;
+  const to = q.date ?? q.to ?? q.from ?? today;
+
+  const rows = await fetchInStoreExportRows({
+    from,
+    to,
+    ...(q.supermarket_id !== undefined ? { supermarketId: q.supermarket_id } : {}),
+    ...(q.visit_id !== undefined ? { visitId: q.visit_id } : {}),
+    ...(q.review_status !== undefined ? { reviewStatus: q.review_status } : {}),
+  });
+
+  const windowLabel = from === to ? from : `${from}_${to}`;
+  const filenameBase = `relevamiento-presencial_${windowLabel}`;
+
+  if (q.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filenameBase}.csv"`);
+    res.send(toInStoreCsv(rows));
+    return;
+  }
+
+  await writeInStoreXlsx(res, rows, filenameBase);
+});
+
+// GET /v1/in-store/review/price-outliers
+//
+// Pre-approve operator panel: typed prices that deviate ≥threshold% from
+// a baseline (self-history → other stores → EDP target). Same role as
+// GET /v1/runs/:id/price-outliers on the online publicación tab — catch
+// extra/missing-zero typos before the visit is approved.
+const ReviewOutliersQuery = z.object({
+  date: z.iso.date().optional(),
+  supermarket_id: z.string().trim().min(1).optional(),
+  threshold: z.coerce.number().min(0).max(1000).optional(),
+  window: z.coerce.number().int().min(1).max(365).optional(),
+  min_history: z.coerce.number().int().min(1).max(365).optional(),
+});
+
+inStoreRouter.get('/review/price-outliers', async (req: Request, res: Response) => {
+  requireFullAccess(req);
+  const q = parseQuery(req, ReviewOutliersQuery);
+  const date = q.date ?? todayInBuenosAires();
+
+  const result = await computeInStorePriceOutliers(date, {
+    ...(q.supermarket_id !== undefined ? { supermarketId: q.supermarket_id } : {}),
+    ...(q.threshold !== undefined ? { threshold: q.threshold } : {}),
+    ...(q.window !== undefined ? { windowDays: q.window } : {}),
+    ...(q.min_history !== undefined ? { minHistory: q.min_history } : {}),
+  });
+
+  res.json(success(result));
+});
+
 
 // GET /v1/in-store/review/pending — finished visits awaiting review.
 const ReviewPendingQuery = PaginationQuery.extend({

@@ -1834,7 +1834,7 @@ photos live on the visit, not on each product.
 > `in-store-visit.json`, `in-store-visits.json`, `in-store-photo.json`,
 > `in-store-entry.json`, `in-store-entries.json`,
 > `in-store-review-pending.json`, `in-store-review-visit.json`,
-> `in-store-review-approve.json`.
+> `in-store-review-approve.json`, `in-store-review-price-outliers.json`.
 
 **Auth.** These routes accept the platform-standard `X-API-Key`. The mobile app
 embeds a key **scoped to `in-store`** (created with
@@ -2115,7 +2115,7 @@ Each item:
 
 ### Daily review (back-office)
 
-**These three endpoints require a FULL-ACCESS API key** (not the `in-store`-scoped
+**These review endpoints require a FULL-ACCESS API key** (not the `in-store`-scoped
 app key). They power a back-office screen that reviews each day's finished visits
 before the prices reach the client base.
 
@@ -2166,6 +2166,104 @@ snapshot (reaches the client base); rejecting discards it. Marks the visit
 → `{ visit_id: string; approved: number; rejected: number; snapshots: number }`.
 Errors: `403 FORBIDDEN` (scoped key), `404 NOT_FOUND` (unknown visit),
 `400 INVALID_REQUEST` (visit not finished).
+
+#### `GET /v1/in-store/review/export`
+
+Download the **relevamiento presencial** as a real `.xlsx` (default) or `.csv`.
+This is the field-worker dump (who typed what, where, review status) — **not**
+the client `client_base` pricing file. Same idea as `GET /v1/data/export`, but
+scoped to in-store entries so the review tab can archive / share a day's PDV
+work. Full-access only.
+
+Defaults to **today (Buenos Aires)**. `visit_id` ignores the date window (a
+visit can span midnight).
+
+| Param | Default | Meaning |
+| --- | --- | --- |
+| `format` | `xlsx` | `xlsx` or `csv` |
+| `date` | today (BA) | Single day (`YYYY-MM-DD`). Wins over `from`/`to`. |
+| `from`, `to` | — | Inclusive date range when `date` is omitted |
+| `supermarket_id` | — | One chain |
+| `visit_id` | — | One visit (all its entries, any day) |
+| `review_status` | — | `pending` \| `approved` \| `rejected` |
+
+Filename: `relevamiento-presencial_2026-08-24.xlsx` (or `_from_to` for a range).
+Columns, in order:
+
+`Fecha`, `Cadena`, `Provincia`, `Localidad`, `Direccion`, `Relevador`, `EAN`,
+`Producto`, `Marca`, `Precio_Regular`, `Precio_Mayorista`, `Unidades_Mayorista`,
+`Sin_precio` (`si` or blank), `Observaciones`, `Estado_revision`, `Visit_id`,
+`Entry_id`.
+
+`Sin_precio` rows leave the price columns blank. Errors: `403 FORBIDDEN`
+(scoped key).
+
+#### `GET /v1/in-store/review/price-outliers`
+
+Pre-approve operator panel — the in-store equivalent of
+`GET /v1/runs/:id/price-outliers`. Surfaces typed prices that deviate by
+**≥ 30%** from a baseline so extra/missing-zero typos (and other fat-finger
+errors) can be eyeballed **before** a visit is approved.
+
+Reads **pending and approved** entries for the day (rejected and `no_price`
+rows are skipped). Both **Precio Regular** and **Precio Mayorista** are
+checked independently (`field`).
+
+**Baseline** (first source with enough signal wins):
+
+1. **Self-history** — previous in-store entries for the same supermarket + EAN
+   over the last `window` days (default 90; visits are ~twice a week).
+2. **Cross-store** — other in-store chains' prices for the same EAN (prior
+   history + same-day peers). Catches a first visit with no self-history.
+3. **EDP target** — the client's target for the EAN + the chain's canal
+   (`MAY` / `MAY REG` / `SPM`). Last resort when the product is new everywhere.
+
+A mapping/EAN with no signal is skipped (can't judge). `deviation_pct` is
+signed (negative = drop, positive = spike). Rows with
+`|deviation_pct| >= threshold` are returned, sorted by magnitude descending.
+
+Fixture: [`examples/api/in-store-review-price-outliers.json`](examples/api/in-store-review-price-outliers.json).
+
+| Param | Default | Meaning |
+| --- | --- | --- |
+| `date` | today (BA) | Buenos Aires calendar day |
+| `supermarket_id` | — | Only one chain |
+| `threshold` | `30` | Min `|deviation_pct|` (percent) to include |
+| `window` | `90` | Days of prior in-store history |
+| `min_history` | `1` | Min prior points before trusting a baseline |
+
+```ts
+{
+  date: string;
+  supermarket_id: string | null;
+  baseline: {
+    method: 'self-history-then-cross-store-then-target';
+    windowDays: number;
+    minHistory: number;
+  };
+  threshold: number;
+  count: number;
+  priceOutliers: {
+    entry_id: string;
+    visit_id: string | null;
+    ean: string;
+    name: string;
+    brand: string | null;
+    supermarket_id: string;
+    supermarket_name: string | null;
+    entered_by: string;
+    field: 'price' | 'wholesale_price';
+    price: number;                 // the typed value that failed the check
+    baseline: number;
+    deviation_pct: number;         // signed percent
+    source: 'self-history' | 'cross-store' | 'target';
+    review_status: string;
+    created_at: string;
+  }[];
+}
+```
+
+Errors: `403 FORBIDDEN` (scoped key).
 
 ---
 
