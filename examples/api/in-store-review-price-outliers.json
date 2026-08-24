@@ -1,0 +1,50 @@
+{
+  "data": {
+    "date": "2026-08-24",
+    "supermarket_id": null,
+    "baseline": {
+      "method": "self-history-then-cross-store-then-target",
+      "windowDays": 90,
+      "minHistory": 1
+    },
+    "threshold": 30,
+    "count": 2,
+    "priceOutliers": [
+      {
+        "entry_id": "3f2a1b0c-9d8e-4f70-8a1b-2c3d4e5f6071",
+        "visit_id": "0a1b2c3d-4e5f-4071-8a2b-3c4d5e6f7081",
+        "ean": "7790040999999",
+        "name": "Gaseosa Cola 2.25L",
+        "brand": "COCA COLA",
+        "supermarket_id": "diarco",
+        "supermarket_name": "DIARCO",
+        "entered_by": "Juan Pérez",
+        "field": "price",
+        "price": 25900,
+        "baseline": 2590,
+        "deviation_pct": 900,
+        "source": "self-history",
+        "review_status": "pending",
+        "created_at": "2026-08-24T14:32:05.912Z"
+      },
+      {
+        "entry_id": "6b7c8d9e-0f11-4223-8455-66778899aabb",
+        "visit_id": "0a1b2c3d-4e5f-4071-8a2b-3c4d5e6f7081",
+        "ean": "7791234567890",
+        "name": "Arroz Largo Fino 1kg",
+        "brand": "GALLO",
+        "supermarket_id": "diarco",
+        "supermarket_name": "DIARCO",
+        "entered_by": "Juan Pérez",
+        "field": "wholesale_price",
+        "price": 145,
+        "baseline": 1290,
+        "deviation_pct": -88.8,
+        "source": "cross-store",
+        "review_status": "pending",
+        "created_at": "2026-08-24T14:31:40.221Z"
+      }
+    ]
+  },
+  "meta": { "ts": "2026-08-24T18:00:00.000Z" }
+}

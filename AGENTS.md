@@ -121,6 +121,11 @@ scraper/
     │   ├── entry.ts                   ← record a submission → supermarket_products + run-less snapshot + audit log
     │   ├── visits.ts                  ← PDV visit lifecycle (create w/ location, finish/exit, counts)
     │   ├── review.ts                  ← daily review gate: approve a finished visit → materialize snapshots (mig 019)
+    │   ├── export.ts                  ← Excel/CSV of the day's in-store relevamiento (GET /v1/in-store/review/export)
+    │   ├── priceOutliers.ts           ← typed-price outliers for the review tab (GET /v1/in-store/review/price-outliers)
+    │   ├── detectOutliers.ts          ← pure outlier rules (no DB; unit-tested)
+    │   ├── exportFormat.ts            ← Excel/CSV column list + CSV writer (no DB)
+    │   ├── dates.ts                   ← Buenos Aires calendar-day helpers
     │   └── storage.ts                 ← flyer/offer photo upload to Supabase Storage (bucket 'instore-photos')
     ├── orchestrator/
     │   ├── index.ts                   ← cron + finalizer interval
@@ -157,7 +162,7 @@ scraper/
             ├── runs.ts                ← list, detail with breakdown
             ├── alerts.ts              ← list, PATCH (ack/resolve)
             ├── revistas.ts            ← magazine review UI (/v1/revistas/*)
-            └── inStore.ts             ← in-store price entry (/v1/in-store/*): supermarkets, lookup, visits, photos, entries (create/edit), review (full-access)
+            └── inStore.ts             ← in-store price entry (/v1/in-store/*): supermarkets, lookup, visits, photos, entries (create/edit), review (full-access: pending, export, outliers, approve)
 ```
 
 ## Commands cheat sheet
