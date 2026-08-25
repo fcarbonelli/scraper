@@ -79,6 +79,7 @@ scraper/
 │   ├── heal-eans.ts                   ← one-time backfill of catalog EANs onto EAN-less products
 │   ├── import-price-list.ts           ← import client Price List xlsx → price_targets (PRECIO_TGT_SPM/MAY)
 │   ├── scan-price-anomalies.ts        ← review aid: flag bogus low prices (OOS sentinels reported as available)
+│   ├── backfill-coto-promos.ts        ← retroactively fix Coto discount columns on old snapshots from raw_data (no re-scrape)
 │   └── setup-ec2.sh                   ← one-shot bootstrap for a fresh Ubuntu EC2 (Phase 5)
 └── src/
     ├── adapters/
@@ -179,6 +180,7 @@ scraper/
 | `npm run orchestrator:run-now`    | Run a one-shot daily scrape immediately (needs Redis) | Manual trigger, e.g., backfill                         |
 | `npx tsx --env-file=.env scripts/import-price-list.ts "<file.xlsx>" [--dry-run]` | Import the client's Price List (EDP target price per EAN per channel) into `price_targets`; fills `PRECIO_TGT_SPM` / `PRECIO_TGT_MAY` in the export | Every time the client sends a new/updated price list. Idempotent upsert. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
 | `npx tsx --env-file=.env scripts/scan-price-anomalies.ts [--date=YYYY-MM-DD] [--threshold=0.35] [--xlsx]` | Read-only scan for bogus low prices (out-of-stock sentinels the site reports as *available*). Flags rows whose price is a tiny fraction of the same-EAN cross-store median (or the mapping's own recent median). | Before approving a day — catches VTEX-style OOS-low-price leaks that have no availability flag. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
+| `npx tsx --env-file=.env scripts/backfill-coto-promos.ts [--from=YYYY-MM-DD] [--to=YYYY-MM-DD] [--apply]` | Retroactively recompute Coto discount columns (`offer_price_1/2`, `promotion_1/2`, `unit_discount`, `promotions`) on already-scraped `ok` snapshots from the stored `raw_data.attributes` — no re-scrape. Dry-run by default; only changed rows are written. | One-time cleanup after the Coto discount-parsing fix, so past days' exports show the discounts too. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
 | `npm run apikey:create -- <name> [--scope=in-store]` | Generate an API key, store hash, print plaintext once. `--scope` restricts it to matching routes (e.g. `in-store`) | Granting access to a new consumer (frontend, in-store app, etc.) |
 | `npm run typecheck`               | `tsc --noEmit`                                        | Always run before suggesting code is "done"            |
 | `npm run lint`                    | ESLint over `**/*.ts`                                 | Before committing                                      |
