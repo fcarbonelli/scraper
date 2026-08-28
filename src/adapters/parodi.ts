@@ -31,6 +31,9 @@ const SEARCH_TIMEOUT_MS = 20_000;
 const DIPA_HOST = 'cordoba.dipa.ar';
 const DIPA_BASE_URL = 'https://cordoba.dipa.ar';
 
+/** Max canonical redirects to follow before giving up (guards against loops). */
+const MAX_REDIRECT_HOPS = 3;
+
 // Present a realistic Chrome UA to avoid WAF blocks on non-browser agents.
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -97,13 +100,28 @@ function extractProductIdFromUrl(canonicalUrl: string): string | null {
 // =============================================================================
 
 /**
- * Fetch HTML. We do NOT auto-follow redirects so the PrestaShop "unknown id →
- * 302 to home" behavior is detectable as `product_not_found`.
+ * Fetch HTML. We do NOT auto-follow redirects (redirect:'manual') so we can
+ * inspect the target and decide what a 3xx means:
+ *
+ *   - PrestaShop 301/302-redirects a STALE-but-valid product URL to the SAME
+ *     product's current canonical URL whenever the slug or category in the
+ *     stored URL has drifted (a routine event — category renamed, product name
+ *     edited). The product is alive; only its friendly URL changed. Treating
+ *     that as `product_not_found` (the old behavior) marked live, in-stock
+ *     products as gaps every day — the client saw them "discontinued".
+ *   - A genuinely removed product redirects to the home page or a category
+ *     listing (no product id), which we DO surface as `product_not_found`.
+ *
+ * So when `expectedId` is provided we follow a redirect ONLY if its target is
+ * the same product's canonical page (same leading id); any other target (home,
+ * category, a different product) is a real `product_not_found`.
  */
 async function fetchDipaHtml(
   url: string,
   signal: AbortSignal | undefined,
   timeoutMs: number,
+  expectedId?: string,
+  hop = 0,
 ): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -141,9 +159,25 @@ async function fetchDipaHtml(
   }
 
   if (res.status >= 300 && res.status < 400) {
+    // Follow the redirect ONLY when it points at the same product's canonical
+    // URL (PrestaShop friendly-URL canonicalization). Otherwise it's a genuine
+    // "product gone" redirect to home/category → product_not_found.
+    const location = res.headers.get('location');
+    if (expectedId && location && hop < MAX_REDIRECT_HOPS) {
+      let targetId: string | null = null;
+      try {
+        const absolute = new URL(location, url).toString();
+        targetId = extractProductIdFromUrl(canonicalizeUrl(absolute));
+        if (targetId === expectedId) {
+          return fetchDipaHtml(absolute, signal, timeoutMs, expectedId, hop + 1);
+        }
+      } catch {
+        // Unparseable Location — fall through to product_not_found below.
+      }
+    }
     throw new ScrapeError(
       'product_not_found',
-      `DIPA redirected (status=${res.status}) — product likely doesn't exist: ${url}`,
+      `DIPA redirected (status=${res.status}) to a non-product/other page — product likely doesn't exist: ${url}`,
       { httpStatus: res.status },
     );
   }
@@ -291,7 +325,14 @@ export const parodiAdapter: SupermarketAdapter = {
       );
     }
     ctx.logger.debug({ url: ctx.externalUrl }, 'fetching DIPA product HTML');
-    const html = await fetchDipaHtml(ctx.externalUrl, ctx.signal, REQUEST_TIMEOUT_MS);
+    // Pass the product id so a stale-URL canonical redirect (same product, new
+    // slug/category) is followed instead of being mistaken for a 404.
+    const html = await fetchDipaHtml(
+      ctx.externalUrl,
+      ctx.signal,
+      REQUEST_TIMEOUT_MS,
+      ctx.externalId,
+    );
     return parseDipaHtml(html, ctx);
   },
 };
