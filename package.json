@@ -47,6 +47,7 @@
     "revistas:dedupe-report": "tsx --env-file=.env scripts/revistas-dedupe-cleanup.ts",
     "lp:import": "tsx --env-file=.env scripts/import-price-list.ts",
     "anomalies:scan": "tsx --env-file=.env scripts/scan-price-anomalies.ts",
+    "parodi:reset-delisted": "tsx --env-file=.env scripts/reset-parodi-delisted.ts",
     "backfill:coto-promos": "tsx --env-file=.env scripts/backfill-coto-promos.ts",
     "apikey:create": "tsx --env-file=.env scripts/create-api-key.ts"
   },

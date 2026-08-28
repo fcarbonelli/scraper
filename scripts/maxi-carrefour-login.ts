@@ -18,7 +18,17 @@
  *   npm run maxi-carrefour:login -- --no-chrome # use bundled chromium
  *   npm run maxi-carrefour:login -- --edge      # use installed Microsoft Edge
  *   npm run maxi-carrefour:login -- --region=BS_AS_NORTE --seller=219
- *                                               # pin a specific sucursal
+ *                                               # log in bound to a specific
+ *                                               #   sucursal (this run only)
+ *   npm run maxi-carrefour:login -- --region="BS AS (OESTE)" --seller=294 \
+ *     --probe=<known_stocked_ean> --pin
+ *                                               # DURABLE pin: also writes
+ *                                               #   config.maxiCarrefourLogin.pick
+ *                                               #   so every future auto-refresh
+ *                                               #   stays on this sucursal.
+ *                                               #   Requires a --probe EAN so the
+ *                                               #   pin is only written once the
+ *                                               #   sucursal is verified.
  *   npm run maxi-carrefour:login -- --append --region="BS AS (NORTE)" --seller=72 --probe=<ean>
  *                                               # seed an EXTRA sucursal as a
  *                                               #   fallback (config.maxiSessions)
@@ -77,6 +87,13 @@ interface Flags {
   maxSellers?: number;
   /** Remove a fallback session (by seller id) from config.maxiSessions. */
   removeSeller?: string;
+  /**
+   * Persist the pinned sucursal to config.maxiCarrefourLogin.pick so ALL future
+   * auto-refreshes stay on it (durable). Only honored with an explicit
+   * --region + --seller and a verified --probe EAN. Without this flag, a
+   * --region/--seller pin applies to THIS login only.
+   */
+  pin: boolean;
 }
 
 const PROBE_UA =
@@ -90,6 +107,7 @@ function parseFlags(argv: readonly string[]): Flags {
     headless: !argv.includes('--headed') && !argv.includes('--no-headless'),
     useSystemChrome: !argv.includes('--no-chrome'),
     append: argv.includes('--append'),
+    pin: argv.includes('--pin'),
   };
   for (const arg of argv) {
     if (arg === '--edge') flags.browserChannel = 'msedge';
@@ -445,15 +463,28 @@ async function main(): Promise<void> {
           `other sucursales.`,
       );
     } else {
-      await persistCookie(
-        'maxi-carrefour',
-        result,
-        logger,
-        canaryEan ? { canaryEan } : {},
-      );
+      // Durable pin: only when the operator explicitly pinned a sucursal AND a
+      // probe verified it unlocks a real price (so we never pin/validate an
+      // unconfirmed sucursal). autoPin writes maxiCarrefourLogin.pick so every
+      // future auto-refresh stays on this sucursal.
+      const doPin = flags.pin && Boolean(flags.region) && Boolean(flags.seller) && Boolean(canaryEan);
+      if (flags.pin && !doPin) {
+        console.warn(
+          'WARNING: --pin ignored — it requires --region, --seller AND a ' +
+            '--probe EAN that unlocks a real price at that sucursal.',
+        );
+      }
+      await persistCookie('maxi-carrefour', result, logger, {
+        ...(canaryEan ? { canaryEan } : {}),
+        ...(doPin ? { autoPin: true } : {}),
+      });
       console.log(
         `\nPersisted to supermarkets.config.phpSessId` +
-          (canaryEan ? ` (canary EAN: ${canaryEan})` : ''),
+          (canaryEan ? ` (canary EAN: ${canaryEan})` : '') +
+          (doPin
+            ? ` and PINNED sucursal (region="${result.region}", seller="${result.seller}") ` +
+              `to config.maxiCarrefourLogin.pick — future refreshes stay here.`
+            : ''),
       );
     }
   } catch (err) {
