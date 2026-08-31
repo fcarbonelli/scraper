@@ -152,7 +152,21 @@ export async function ensureInStoreMapping(
     })
     .select('id')
     .single();
-  if (inserted.error) throw inserted.error;
+  if (inserted.error) {
+    // Parallel approve of two entries for the same EAN can race on insert.
+    // Unique violation → re-read the winner.
+    if (inserted.error.code === '23505') {
+      const retry = await db
+        .from('supermarket_products')
+        .select('id')
+        .eq('supermarket_id', supermarketId)
+        .eq('external_id', externalId)
+        .maybeSingle();
+      if (retry.error) throw retry.error;
+      if (retry.data) return retry.data.id as string;
+    }
+    throw inserted.error;
+  }
   return inserted.data.id as string;
 }
 

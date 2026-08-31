@@ -886,6 +886,9 @@ Decisions locked in:
   the day's PDV entries) and `GET /v1/in-store/review/price-outliers` (typed
   prices that deviate ≥30% from self-history / other stores / EDP target — the
   in-store analogue of `GET /v1/runs/:id/price-outliers`).
+  Field-app typo warning: `GET /v1/in-store/lookup` and `/catalog` attach
+  `reference_price` (MAY-preferring market median). Weekly volume table:
+  `GET /v1/in-store/stats?from=&to=`.
   **Migration 024** adds a **"sin precio / hay stock"** path (`instore_price_entries.no_price`,
   nullable `price`): when a worker sees the product but can't read the price, they flag it
   instead of typing a fake $1/$0. On approval it writes a MARKER snapshot

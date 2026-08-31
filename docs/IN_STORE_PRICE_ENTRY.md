@@ -303,6 +303,7 @@ Resolve a scan (read-only). →
     format: string | null; variety: string | null;
     image_url: string | null;   // product photo; null for catalog-only matches (show a placeholder)
     source: 'products' | 'catalog';
+    reference_price: number | null; // recent MAY-preferring market median; warn if typed price is ±35%
   } | null }
 ```
 `found: false` → not in catalog → let the worker skip.
@@ -310,10 +311,17 @@ Resolve a scan (read-only). →
 ### `GET /v1/in-store/catalog`
 El catálogo entero (~238 filas, ~90 KB) en una sola respuesta, para guardarlo en
 el dispositivo y poder mostrar nombre/marca al escanear **sin conexión**. Cada
-item tiene la misma forma que el `product` de `lookup`, ordenado por `ean`. Sin
+item tiene la misma forma que el `product` de `lookup` (incluye
+`reference_price` para el aviso de tipeo offline), ordenado por `ean`. Sin
 paginación a propósito. Trae `ETag`: mandalo como `If-None-Match` y si el
 catálogo no cambió responde `304` sin cuerpo, así refrescar en cada apertura de
 la app sale gratis.
+
+### `GET /v1/in-store/stats?from=&to=`
+Weekly counts for the back-office **"productos relevados por súper por semana"**
+table. `from` + `to` required (inclusive BA dates). →
+`data: { supermarket_id, supermarket_name, week, count }[]` (`week` is ISO
+`2026-W35`). Rejected entries are omitted.
 
 ### `POST /v1/in-store/visits`
 Start a PDV relevamiento. Body:

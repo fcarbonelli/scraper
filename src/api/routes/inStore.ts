@@ -4,6 +4,7 @@
  *   GET  /v1/in-store/supermarkets        chains to show in the store dropdown
  *   GET  /v1/in-store/lookup?ean=         resolve a scanned EAN to a catalog product
  *   GET  /v1/in-store/catalog             the whole catalog, cached on-device for offline scanning
+ *   GET  /v1/in-store/stats               weekly entry counts by supermarket (back-office table)
  *
  *   POST /v1/in-store/visits              start a PDV relevamiento (store + location)
  *   GET  /v1/in-store/visits              list visits (today by default)
@@ -43,6 +44,8 @@ import { approveVisit, type ReviewDecision } from '../../instore/review.js';
 import { baDayRangeUtc, todayInBuenosAires } from '../../instore/dates.js';
 import { fetchInStoreExportRows, toInStoreCsv, writeInStoreXlsx } from '../../instore/export.js';
 import { computeInStorePriceOutliers } from '../../instore/priceOutliers.js';
+import { loadReferencePrices, referencePriceFor } from '../../instore/referencePrice.js';
+import { loadWeeklyStats } from '../../instore/stats.js';
 
 export const inStoreRouter = Router();
 
@@ -103,8 +106,13 @@ const LookupQuery = z.object({
   ean: z.string().trim().regex(/^\d{8,14}$/, 'EAN must be 8–14 digits'),
 });
 
-/** Map the resolver's internal (camelCase) shape to the snake_case API contract. */
-function toApiProduct(p: ResolvedProduct): Record<string, unknown> {
+/**
+ * Map the resolver's internal (camelCase) shape to the snake_case API
+ * contract. `reference_price` is the recent MAY-preferring market median
+ * the field app uses for its ±35% typo warning (null when we have no
+ * published history for that EAN).
+ */
+function toApiProduct(p: ResolvedProduct, referencePrice: number | null): Record<string, unknown> {
   return {
     product_id: p.productId,
     ean: p.ean,
@@ -117,17 +125,19 @@ function toApiProduct(p: ResolvedProduct): Record<string, unknown> {
     variety: p.variety,
     image_url: p.imageUrl,
     source: p.source,
+    reference_price: referencePrice,
   };
 }
 
 inStoreRouter.get('/lookup', async (req: Request, res: Response) => {
   const q = parseQuery(req, LookupQuery);
   const product = await resolveEan(q.ean);
+  const referencePrice = product ? await referencePriceFor(q.ean) : null;
   res.json(
     success({
       ean: q.ean,
       found: product !== null,
-      product: product ? toApiProduct(product) : null,
+      product: product ? toApiProduct(product, referencePrice) : null,
     }),
   );
 });
@@ -141,7 +151,9 @@ inStoreRouter.get('/lookup', async (req: Request, res: Response) => {
 // pagination on purpose: it's meant to be stored whole on the device.
 // =============================================================================
 inStoreRouter.get('/catalog', async (req: Request, res: Response) => {
-  const products = (await resolveCatalog()).map(toApiProduct);
+  const resolved = await resolveCatalog();
+  const refs = await loadReferencePrices(resolved.map((p) => p.ean));
+  const products = resolved.map((p) => toApiProduct(p, refs.get(p.ean) ?? null));
   const body = success(products, { total: products.length });
 
   // Weak ETag over the payload: the catalog changes rarely (a handful of
@@ -156,6 +168,24 @@ inStoreRouter.get('/catalog', async (req: Request, res: Response) => {
     return;
   }
   res.json(body);
+});
+
+// =============================================================================
+// GET /v1/in-store/stats — productos relevados por súper por semana
+//
+// Back-office table the frontend can't build from /entries (single-day,
+// paginated) or /visits (no entry counts over a range). Counts pending +
+// approved entries; rejected rows are omitted.
+// =============================================================================
+const StatsQuery = z.object({
+  from: z.iso.date(),
+  to: z.iso.date(),
+}).refine((q) => q.from <= q.to, { message: '`from` must be on or before `to`' });
+
+inStoreRouter.get('/stats', async (req: Request, res: Response) => {
+  const q = parseQuery(req, StatsQuery);
+  const items = await loadWeeklyStats(q.from, q.to);
+  res.json(success(items, { total: items.length }));
 });
 
 // =============================================================================

@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "supermarket_id": "diarco",
+      "supermarket_name": "DIARCO",
+      "week": "2026-W34",
+      "count": 86
+    },
+    {
+      "supermarket_id": "nini",
+      "supermarket_name": "NINI",
+      "week": "2026-W34",
+      "count": 41
+    },
+    {
+      "supermarket_id": "diarco",
+      "supermarket_name": "DIARCO",
+      "week": "2026-W35",
+      "count": 112
+    }
+  ],
+  "meta": { "ts": "2026-08-24T18:00:00.000Z", "total": 3 }
+}

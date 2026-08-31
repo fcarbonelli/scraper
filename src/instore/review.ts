@@ -13,12 +13,18 @@
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
+import { mapPool } from '../revistas/pool.js';
 import {
   InStoreError,
   materializeInStoreEntry,
   wholesalePromoText,
   type VisitLocation,
 } from './entry.js';
+
+/** How many entries to materialize at once. Sequential approve of a
+ *  200-product visit was freezing the review page (one snapshot write
+ *  after another). 6 keeps PostgREST load bounded. */
+const APPROVE_CONCURRENCY = 6;
 
 /** One reviewer decision for a pending entry (edits optional). */
 export interface ReviewDecision {
@@ -108,24 +114,49 @@ export async function approveVisit(
   const byId = new Map((input.decisions ?? []).map((d) => [d.entryId, d]));
   const nowIso = new Date().toISOString();
   const result: ApproveVisitResult = { visitId, approved: 0, rejected: 0, snapshots: 0 };
+  const started = Date.now();
 
+  const toReject: PendingEntryRow[] = [];
+  const toApprove: PendingEntryRow[] = [];
   for (const entry of entries) {
-    const decision = byId.get(entry.id);
+    if (byId.get(entry.id)?.action === 'reject') toReject.push(entry);
+    else toApprove.push(entry);
+  }
 
-    if (decision?.action === 'reject') {
+  // One update for every reject (same reviewed_by / timestamp). Per-entry
+  // note overrides are rare; apply those in a second pass.
+  if (toReject.length > 0) {
+    const defaultRejects = toReject.filter((e) => byId.get(e.id)?.note === undefined);
+    if (defaultRejects.length > 0) {
       const upd = await db
         .from('instore_price_entries')
         .update({
           review_status: 'rejected',
           reviewed_at: nowIso,
           reviewed_by: input.reviewedBy,
-          note: decision.note !== undefined ? decision.note : entry.note,
+        })
+        .in('id', defaultRejects.map((e) => e.id));
+      if (upd.error) throw upd.error;
+    }
+    for (const entry of toReject) {
+      const decision = byId.get(entry.id);
+      if (decision?.note === undefined) continue;
+      const upd = await db
+        .from('instore_price_entries')
+        .update({
+          review_status: 'rejected',
+          reviewed_at: nowIso,
+          reviewed_by: input.reviewedBy,
+          note: decision.note,
         })
         .eq('id', entry.id);
       if (upd.error) throw upd.error;
-      result.rejected++;
-      continue;
     }
+    result.rejected = toReject.length;
+  }
+
+  await mapPool(toApprove, APPROVE_CONCURRENCY, async (entry) => {
+    const decision = byId.get(entry.id);
 
     // Approve — apply any inline edits, else keep the entered values.
     // Resolve no_price: explicit flag wins; else a provided price implies a
@@ -192,10 +223,10 @@ export async function approveVisit(
       })
       .eq('id', entry.id);
     if (upd.error) throw upd.error;
+  });
 
-    result.approved++;
-    result.snapshots++;
-  }
+  result.approved = toApprove.length;
+  result.snapshots = toApprove.length;
 
   const visitUpd = await db
     .from('instore_visits')
@@ -203,6 +234,6 @@ export async function approveVisit(
     .eq('id', visitId);
   if (visitUpd.error) throw visitUpd.error;
 
-  logger.info(result, 'instore: visit reviewed & approved');
+  logger.info({ ...result, elapsed_ms: Date.now() - started }, 'instore: visit reviewed & approved');
   return result;
 }

@@ -1834,7 +1834,8 @@ photos live on the visit, not on each product.
 > `in-store-visit.json`, `in-store-visits.json`, `in-store-photo.json`,
 > `in-store-entry.json`, `in-store-entries.json`,
 > `in-store-review-pending.json`, `in-store-review-visit.json`,
-> `in-store-review-approve.json`, `in-store-review-price-outliers.json`.
+> `in-store-review-approve.json`, `in-store-review-price-outliers.json`,
+> `in-store-stats.json`.
 
 **Auth.** These routes accept the platform-standard `X-API-Key`. The mobile app
 embeds a key **scoped to `in-store`** (created with
@@ -1876,6 +1877,7 @@ anything. Use it to show the operator the product name before they type a price.
     variety: string | null;
     image_url: string | null;     // product photo (products.metadata.imageUrl); null for catalog-only matches
     source: "products" | "catalog";
+    reference_price: number | null; // recent MAY-preferring market median (Precio_Regular); null if no published history. Field app warns at ±35%.
   } | null;                        // null when found=false
 }
 ```
@@ -1910,6 +1912,7 @@ No pagination, on purpose: it's meant to be stored whole (~238 rows, ~90 KB).
     variety: string | null;
     image_url: string | null;
     source: "products" | "catalog";
+    reference_price: number | null; // same as lookup — so offline scans can still warn
   }>;                             // same item shape as lookup's `product`, sorted by ean
   meta: { ts: string; total: number };
 }
@@ -1921,10 +1924,37 @@ reuse one type for both. Rows are sorted by `ean` — the order is stable so the
 
 **Revalidate with `ETag`.** The response carries a weak `ETag` over its body;
 send it back as `If-None-Match` and an unchanged catalog answers `304 Not
-Modified` with no payload. The catalog only moves when someone adds a
-`catalog_extra_eans` row, so refreshing on every app open is cheap.
+Modified` with no payload. The catalog identity (EANs / names) rarely moves;
+`reference_price` is cached ~15 min on the server, so a later open can get a
+fresh ETag when market medians change.
 
 Fixture: [`examples/api/in-store-catalog.json`](examples/api/in-store-catalog.json).
+
+### `GET /v1/in-store/stats?from=&to=`
+
+Weekly volume for the back-office **"productos relevados por súper por semana"**
+table. `/entries` is single-day + paginated and `/visits` has no entry counts
+over a range, so the frontend cannot build this itself.
+
+`from` and `to` are required inclusive Buenos Aires dates (`YYYY-MM-DD`).
+Counts **pending + approved** entries (rejected rows are omitted). `week` is
+the ISO week of the entry's BA calendar day (`2026-W35`).
+
+```ts
+{
+  data: Array<{
+    supermarket_id: string;
+    supermarket_name: string | null;
+    week: string;    // ISO, e.g. "2026-W35"
+    count: number;
+  }>;
+  meta: { ts: string; total: number };
+}
+```
+
+Sorted by `week` then supermarket name. Fixture:
+[`examples/api/in-store-stats.json`](examples/api/in-store-stats.json).
+Errors: `400 INVALID_REQUEST` (missing/invalid dates, or `from` > `to`).
 
 ### `POST /v1/in-store/visits`
 

@@ -13,7 +13,8 @@
       "format": "2.25L",
       "variety": "REGULAR",
       "image_url": "https://images.example.com/coca-cola-2250.jpg",
-      "source": "products"
+      "source": "products",
+      "reference_price": 2590
     }
   },
   "meta": { "ts": "2026-07-16T01:31:12.400Z" }
