@@ -27,7 +27,7 @@
 import { createHash } from 'node:crypto';
 import express, { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { db } from '../../shared/db.js';
+import { db, fetchAllPages } from '../../shared/db.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
@@ -40,7 +40,14 @@ import { recordInStoreEntry, updatePendingEntry, InStoreError } from '../../inst
 import { createVisit, finishVisit, getVisit, countVisit, type Visit, type VisitCounts } from '../../instore/visits.js';
 import { uploadVisitPhoto } from '../../instore/storage.js';
 import { approveVisit, type ReviewDecision } from '../../instore/review.js';
-import { baDayRangeUtc, todayInBuenosAires } from '../../instore/dates.js';
+import {
+  baDateRangeUtc,
+  baDayRangeUtc,
+  buenosAiresDate,
+  isoWeekOf,
+  todayInBuenosAires,
+} from '../../instore/dates.js';
+import { loadReferencePrices } from '../../instore/referencePrice.js';
 import { fetchInStoreExportRows, toInStoreCsv, writeInStoreXlsx } from '../../instore/export.js';
 import { computeInStorePriceOutliers } from '../../instore/priceOutliers.js';
 
@@ -123,11 +130,20 @@ function toApiProduct(p: ResolvedProduct): Record<string, unknown> {
 inStoreRouter.get('/lookup', async (req: Request, res: Response) => {
   const q = parseQuery(req, LookupQuery);
   const product = await resolveEan(q.ean);
+
+  // Recent market price for the typo warning (front warns at ±35%). Keyed by
+  // EAN, so it's available even for catalog-only products with no `products` row.
+  const refs = await loadReferencePrices([q.ean]);
+  const referencePrice = refs.get(q.ean) ?? null;
+
   res.json(
     success({
       ean: q.ean,
       found: product !== null,
-      product: product ? toApiProduct(product) : null,
+      reference_price: referencePrice,
+      product: product
+        ? { ...toApiProduct(product), reference_price: referencePrice }
+        : null,
     }),
   );
 });
@@ -141,7 +157,17 @@ inStoreRouter.get('/lookup', async (req: Request, res: Response) => {
 // pagination on purpose: it's meant to be stored whole on the device.
 // =============================================================================
 inStoreRouter.get('/catalog', async (req: Request, res: Response) => {
-  const products = (await resolveCatalog()).map(toApiProduct);
+  const resolved = await resolveCatalog();
+
+  // Stamp each product with its recent market reference price (typo warning).
+  // One batched pass over all catalog EANs — cheap enough to include in the
+  // once-per-device download; a changed reference simply busts the ETag.
+  const refs = await loadReferencePrices(resolved.map((p) => p.ean));
+  const products = resolved.map((p) => ({
+    ...toApiProduct(p),
+    reference_price: refs.get(p.ean) ?? null,
+  }));
+
   const body = success(products, { total: products.length });
 
   // Weak ETag over the payload: the catalog changes rarely (a handful of
@@ -559,6 +585,103 @@ inStoreRouter.get('/entries', async (req: Request, res: Response) => {
   }));
 
   res.json(paginated(items, count ?? 0, page, limit));
+});
+
+// =============================================================================
+// GET /v1/in-store/stats — entries per supermarket per ISO week
+//
+// Aggregation for the "productos relevados por súper por semana" table. Unlike
+// /entries (single-day, no counts), this groups the entry counts by
+// supermarket_id + ISO week over a date range. Defaults to the last 8 weeks.
+//
+//   ?from=YYYY-MM-DD  ?to=YYYY-MM-DD   inclusive range on the entry's BA day
+//   ?supermarket_id=diarco             optional single-chain filter
+//   ?review_status=approved            optional (default: count all statuses)
+// =============================================================================
+const StatsQuery = z.object({
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  supermarket_id: z.string().trim().min(1).optional(),
+  review_status: z.enum(['pending', 'approved', 'rejected']).optional(),
+});
+
+interface StatsEntryRow {
+  supermarket_id: string;
+  created_at: string;
+}
+
+inStoreRouter.get('/stats', async (req: Request, res: Response) => {
+  const q = parseQuery(req, StatsQuery);
+
+  // Default window: the trailing 8 ISO weeks (inclusive of today, BA time).
+  const to = q.to ?? todayInBuenosAires();
+  const defaultFrom = new Date(Date.now() - 55 * 86_400_000);
+  const from = q.from ?? buenosAiresDate(defaultFrom);
+  const { fromUtc, toUtc } = baDateRangeUtc(from, to);
+
+  // Pull the (small) set of entries in-window; group in JS by chain + ISO week.
+  const rows = await fetchAllPages<StatsEntryRow>((rangeFrom, rangeTo) => {
+    let query = db
+      .from('instore_price_entries')
+      .select('supermarket_id, created_at')
+      .gte('created_at', fromUtc)
+      .lt('created_at', toUtc)
+      .order('created_at', { ascending: true })
+      .range(rangeFrom, rangeTo);
+    if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
+    if (q.review_status) query = query.eq('review_status', q.review_status);
+    return query;
+  });
+
+  // Resolve chain display names once (small table).
+  const { data: sms, error: smErr } = await db
+    .from('supermarkets')
+    .select('id, name, cadena_display_name');
+  if (smErr) throw smErr;
+  const nameById = new Map<string, string>(
+    (sms ?? []).map((s) => [
+      s.id as string,
+      (s.cadena_display_name as string | null) ?? (s.name as string),
+    ]),
+  );
+
+  // Group by supermarket_id + ISO week (of the entry's Buenos Aires day).
+  interface Bucket {
+    supermarket_id: string;
+    supermarket_name: string | null;
+    week: string;
+    week_start: string;
+    count: number;
+  }
+  const buckets = new Map<string, Bucket>();
+  for (const r of rows) {
+    const baDate = buenosAiresDate(new Date(r.created_at));
+    const iso = isoWeekOf(baDate);
+    const key = `${r.supermarket_id}|${iso.label}`;
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.count += 1;
+    } else {
+      buckets.set(key, {
+        supermarket_id: r.supermarket_id,
+        supermarket_name: nameById.get(r.supermarket_id) ?? null,
+        week: iso.label,
+        week_start: iso.weekStart,
+        count: 1,
+      });
+    }
+  }
+
+  // Stable order: chain name, then week.
+  const items = [...buckets.values()].sort(
+    (a, b) =>
+      (a.supermarket_name ?? a.supermarket_id).localeCompare(
+        b.supermarket_name ?? b.supermarket_id,
+        'es',
+      ) || a.week.localeCompare(b.week),
+  );
+
+  res.json(success(items, { from, to, total: items.length }));
 });
 
 // =============================================================================

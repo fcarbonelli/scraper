@@ -1864,6 +1864,7 @@ anything. Use it to show the operator the product name before they type a price.
 {
   ean: string;
   found: boolean;
+  reference_price: number | null;  // recent MARKET price for the typo warning (see below)
   product: {
     product_id: string | null;   // null when it exists only in the catalog (not yet created)
     ean: string;
@@ -1876,12 +1877,23 @@ anything. Use it to show the operator the product name before they type a price.
     variety: string | null;
     image_url: string | null;     // product photo (products.metadata.imageUrl); null for catalog-only matches
     source: "products" | "catalog";
+    reference_price: number | null; // same value as the top-level field, for convenience
   } | null;                        // null when found=false
 }
 ```
 
 `found: false` means the EAN is in neither our products nor the client catalog —
 the UI should let the operator skip it. Errors: `400 INVALID_REQUEST` (bad EAN).
+
+**`reference_price`** is the product's recent **market price**, so the field app
+can warn when a typed price deviates ±35% (catches extra/missing-zero typos). It
+is resolved per EAN from the first source with a signal: (1) the **online market**
+median — the latest online price at each store over the last 30 days, then the
+median across stores; (2) recent **in-store** entries median over the last 90 days
+(covers wholesale-only items never scraped online); (3) the client's **EDP target**
+(`price_targets`, preferring SPM → MAY → MAY REG). `null` when no source has a
+price — the front simply shows no warning. It's exposed here (rather than via the
+pricing endpoints) because the field app's key is scoped to `/v1/in-store/*`.
 
 ### `GET /v1/in-store/catalog`
 
@@ -1910,14 +1922,17 @@ No pagination, on purpose: it's meant to be stored whole (~238 rows, ~90 KB).
     variety: string | null;
     image_url: string | null;
     source: "products" | "catalog";
+    reference_price: number | null; // recent market price for the typo warning (see lookup)
   }>;                             // same item shape as lookup's `product`, sorted by ean
   meta: { ts: string; total: number };
 }
 ```
 
-Each row is exactly the `product` shape returned by `lookup`, so a client can
-reuse one type for both. Rows are sorted by `ean` — the order is stable so the
-`ETag` doesn't churn.
+Each row is exactly the `product` shape returned by `lookup` (including
+`reference_price` — see there for how it's derived), so a client can reuse one
+type for both. Rows are sorted by `ean` — the order is stable so the `ETag`
+doesn't churn. `reference_price` moves with the market, so the `ETag` refreshes
+about daily.
 
 **Revalidate with `ETag`.** The response carries a weak `ETag` over its body;
 send it back as `If-None-Match` and an unchanged catalog answers `304 Not
@@ -2112,6 +2127,36 @@ Each item:
   created_at: string;
 }
 ```
+
+### `GET /v1/in-store/stats`
+
+Entry counts grouped by **supermarket + ISO week** — powers the "productos
+relevados por súper por semana" table. Unlike `/entries` (single day, no counts),
+this aggregates a date range.
+
+| Param | Type | Description |
+|---|---|---|
+| `from` | `YYYY-MM-DD` | Inclusive range start (BA day). Default: 8 weeks ago |
+| `to` | `YYYY-MM-DD` | Inclusive range end (BA day). Default: today |
+| `supermarket_id` | string | Optional single-chain filter |
+| `review_status` | `pending`\|`approved`\|`rejected` | Optional; default counts **all** statuses |
+
+```ts
+{
+  data: Array<{
+    supermarket_id: string;
+    supermarket_name: string | null;
+    week: string;         // ISO-8601 week label, e.g. "2026-W34" (matches the export's Semana)
+    week_start: string;   // Monday of that week, YYYY-MM-DD
+    count: number;        // entries submitted that week at that chain
+  }>;
+  meta: { ts: string; from: string; to: string; total: number };
+}
+```
+
+Rows are sorted by chain name, then week. Weeks with no entries are omitted (no
+zero-rows). The week is the ISO week of the entry's Buenos Aires day, so it lines
+up with the `Semana` column in the client export.
 
 ### Daily review (back-office)
 
