@@ -127,6 +127,8 @@ scraper/
     │   ├── detectOutliers.ts          ← pure outlier rules (no DB; unit-tested)
     │   ├── exportFormat.ts            ← Excel/CSV column list + CSV writer (no DB)
     │   ├── dates.ts                   ← Buenos Aires calendar-day helpers
+    │   ├── referencePrice.ts          ← market median for the field-app typo warning (lookup/catalog)
+    │   ├── stats.ts                   ← weekly entry counts (GET /v1/in-store/stats)
     │   └── storage.ts                 ← flyer/offer photo upload to Supabase Storage (bucket 'instore-photos')
     ├── orchestrator/
     │   ├── index.ts                   ← cron + finalizer interval

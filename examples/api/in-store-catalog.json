@@ -11,7 +11,8 @@
                      "format":  "354ml",
                      "variety":  null,
                      "image_url":  "https://carrefourar.vteximg.com.br/arquivos/ids/787062/757037512449_01.jpg?v=639026339321900000",
-                     "source":  "products"
+                     "source":  "products",
+                     "reference_price":  2890
                  },
                  {
                      "product_id":  "4e21b542-a759-49fa-9152-940be8ff1a86",
@@ -24,7 +25,8 @@
                      "format":  "4/3LB",
                      "variety":  null,
                      "image_url":  "https://static.cotodigital3.com.ar/sitios/fotos/medium/00573400/00573423.jpg",
-                     "source":  "products"
+                     "source":  "products",
+                     "reference_price":  8450
                  },
                  {
                      "product_id":  null,
@@ -37,7 +39,8 @@
                      "format":  "1L",
                      "variety":  null,
                      "image_url":  null,
-                     "source":  "catalog"
+                     "source":  "catalog",
+                     "reference_price":  null
                  }
              ],
     "meta":  {
