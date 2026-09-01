@@ -27,6 +27,8 @@ import {
   buenosAiresDate,
   decideTodayWrite,
   mapSnapshotPrices,
+  snapshotPricesFromOverride,
+  type ApprovedOverride,
   type SnapshotPrices,
 } from './pricing.js';
 
@@ -349,13 +351,18 @@ interface ReviewItemRow {
     quantity?: string | null;
   } | null;
   /** Operator overrides — never overwrite `extracted` (AI read). */
-  approved_override?: {
-    price?: number | null;
-    promo_price?: number | null;
-    promo_text?: string | null;
-  } | null;
+  approved_override?: ApprovedOverride | null;
   resulting_supermarket_product_id?: string | null;
   resulting_snapshot_id?: number | null;
+}
+
+/** The AI read (`extracted`, snake_case) in the shape the pricing helpers speak. */
+function extractedPrices(item: ReviewItemRow): SnapshotPrices {
+  return {
+    price: item.extracted?.price ?? null,
+    promoPrice: item.extracted?.promo_price ?? null,
+    promoText: item.extracted?.promo_text ?? null,
+  };
 }
 
 export interface ApproveBody {
@@ -364,8 +371,10 @@ export interface ApproveBody {
   /** Legacy override: master product uuid. */
   productId?: string;
   price?: number;
-  promoPrice?: number;
-  promoText?: string;
+  /** Omit to keep the AI read; pass null to clear. */
+  promoPrice?: number | null;
+  /** Omit to keep the AI read; pass null or "" to clear. */
+  promoText?: string | null;
   note?: string;
   reviewedBy?: string;
 }
@@ -409,11 +418,17 @@ export async function approveReviewItem(
     fallbackProductId: item.proposed_product_id,
   });
 
-  const prices: SnapshotPrices = {
-    price: body.price ?? item.extracted?.price ?? null,
-    promoPrice: body.promoPrice ?? item.extracted?.promo_price ?? null,
-    promoText: body.promoText ?? item.extracted?.promo_text ?? null,
-  };
+  // What the reviewer confirmed, as an override: only the keys the body carried.
+  // An explicit null is a CLEAR, not "nothing sent" — hence the `!== undefined`
+  // checks rather than `??`, which would resurrect the AI read.
+  const approveOverride: ApprovedOverride = {};
+  if (body.price !== undefined) approveOverride.price = body.price;
+  if (body.promoPrice !== undefined) approveOverride.promo_price = body.promoPrice;
+  if (body.promoText !== undefined) {
+    approveOverride.promo_text = body.promoText === '' ? null : body.promoText;
+  }
+
+  const prices = snapshotPricesFromOverride(extractedPrices(item), approveOverride);
   if (prices.price == null && prices.promoPrice == null) {
     throw new ItemError('invalid', 'No price to record (neither price nor promo_price).');
   }
@@ -442,6 +457,11 @@ export async function approveReviewItem(
       reviewed_at: new Date().toISOString(),
       resulting_supermarket_product_id: spId,
       resulting_snapshot_id: snapshotId,
+      // Without this a clear-on-approve would be invisible: the panel reads
+      // `approved_override` and would fall back to the AI's text.
+      ...(Object.keys(approveOverride).length > 0
+        ? { approved_override: approveOverride }
+        : {}),
       ...(rematch ? { method: 'manual' } : {}),
     })
     .eq('id', itemId);
@@ -588,6 +608,17 @@ export async function updateApprovedItem(
     body.productId != null && body.productId !== item.proposed_product_id;
   const rematch = rematchEan || rematchProduct;
 
+  // Only the keys the operator actually sent are written, so "never touched"
+  // (key absent) stays distinguishable from "cleared" (key present, null).
+  // Writing all three unconditionally is what used to make a cleared promo
+  // indistinguishable from an untouched one.
+  const override: ApprovedOverride = { ...(item.approved_override ?? {}) };
+  if (body.price !== undefined) override.price = body.price;
+  if (body.promoPrice !== undefined) override.promo_price = body.promoPrice;
+  if (body.promoText !== undefined) {
+    override.promo_text = body.promoText === '' ? null : body.promoText;
+  }
+
   if (rematch) {
     // Undo old approval effects, then re-approve against the new product.
     await undoApprovalEffects(item);
@@ -605,41 +636,22 @@ export async function updateApprovedItem(
       .eq('id', itemId);
     if (reApprove.error) throw reApprove.error;
 
+    // `approved_override` was just reset above, so the operator's decisions ride
+    // along in the body — nulls included, which `approveReviewItem` now both
+    // honours and re-persists. Collapsing them to undefined used to lose the
+    // clear and bring the AI's text back.
     return approveReviewItem(itemId, {
       ean: body.ean,
       productId: body.productId,
-      price: body.price ?? item.extracted?.price ?? undefined,
-      promoPrice:
-        body.promoPrice !== undefined
-          ? (body.promoPrice ?? undefined)
-          : (item.extracted?.promo_price ?? undefined),
-      promoText:
-        body.promoText !== undefined
-          ? (body.promoText ?? undefined)
-          : (item.extracted?.promo_text ?? undefined),
+      price: override.price ?? item.extracted?.price ?? undefined,
+      promoPrice: 'promo_price' in override ? override.promo_price : undefined,
+      promoText: 'promo_text' in override ? override.promo_text : undefined,
       note: body.note ?? undefined,
       reviewedBy: body.reviewedBy,
     });
   }
 
-  const prevOverride = item.approved_override ?? {};
-  const override = {
-    price: body.price !== undefined ? body.price : (prevOverride.price ?? null),
-    promo_price:
-      body.promoPrice !== undefined ? body.promoPrice : (prevOverride.promo_price ?? null),
-    promo_text:
-      body.promoText !== undefined
-        ? body.promoText === ''
-          ? null
-          : body.promoText
-        : (prevOverride.promo_text ?? null),
-  };
-
-  const prices: SnapshotPrices = {
-    price: override.price ?? item.extracted?.price ?? null,
-    promoPrice: override.promo_price ?? item.extracted?.promo_price ?? null,
-    promoText: override.promo_text ?? item.extracted?.promo_text ?? null,
-  };
+  const prices = snapshotPricesFromOverride(extractedPrices(item), override);
   if (prices.price == null && prices.promoPrice == null) {
     throw new ItemError('invalid', 'No price to record after update.');
   }

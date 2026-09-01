@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   mapSnapshotPrices,
+  snapshotPricesFromOverride,
   effectivePrices,
   decideTodayWrite,
   pickWinnerAmongDuplicates,
@@ -53,6 +54,66 @@ describe('mapSnapshotPrices', () => {
     const mapped = mapSnapshotPrices({ price: 100, promoPrice: null, promoText: '  ' });
     expect(mapped.promotion_1).toBeNull();
     expect(mapped.promotions).toEqual([]);
+  });
+});
+
+describe('snapshotPricesFromOverride', () => {
+  // The AI read off page 70 of the Rosental flyer: a stray "OFERTA" the
+  // reviewer deleted, which used to come back in the client Excel.
+  const extracted = { price: 569, promoPrice: null, promoText: 'OFERTA' };
+
+  it('clears the promo text when the operator blanked it (key present, null)', () => {
+    const prices = snapshotPricesFromOverride(extracted, {
+      price: 569,
+      promo_price: null,
+      promo_text: null,
+    });
+    expect(prices.promoText).toBeNull();
+    // …and that is what reaches the Promocion_1 column.
+    expect(mapSnapshotPrices(prices)).toMatchObject({
+      price: 569,
+      promotion_1: null,
+      promotions: [],
+    });
+  });
+
+  it('clears the promo price too, instead of re-offering it', () => {
+    const prices = snapshotPricesFromOverride(
+      { price: 2899, promoPrice: 2899, promoText: 'OFERTA' },
+      { price: 2899, promo_price: null, promo_text: null },
+    );
+    expect(prices.promoPrice).toBeNull();
+    // Without this the export showed Precio_c_Oferta_1 equal to Precio_Regular.
+    expect(mapSnapshotPrices(prices)).toMatchObject({
+      price: 2899,
+      offer_price_1: null,
+      list_price: null,
+    });
+  });
+
+  it('keeps the text the operator typed', () => {
+    expect(
+      snapshotPricesFromOverride(extracted, { price: 569, promo_text: '12 unidades' }).promoText,
+    ).toBe('12 unidades');
+  });
+
+  it('falls back to the AI read for keys the operator never touched', () => {
+    expect(snapshotPricesFromOverride(extracted, { price: 569 })).toEqual({
+      price: 569,
+      promoPrice: null,
+      promoText: 'OFERTA',
+    });
+  });
+
+  it('falls back for the whole read when there is no override at all', () => {
+    expect(snapshotPricesFromOverride(extracted, null)).toEqual(extracted);
+  });
+
+  it('never reads a null price as "cleared" — a snapshot always needs one', () => {
+    // Legacy overrides carry price:null whenever only a promo field was edited.
+    expect(
+      snapshotPricesFromOverride(extracted, { price: null, promo_text: null }).price,
+    ).toBe(569);
   });
 });
 

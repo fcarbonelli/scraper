@@ -1374,8 +1374,10 @@ const ApproveBodySchema = z.object({
   ean: CatalogEanBody.optional(),
   product_id: z.string().uuid().optional(),
   price: z.number().nonnegative().optional(),
-  promo_price: z.number().nonnegative().optional(),
-  promo_text: z.string().max(500).optional(),
+  // Nullable like PATCH: an explicit null clears the field instead of falling
+  // back to the AI read. Omitting the key still means "keep what the AI read".
+  promo_price: z.number().nonnegative().nullable().optional(),
+  promo_text: z.string().max(500).nullable().optional(),
   note: z.string().max(1000).optional(),
   reviewed_by: z.string().max(200).optional(),
 });

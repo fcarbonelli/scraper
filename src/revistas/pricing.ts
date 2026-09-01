@@ -73,6 +73,49 @@ export function mapSnapshotPrices(prices: SnapshotPrices): MappedSnapshotColumns
   };
 }
 
+/**
+ * Operator corrections as stored in `revista_review_items.approved_override`
+ * (snake_case, straight out of the jsonb column).
+ *
+ * A key being PRESENT is what carries the meaning: it says the operator decided
+ * this field, and `null` therefore means "he cleared it". A key being ABSENT
+ * means he never touched it, so the AI read stands.
+ */
+export interface ApprovedOverride {
+  price?: number | null;
+  promo_price?: number | null;
+  promo_text?: string | null;
+}
+
+/**
+ * Precedence for the SNAPSHOT WRITER: key present in the override wins, `null`
+ * included — that is what makes "clear the promo text" actually clear it.
+ *
+ * `price` is the one exception: a snapshot always needs a price, so a null there
+ * never means "cleared" and still falls back to the AI read. (Historic overrides
+ * carry `price: null` whenever the operator edited only a promo field.)
+ *
+ * This is the same rule the review panel reads with (`'promo_text' in override`),
+ * so what the reviewer sees is what gets written.
+ */
+export function snapshotPricesFromOverride(
+  extracted: SnapshotPrices | null | undefined,
+  override: ApprovedOverride | null | undefined,
+): SnapshotPrices {
+  const has = (key: keyof ApprovedOverride): boolean =>
+    override != null && Object.prototype.hasOwnProperty.call(override, key);
+
+  return {
+    price: override?.price ?? extracted?.price ?? null,
+    promoPrice: has('promo_price')
+      ? (override?.promo_price ?? null)
+      : (extracted?.promoPrice ?? null),
+    promoText: has('promo_text')
+      ? (override?.promo_text ?? null)
+      : (extracted?.promoText ?? null),
+  };
+}
+
 /** Effective prices returned by the list/review UI (override beats extracted). */
 export function effectivePrices(
   extracted: SnapshotPrices | null | undefined,
