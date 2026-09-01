@@ -2,9 +2,9 @@
 -- Revista: "key present wins" for the effective promo fields.
 --
 -- `approved_override` records the operator's corrections. A key being PRESENT
--- means he decided that field, so `null` there means he CLEARED it. The 017
--- view used COALESCE, which treats a cleared promo as "nothing said" and falls
--- back to the AI read — so a promo text the reviewer deleted still showed up in
+-- means he decided that field, so `null` there means he CLEARED it. The view
+-- used COALESCE, which treats a cleared promo as "nothing said" and falls back
+-- to the AI read — so a promo text the reviewer deleted still showed up in
 -- /revistas/aprobados (and, via the same fallback in the writer, in the client
 -- Excel as Promocion_1).
 --
@@ -12,9 +12,15 @@
 -- null there never means "cleared".
 --
 -- jsonb_exists(x, 'k') rather than `x ? 'k'`: same semantics, but `?` collides
--- with parameter placeholders in several drivers.
+-- with parameter placeholders in several drivers. jsonb_exists(NULL, 'k') is
+-- NULL, so a row with no override falls through to the ELSE branch — the AI
+-- read — which is what we want.
 --
--- Depends on migration 017. Idempotent: DROP + CREATE the view.
+-- REBASED ON MIGRATION 020, not 017: 020 is the newest definition of this view
+-- and adds carry_active, proposed_ean, the match_ean fallback and proposed_ean
+-- in search_text. Only the two effective_promo_* expressions differ from it.
+--
+-- Idempotent: DROP + CREATE the view.
 -- =============================================================================
 
 DROP VIEW IF EXISTS revista_items_enriched;
@@ -30,12 +36,13 @@ SELECT
   COALESCE(m.series_key, 'default')                   AS series_key,
   m.superseded_by,
   m.superseded_at,
+  m.carry_active,
   i.page_number,
   i.page_image_url,
   i.extracted,
   i.approved_override,
-  -- Effective prices: a key PRESENT in the override wins, null included
-  -- (= cleared). `price` is the exception and still coalesces.
+  -- Effective values: a key PRESENT in the override wins, null included
+  -- (= the operator cleared it). `price` is the exception and still coalesces.
   COALESCE(
     (i.approved_override->>'price')::numeric,
     (i.extracted->>'price')::numeric
@@ -49,9 +56,10 @@ SELECT
        ELSE NULLIF(i.extracted->>'promo_text', '')
   END                                                 AS effective_promo_text,
   i.proposed_product_id,
+  i.proposed_ean,
   p.name                                              AS match_name,
   p.brand                                             AS match_brand,
-  p.ean                                               AS match_ean,
+  COALESCE(p.ean, i.proposed_ean)                     AS match_ean,
   COALESCE(p.unit, p.format)                          AS match_quantity,
   i.confidence,
   i.method,
@@ -64,7 +72,6 @@ SELECT
   i.resulting_supermarket_product_id,
   i.resulting_snapshot_id,
   i.created_at,
-  -- Search haystack (lowercase) for ilike filters from the API.
   lower(
     concat_ws(
       ' ',
@@ -75,6 +82,7 @@ SELECT
       p.name,
       p.brand,
       p.ean,
+      i.proposed_ean,
       m.label,
       s.name
     )
