@@ -141,6 +141,11 @@ function isSucursalRecoverable(type: ScrapeError['type']): boolean {
   );
 }
 
+/** A result is "usable" only when it has a real, in-stock price. */
+function isUsableResult(r: ScrapeResult): boolean {
+  return r.inStock === true && Number.isFinite(r.price) && r.price > 0;
+}
+
 // Capture the first product link of the form `/<slug>/art_<id>/`.
 const PRODUCT_LINK_RE = /href=["'](\/[^"']*\/art_(\d+)\/?)["']/i;
 
@@ -476,11 +481,18 @@ export const laAnonimaAdapter: SupermarketAdapter = {
     ctx.logger.debug({ url: ctx.externalUrl }, 'fetching La Anónima product HTML');
 
     // Try the primary attempt (IP-default or configured branch); on a
-    // sucursal-recoverable failure, sweep alternate super branches until one
-    // stocks the product. First success wins; otherwise the last error (a real
-    // product_not_found once every branch home-redirects) propagates so the
-    // re-discovery healer can re-resolve the EAN.
+    // sucursal-recoverable failure, sweep alternate super branches. We prefer an
+    // IN-STOCK result: a product listed-but-out-of-stock at the primary branch
+    // is often in stock at another one, so returning the first *parseable*
+    // (possibly OOS) result — as this used to — reported it as out of stock even
+    // when a branch carried it (the "shows OOS but I find it in a sucursal"
+    // bug). So we sweep every branch for stock and only fall back to an
+    // out-of-stock result (keeping the primary's, for price continuity) when no
+    // branch has any. If nothing parses, the last error propagates (a real
+    // product_not_found once every branch home-redirects) so the re-discovery
+    // healer can re-resolve the EAN.
     const attempts = buildSucursalAttempts();
+    let fallbackResult: ScrapeResult | undefined; // parsed but out of stock
     let lastError: unknown;
     for (let i = 0; i < attempts.length; i++) {
       const cookie = attempts[i];
@@ -492,13 +504,18 @@ export const laAnonimaAdapter: SupermarketAdapter = {
           cookie,
         );
         const result = parseLaAnonimaHtml(html, ctx);
-        if (i > 0) {
-          ctx.logger.debug(
-            { sucursalCookie: cookie },
-            'La Anónima resolved via fallback sucursal sweep',
-          );
+        if (isUsableResult(result)) {
+          if (i > 0) {
+            ctx.logger.debug(
+              { sucursalCookie: cookie },
+              'La Anónima resolved via fallback sucursal sweep',
+            );
+          }
+          return result;
         }
-        return result;
+        // Listed but out of stock at this branch — keep the first (primary) as a
+        // continuity fallback and keep sweeping for a branch that has stock.
+        if (!fallbackResult) fallbackResult = result;
       } catch (err) {
         if (err instanceof ScrapeError && isSucursalRecoverable(err.type)) {
           lastError = err;
@@ -507,6 +524,9 @@ export const laAnonimaAdapter: SupermarketAdapter = {
         throw err; // network / WAF / rate-limit / server error — don't sweep
       }
     }
+    // No branch had stock: return an out-of-stock result if any branch had a
+    // price (price continuity), else propagate the last recoverable error.
+    if (fallbackResult) return fallbackResult;
     throw lastError;
   },
 };

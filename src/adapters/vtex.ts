@@ -610,21 +610,35 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
   }
 
   /**
-   * Try the default sales channel, then sweep the configured fallback channels
-   * until one stocks the product. First success wins; otherwise the last
-   * recoverable error propagates.
+   * Try the default sales channel, then sweep the configured fallback channels.
+   *
+   * Prefers an IN-STOCK result: a product is often listed-but-out-of-stock in
+   * the default channel yet in stock in another sucursal channel. Returning the
+   * first *parseable* (possibly OOS) result — as this used to — reported the
+   * product as out of stock even when a branch carried it (the "shows OOS but I
+   * find it in a sucursal" bug). So we sweep EVERY channel for stock and only
+   * fall back to an out-of-stock result (keeping the default's, for price
+   * continuity) when no channel has any. Mirrors the geo-fallback policy in
+   * geo-retry.ts. The last recoverable error propagates if nothing parsed.
    */
   async function scrapeWithSalesChannelSweep(ctx: ScrapeContext): Promise<ScrapeResult> {
     const channels: Array<number | null> = [null, ...(opts.salesChannels ?? [])];
+    let fallbackResult: ScrapeResult | undefined; // parsed but out of stock
     let lastError: unknown;
     for (let i = 0; i < channels.length; i++) {
       const sc = channels[i] ?? null;
       try {
         const result = await scrapeSalesChannel(ctx, sc);
-        if (i > 0) {
-          ctx.logger.debug({ sc }, `${opts.name} resolved via fallback sales channel`);
+        if (isUsableResult(result)) {
+          if (sc !== null) {
+            result.zoneUsed = `sc=${sc}`;
+            ctx.logger.debug({ sc }, `${opts.name} resolved via fallback sales channel`);
+          }
+          return result;
         }
-        return result;
+        // Listed but out of stock here — keep the first (default channel) as a
+        // continuity fallback and keep sweeping for a branch that has stock.
+        if (!fallbackResult) fallbackResult = result;
       } catch (err) {
         if (err instanceof ScrapeError && isChannelRecoverable(err.type)) {
           lastError = err;
@@ -633,6 +647,9 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
         throw err; // transport / WAF / 5xx — don't sweep
       }
     }
+    // No channel had stock: return an out-of-stock result if any channel had a
+    // price (price continuity), else propagate the last recoverable error.
+    if (fallbackResult) return fallbackResult;
     throw lastError;
   }
 
