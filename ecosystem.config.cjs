@@ -88,7 +88,11 @@ module.exports = {
       // Single instance is fine for v1; bump if traffic grows.
       instances: 1,
       exec_mode: 'fork',
-      max_memory_restart: '300M',
+      // Resumen (`GET /v1/data/analytics/overview`) pages ~100k slim snapshot
+      // rows into one response. 300M used to SIGKILL the process mid-request
+      // (Caddy 502, browser reported CORS). 512M leaves headroom for that
+      // aggregation without crowding the worker/orchestrator on a 4GB box.
+      max_memory_restart: '512M',
     },
   ],
 };

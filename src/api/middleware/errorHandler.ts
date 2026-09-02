@@ -10,14 +10,30 @@
  * the `_next` parameter even though we don't call it.
  */
 
-import type { ErrorRequestHandler } from 'express';
+import type { ErrorRequestHandler, Request, Response } from 'express';
 import { logger } from '../../shared/logger.js';
 import { captureError } from '../../shared/sentry.js';
 import { ApiError } from '../lib/apiError.js';
 import { failure } from '../lib/envelope.js';
 import { CLIENT_PRICING_PATH, clientPricingError } from '../lib/clientPricing.js';
 
+/**
+ * Re-apply CORS on the error path. The `cors` middleware usually already set
+ * these, but a handler that failed before `cors` ran (or a proxy that strips
+ * them) would otherwise look like a browser CORS failure instead of a 4xx/5xx.
+ */
+function ensureCors(req: Request, res: Response): void {
+  if (res.getHeader('Access-Control-Allow-Origin')) return;
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && origin.length > 0) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Expose-Headers', 'ETag');
+    res.setHeader('Vary', 'Origin');
+  }
+}
+
 export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
+  ensureCors(req, res);
   // The external client pricing endpoint must always answer with its own
   // envelope ({ ProcesadoOk: false, Error, ... }) — even on auth or unexpected
   // errors — so the integration never sees our internal error shape.

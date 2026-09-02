@@ -48,4 +48,16 @@ api.meganalytics.net {
 		# Don't log health checks (cuts noise from uptime monitors)
 		level INFO
 	}
+
+	# When the upstream dies (PM2 SIGKILL, connection reset) Caddy generates
+	# the 502 itself — Express never runs, so its CORS middleware never sets
+	# Access-Control-Allow-Origin. The browser then reports a "CORS error"
+	# instead of the real 502. Only applies to Caddy-generated errors, not
+	# proxied 4xx/5xx (those already carry Express CORS headers).
+	handle_errors {
+		header Access-Control-Allow-Origin *
+		header Access-Control-Allow-Methods "GET,HEAD,PUT,PATCH,POST,DELETE"
+		header Access-Control-Allow-Headers "Content-Type, X-API-Key, x-api-key, If-None-Match"
+		header Access-Control-Expose-Headers ETag
+	}
 }
