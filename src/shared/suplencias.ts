@@ -95,6 +95,13 @@ export const SUPLENCIAS_BY_EAN = new Map<string, Suplencia>([
   ['7798159712440', 'SUPLENTE'],
   ['8480017243522', 'TITULAR'],
   ['8480017103338', 'SUPLENTE'],
+  // Client Setup V4 (2026-09): new Poett "Huellitas Frescura" line (all TITULAR).
+  ['7793253007621', 'TITULAR'],
+  ['7793253007607', 'TITULAR'],
+  ['7793253007591', 'TITULAR'],
+  ['7793253007645', 'TITULAR'],
+  ['7793253007638', 'TITULAR'],
+  ['7793253007614', 'TITULAR'],
 ]);
 
 /**

@@ -304,6 +304,13 @@ const RAW: [string, string, string, string, string, string, string, string][] = 
   ['7794440045426', 'UTEN DE LIMP', 'GUANTES', 'VIRULANA', 'VERDE', 'M', 'GUANTES VIRULANA MULTIUSO 1 PAR', 'MAPA VIRULANA S.A.'],
   ['7794440045433', 'UTEN DE LIMP', 'GUANTES', 'VIRULANA', 'VERDE', 'L', 'GUANTES VIRULANA MULTIUSO 1 PAR', 'MAPA VIRULANA S.A.'],
   ['7798184680080', 'PERF P/ TELA', 'PERF P/ TELA', 'SAPHIRUS', 'GAT250', '', 'AROMATIZADOR TEXTIL SAPHIRUS GAT250', 'SAPHIRUS'],
+  // Client Setup V4 (2026-09): new Poett "Huellitas Frescura" line (6 EANs).
+  ['7793253007621', 'NAT BLENDS', 'NAT BLENDS', 'POETT', '400', 'HUE', 'Poett Ntrl Blnds HuellitasFresc 12/400ml', 'GRUPO AYUDIN'],
+  ['7793253007607', 'LIQUIDOS', 'LIVIANOS', 'POETT', '1800', '', 'Poett HuellitasFresc 8/1.8l', 'GRUPO AYUDIN'],
+  ['7793253007591', 'LIQUIDOS', 'LIVIANOS', 'POETT', '900', '', 'Poett HuellitasFresc 12/900ml', 'GRUPO AYUDIN'],
+  ['7793253007645', 'PERF P/ TELA', 'PERF P/ TELA', 'POETT', '250', '', 'Poett Frgnz HuellitsFresc DoyPk 12/250ml', 'GRUPO AYUDIN'],
+  ['7793253007638', 'PERF P/ TELA', 'PERF P/ TELA', 'POETT', '250', '', 'Poett Frgnz HuellitasFresc 12/250 ml', 'GRUPO AYUDIN'],
+  ['7793253007614', 'AERO', 'DESINF', 'POETT', '360', 'HUE', 'Poett Aer HuellitasFrescura 6/360 ml', 'GRUPO AYUDIN'],
 ];
 
 for (const [ean, category, subcategory, brand, format, variety, descriptionForms, manufacturer] of RAW) {
