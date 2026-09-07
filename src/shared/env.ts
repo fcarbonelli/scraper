@@ -58,6 +58,17 @@ const EnvSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
 
+  // Bank/card promotions module (Phase 7 — see docs/BANK_PROMOS.md). A separate,
+  // isolated pipeline that scrapes bank/credit-card promotions weekly. Enabled
+  // by default (like REVISTA_ENABLED) so deploying the code turns on the weekly
+  // cron — no env change needed. Set to 'false' to pause it.
+  PROMOS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  // Weekly cron for the promos check (evaluated in TZ). Default: Mondays 05:00.
+  PROMOS_CRON: z.string().default('0 5 * * 1'),
+
   // Observability
   SENTRY_DSN: z.string().optional().default(''),
 

@@ -27,6 +27,7 @@ import { dataRouter } from './routes/data.js';
 import { catalogRouter } from './routes/catalog.js';
 import { revistasRouter } from './routes/revistas.js';
 import { inStoreRouter } from './routes/inStore.js';
+import { promosRouter } from './routes/promos.js';
 import { telegramRouter } from './routes/telegram.js';
 
 export function buildApp(): Express {
@@ -76,6 +77,9 @@ export function buildApp(): Express {
   app.use('/v1/catalog', catalogRouter);
   app.use('/v1/revistas', revistasRouter);
   app.use('/v1/in-store', inStoreRouter);
+  // Bank/card promotions — isolated module, promos-scoped keys only. See
+  // src/api/routes/promos.ts and docs/BANK_PROMOS.md.
+  app.use('/v1/promos', promosRouter);
 
   // 404 + error handlers (must be last).
   app.use(notFoundHandler);

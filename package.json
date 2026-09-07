@@ -46,6 +46,8 @@
     "revistas:dedupe-simulate": "tsx scripts/revistas-dedupe-simulate.ts",
     "revistas:dedupe-report": "tsx --env-file=.env scripts/revistas-dedupe-cleanup.ts",
     "revistas:fix-promos": "tsx --env-file=.env scripts/revistas-fix-cleared-promos.ts",
+    "promos:run": "tsx --env-file=.env scripts/promos-run.ts",
+    "promos:doctor": "tsx --env-file=.env scripts/promos-doctor.ts",
     "lp:import": "tsx --env-file=.env scripts/import-price-list.ts",
     "anomalies:scan": "tsx --env-file=.env scripts/scan-price-anomalies.ts",
     "parodi:reset-delisted": "tsx --env-file=.env scripts/reset-parodi-delisted.ts",

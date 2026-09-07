@@ -37,6 +37,12 @@ const cache = new Map<string, CachedKey>();
  */
 const SCOPE_PREFIXES: Record<string, string> = {
   'in-store': '/v1/in-store',
+  // Bank/card promotions dashboard. NB: mapping the prefix only restricts a
+  // *scoped* key to it — full-access keys still reach /v1/promos/* via
+  // enforceScopes. The promos routes therefore ALSO apply an explicit
+  // requirePromosScope guard so the existing (full-access) client key is
+  // rejected. See src/api/routes/promos.ts and docs/BANK_PROMOS.md.
+  'promos': '/v1/promos',
 };
 
 function hashKey(plaintext: string): string {

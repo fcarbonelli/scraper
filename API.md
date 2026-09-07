@@ -2312,6 +2312,69 @@ Errors: `403 FORBIDDEN` (scoped key).
 
 ---
 
+## Promotions (bank / card)
+
+A **separate, isolated** module (see
+[`docs/BANK_PROMOS.md`](docs/BANK_PROMOS.md)) that scrapes bank / credit-card
+promotions (Naranja X first) weekly into its own tables and serves them under
+**`/v1/promos/*`**. Data model: one `promotions` row per merchant **binder**
+(commerce card) which bundles one or more individual promo **plans**
+(e.g. "25% off" + "12 cuotas cero interés"), kept losslessly.
+
+> **Isolation.** These routes require a key **scoped to `promos`** (created with
+> `npm run apikey:create -- promos-dashboard --scope=promos`). A `promos` key can
+> reach **only** `/v1/promos/*`; conversely a **full-access** key (e.g. the
+> supermarket client) gets `403 FORBIDDEN` on `/v1/promos/*`. The two datasets
+> never cross.
+
+Fixtures: [`examples/api/promos-list.json`](examples/api/promos-list.json),
+[`promos-detail.json`](examples/api/promos-detail.json),
+[`promos-providers.json`](examples/api/promos-providers.json),
+[`promos-filters.json`](examples/api/promos-filters.json).
+
+### `GET /v1/promos`
+
+Paginated, filterable list of promotions. All query params optional, AND-combined:
+
+| Param | Type | Notes |
+| --- | --- | --- |
+| `provider` | string | Provider id, e.g. `naranjax` |
+| `category` | string | Taxonomy key, e.g. `SUPERMERCADOS` (case-insensitive) |
+| `paymentMethod` | string | `CREDITO` / `DEBITO` / `DINERO` / `VISA` / `MASTER` / `AMEX` |
+| `weekday` | string | `MONDAY`…`SUNDAY` or `ALL_DAYS` |
+| `purchaseMode` | string | `ONLINE` / `IN_STORE` |
+| `merchant` | string | Substring search on merchant name |
+| `minDiscount` | int | Min `max_discount_pct` (0–100) |
+| `featured` | `true`/`false` | Only homepage-carousel promos |
+| `activeOnly` | `true`/`false` | Default `true` (hide expired / dropped-off) |
+| `page`, `limit` | int | Standard pagination (`limit` ≤ 200) |
+
+Ordered by `is_featured desc, max_discount_pct desc, merchant asc`. Response:
+paginated envelope; each item is a `promotions` row (without `plans`/`raw`).
+Fixture: [`examples/api/promos-list.json`](examples/api/promos-list.json).
+
+### `GET /v1/promos/:id`
+
+One promotion, full detail including the per-plan breakdown (`plans`) and the
+original source payload (`raw`). `404 NOT_FOUND` if the id doesn't exist.
+Fixture: [`examples/api/promos-detail.json`](examples/api/promos-detail.json).
+
+### `GET /v1/promos/providers`
+
+Providers with active-promo counts and last run time.
+Fixture: [`examples/api/promos-providers.json`](examples/api/promos-providers.json).
+
+### `GET /v1/promos/filters`
+
+Taxonomy for building the dashboard's filter UI: `providers`, dynamic
+`categories` (from what's currently stored), and fixed `paymentMethods`,
+`weekdays`, `purchaseModes` enums.
+Fixture: [`examples/api/promos-filters.json`](examples/api/promos-filters.json).
+
+Errors (all promos routes): `403 FORBIDDEN` unless the key is `promos`-scoped.
+
+---
+
 ## Quickstart
 
 ### cURL

@@ -26,6 +26,8 @@ import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { emitPhantomMarkers } from './phantomMarkers.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
+import { runPromoCheck } from '../promos/pipeline.js';
+import { promosConfig } from '../promos/config.js';
 import { checkRevistaConfigHealth, checkStuckMagazines } from '../revistas/health.js';
 import { createRevistaIngestWorker } from '../revistas/ingestWorker.js';
 import { withTimeout } from '../revistas/pool.js';
@@ -134,6 +136,21 @@ async function enqueueCoverageSweep(): Promise<void> {
 }
 
 /**
+ * Weekly bank/card promotions check (Phase 7 — see docs/BANK_PROMOS.md). A
+ * self-contained pipeline that scrapes promotions into its own tables. Isolated
+ * so a failure here never affects the supermarket scrape or the revista check.
+ */
+async function runPromoCheckWithErrorHandling(): Promise<void> {
+  try {
+    const summaries = await runPromoCheck();
+    if (summaries.length > 0) logger.info({ summaries }, 'promos check complete');
+  } catch (err) {
+    logger.error({ err }, 'promos check failed');
+    captureError(err, { phase: 'promos-check' });
+  }
+}
+
+/**
  * Emit the daily run-less "No encontrado" markers for phantom products (catalog
  * items with no scrapeable URL — see phantomMarkers.ts). Isolated so a failure
  * here never affects the scrape. Idempotent per day.
@@ -198,6 +215,15 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // Manual one-shot promotions check (handy for testing the weekly job on
+  // demand). Ignores PROMOS_ENABLED when invoked explicitly.
+  if (process.argv.includes('--promos-now')) {
+    logger.info('--promos-now: running promotions check');
+    const summaries = await runPromoCheck({ force: true });
+    logger.info({ summaries }, '--promos-now: done');
+    process.exit(0);
+  }
+
   // Validate the cron expressions before scheduling
   if (!cron.validate(env.SCRAPE_CRON)) {
     logger.fatal({ cron: env.SCRAPE_CRON }, 'invalid SCRAPE_CRON expression');
@@ -207,10 +233,20 @@ async function main(): Promise<void> {
     logger.fatal({ cron: env.SWEEP_CRON }, 'invalid SWEEP_CRON expression');
     process.exit(1);
   }
+  if (!cron.validate(promosConfig.cron)) {
+    logger.fatal({ cron: promosConfig.cron }, 'invalid PROMOS_CRON expression');
+    process.exit(1);
+  }
 
   logger.info(
-    { cron: env.SCRAPE_CRON, sweepCron: env.SWEEP_CRON, tz: env.TZ },
-    'orchestrator: scheduling daily scrape + weekly sweep',
+    {
+      cron: env.SCRAPE_CRON,
+      sweepCron: env.SWEEP_CRON,
+      promosCron: promosConfig.cron,
+      promosEnabled: promosConfig.enabled,
+      tz: env.TZ,
+    },
+    'orchestrator: scheduling daily scrape + weekly sweep + weekly promos',
   );
 
   // 1. Daily scrape cron.
@@ -230,6 +266,12 @@ async function main(): Promise<void> {
 
   // 1b. Weekly coverage sweep cron.
   cron.schedule(env.SWEEP_CRON, () => void enqueueCoverageSweep(), {
+    timezone: env.TZ,
+  });
+
+  // 1c. Weekly bank/card promotions cron. Gated by PROMOS_ENABLED inside
+  // runPromoCheck, so leaving it scheduled is a no-op until turned on.
+  cron.schedule(promosConfig.cron, () => void runPromoCheckWithErrorHandling(), {
     timezone: env.TZ,
   });
 

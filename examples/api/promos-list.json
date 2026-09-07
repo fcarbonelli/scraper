@@ -1,0 +1,66 @@
+{
+  "data": [
+    {
+      "id": "3f9a1c22-1111-4aaa-9bbb-000000000001",
+      "provider_id": "naranjax",
+      "external_id": "8458fb6e-7034-4fdc-acb1-f0f3052258b6",
+      "title": "25% off y 12 cuotas cero interés",
+      "merchant": "Disco",
+      "category": "SUPERMERCADOS",
+      "category_name": "Supermercados",
+      "subcategory": "HIPERMERCADOS",
+      "subtitle": "En Disco, ingresá y encontrá más beneficios.",
+      "payment_methods": ["CREDITO", "DEBITO"],
+      "weekdays": ["TUESDAY", "ALL_DAYS"],
+      "purchase_modes": ["ONLINE"],
+      "max_discount_pct": 25,
+      "max_installments": 12,
+      "valid_from": "2026-07-31T03:00:00.000Z",
+      "valid_to": "2026-11-28T03:00:00.000Z",
+      "url": "disco",
+      "full_url": "https://www.naranjax.com/promociones/SUPERMERCADOS/HIPERMERCADOS/disco_comercio",
+      "logo_url": "https://merchants-api-statics.naranjax.com/commerces/logos/cuit_0030590360763_bnLZh2zri0W7FmSb.png",
+      "image_url": "https://promotion-featured-images.naranjax.com/categories/supermercados/hipermercados/hipermercados_3.webp",
+      "is_featured": true,
+      "is_active": true,
+      "tags": [
+        { "type": "accreditation", "description": "Reintegro en el resumen de tu tarjeta" },
+        { "type": "refund", "description": "$ 9.500, por persona, por semana" }
+      ],
+      "first_seen": "2026-09-01T08:00:00.000Z",
+      "last_seen": "2026-09-07T08:00:00.000Z"
+    },
+    {
+      "id": "3f9a1c22-1111-4aaa-9bbb-000000000002",
+      "provider_id": "naranjax",
+      "external_id": "be9390ab-8454-4a50-8e2b-065be4482714",
+      "title": "25% off y hasta 12 cuotas cero interés",
+      "merchant": "Changomas",
+      "category": "SUPERMERCADOS",
+      "category_name": "Supermercados",
+      "subcategory": "HIPERMERCADOS",
+      "subtitle": "En Changomas, ingresá y encontrá más beneficios.",
+      "payment_methods": ["CREDITO", "DINERO", "DEBITO"],
+      "weekdays": ["TUESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "ALL_DAYS"],
+      "purchase_modes": ["ONLINE"],
+      "max_discount_pct": 25,
+      "max_installments": 12,
+      "valid_from": "2026-07-31T03:00:00.000Z",
+      "valid_to": "2026-11-28T03:00:00.000Z",
+      "url": "changomas",
+      "full_url": "https://www.naranjax.com/promociones/SUPERMERCADOS/HIPERMERCADOS/changomas_comercio",
+      "logo_url": "https://merchants-api-statics.naranjax.com/commerces/logos/cuit_0030678138300_bUnYHfgogk3JlhWP.png",
+      "image_url": "https://promotion-featured-images.naranjax.com/categories/supermercados/hipermercados/hipermercados_2.webp",
+      "is_featured": false,
+      "is_active": true,
+      "tags": [
+        { "type": "accreditation", "description": "Reintegro en el resumen de tu tarjeta" },
+        { "type": "days", "description": "Días seleccionados" }
+      ],
+      "first_seen": "2026-09-01T08:00:00.000Z",
+      "last_seen": "2026-09-07T08:00:00.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 20, "total": 1442, "totalPages": 73 },
+  "meta": { "ts": "2026-09-07T08:05:00.000Z" }
+}

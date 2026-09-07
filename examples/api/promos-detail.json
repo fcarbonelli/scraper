@@ -1,0 +1,58 @@
+{
+  "data": {
+    "id": "3f9a1c22-1111-4aaa-9bbb-000000000001",
+    "provider_id": "naranjax",
+    "external_id": "8458fb6e-7034-4fdc-acb1-f0f3052258b6",
+    "title": "25% off y 12 cuotas cero interés",
+    "merchant": "Disco",
+    "category": "SUPERMERCADOS",
+    "category_name": "Supermercados",
+    "subcategory": "HIPERMERCADOS",
+    "subtitle": "En Disco, ingresá y encontrá más beneficios.",
+    "payment_methods": ["CREDITO", "DEBITO"],
+    "weekdays": ["TUESDAY", "ALL_DAYS"],
+    "purchase_modes": ["ONLINE"],
+    "max_discount_pct": 25,
+    "max_installments": 12,
+    "valid_from": "2026-07-31T03:00:00.000Z",
+    "valid_to": "2026-11-28T03:00:00.000Z",
+    "url": "disco",
+    "full_url": "https://www.naranjax.com/promociones/SUPERMERCADOS/HIPERMERCADOS/disco_comercio",
+    "logo_url": "https://merchants-api-statics.naranjax.com/commerces/logos/cuit_0030590360763_bnLZh2zri0W7FmSb.png",
+    "image_url": "https://promotion-featured-images.naranjax.com/categories/supermercados/hipermercados/hipermercados_3.webp",
+    "is_featured": true,
+    "is_active": true,
+    "tags": [
+      { "type": "accreditation", "description": "Reintegro en el resumen de tu tarjeta" },
+      { "type": "refund", "description": "$ 9.500, por persona, por semana" },
+      { "type": "ephemeris", "description": "Exclusiva Turbo", "visible": true },
+      { "type": "days", "description": "Días seleccionados" }
+    ],
+    "plans": [
+      {
+        "title": "12 cuotas cero interés",
+        "paymentMethods": ["CREDITO", "DEBITO"],
+        "weekdays": ["ALL_DAYS"],
+        "validFrom": "2026-09-01T03:00:00.000Z",
+        "validTo": "2026-10-31T03:00:00.000Z",
+        "appliesOnline": null,
+        "discountPct": null,
+        "installments": 12
+      },
+      {
+        "title": "25% off",
+        "paymentMethods": ["DEBITO", "CREDITO"],
+        "weekdays": ["TUESDAY"],
+        "validFrom": "2026-09-01T03:00:00.000Z",
+        "validTo": "2026-09-30T03:00:00.000Z",
+        "appliesOnline": true,
+        "discountPct": 25,
+        "installments": null
+      }
+    ],
+    "first_seen": "2026-09-01T08:00:00.000Z",
+    "last_seen": "2026-09-07T08:00:00.000Z",
+    "raw": { "note": "original binder payload from the source is stored here (truncated in this fixture)" }
+  },
+  "meta": { "ts": "2026-09-07T08:05:00.000Z" }
+}

@@ -893,6 +893,38 @@ Decisions locked in:
   blank prices — same pattern as the scraper's out_of_stock markers.
   Frontend contract: `docs/IN_STORE_PRICE_ENTRY.md`.
 
+### Phase 7 — Bank & card promotions (IMPLEMENTED, Naranja X) — see `docs/BANK_PROMOS.md`
+
+A **new, fully isolated module** that scrapes **bank / credit-card promotions**
+(Naranja X first, more providers later), stores them with **weekly history**,
+and serves a **separate dashboard** under a new API path. It must **never** reach
+the existing supermarket-pricing client.
+
+- **Isolation — data:** new tables only (`promo_providers`, `promotions`,
+  `promotion_snapshots`; migration `029`). Never touches `price_snapshots` /
+  `client_base`; invisible to the daily supermarket enqueue.
+- **Isolation — API:** new prefix `/v1/promos/*` (same domain, new path) gated by
+  a new **`promos` scope** in `SCOPE_PREFIXES` **plus an explicit route guard**
+  that rejects full-access keys (the current client's key type). Dedicated key
+  via `npm run apikey:create -- promos-dashboard --scope=promos`.
+- **Source (verified + built):** Naranja X is an Angular SPA backed by a clean
+  JSON BFF (`bkn-promotions.naranjax.com/bff-promotions-web/api`). All endpoints
+  used are **public** (need realistic browser headers to pass Cloudflare): the
+  taxonomy (`GET /data-for-filter`) and the **full list**
+  (`POST /binder/filter` — paged, per category). The earlier "token-gated"
+  assumption was wrong: `binder/*` is `POST`, not `GET` — no Auth0 token and no
+  Playwright required. No AI extraction. Each stored promotion is a merchant
+  **binder** bundling its individual **plans** (kept as `jsonb`).
+- **Module:** `src/promos/` (`types`, `config`, `normalize`, `naranjax`,
+  `registry`, `store`, `pipeline.ts:runPromoCheck`), `src/api/routes/promos.ts`
+  (list/detail/providers/filters + `requirePromosScope` guard), weekly
+  `PROMOS_CRON` hook + `--promos-now`, `npm run promos:run` / `promos:doctor`.
+- **Status:** IMPLEMENTED + proven end-to-end (first run persisted ~20.8k
+  Naranja X promotions across 20 categories). Migration `029` applied; the
+  `promos-dashboard` API key is created and scoped to `promos`. `PROMOS_ENABLED`
+  defaults to `true`, so the weekly cron activates on deploy (no env change) —
+  set `false` to pause.
+
 ---
 
 ## 11. Open decisions
@@ -940,6 +972,10 @@ TELEGRAM_CHAT_ID=
 # Scraping
 SCRAPE_CRON=0 6 * * *           # 6am every day (server timezone)
 TZ=America/Argentina/Buenos_Aires
+
+# Bank/card promotions (Phase 7 — see docs/BANK_PROMOS.md)
+PROMOS_ENABLED=false            # master switch (default off until live)
+PROMOS_CRON=0 5 * * 1           # weekly, Mondays 05:00 (TZ above)
 ```
 
 All loaded and validated by `src/shared/env.ts` using zod. Process exits at startup if anything required is missing.

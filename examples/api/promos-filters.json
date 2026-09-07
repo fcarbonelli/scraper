@@ -1,0 +1,16 @@
+{
+  "data": {
+    "providers": [{ "id": "naranjax", "name": "Naranja X" }],
+    "categories": [
+      { "key": "COMBUSTIBLE", "name": "Combustible" },
+      { "key": "ELECTRO_Y_TECNOLOGIA", "name": "Electro y Tecnología" },
+      { "key": "GASTRONOMIA", "name": "Gastronomía" },
+      { "key": "MODA_Y_ACCESORIOS", "name": "Moda y Accesorios" },
+      { "key": "SUPERMERCADOS", "name": "Supermercados" }
+    ],
+    "paymentMethods": ["CREDITO", "DEBITO", "DINERO", "VISA", "MASTER", "AMEX"],
+    "weekdays": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY", "ALL_DAYS"],
+    "purchaseModes": ["ONLINE", "IN_STORE"]
+  },
+  "meta": { "ts": "2026-09-07T08:05:00.000Z" }
+}

@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "id": "naranjax",
+      "name": "Naranja X",
+      "baseUrl": "https://bkn-promotions.naranjax.com/bff-promotions-web/api",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 1442
+    }
+  ],
+  "meta": { "ts": "2026-09-07T08:05:00.000Z", "total": 1 }
+}
