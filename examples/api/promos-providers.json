@@ -1,13 +1,69 @@
 {
   "data": [
     {
+      "id": "modo",
+      "name": "MODO",
+      "baseUrl": "https://www.modo.com.ar/promos/api/rewards",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 26274
+    },
+    {
       "id": "naranjax",
       "name": "Naranja X",
       "baseUrl": "https://bkn-promotions.naranjax.com/bff-promotions-web/api",
       "active": true,
       "lastRunAt": "2026-09-07T08:00:00.000Z",
       "activePromotions": 1442
+    },
+    {
+      "id": "bbva",
+      "name": "BBVA",
+      "baseUrl": "https://go.bbva.com.ar/willgo/fgo/API",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 908
+    },
+    {
+      "id": "galicia",
+      "name": "Banco Galicia",
+      "baseUrl": "https://loyalty.bff.bancogalicia.com.ar/api/portal",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 1713
+    },
+    {
+      "id": "macro",
+      "name": "Banco Macro",
+      "baseUrl": "https://apipublic.macro.com.ar/v1/card-benefits",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 612
+    },
+    {
+      "id": "santander",
+      "name": "Banco Santander",
+      "baseUrl": "https://www.santander.com.ar/bff-benefits",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 1054
+    },
+    {
+      "id": "icbc",
+      "name": "ICBC",
+      "baseUrl": "https://prod-utilidades-icbc.pisol.net/api/web/v1",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 337
+    },
+    {
+      "id": "cuentadni",
+      "name": "Cuenta DNI",
+      "baseUrl": "https://www.bancoprovincia.com.ar/cuentadni/Home",
+      "active": true,
+      "lastRunAt": "2026-09-07T08:00:00.000Z",
+      "activePromotions": 25
     }
   ],
-  "meta": { "ts": "2026-09-07T08:05:00.000Z", "total": 1 }
+  "meta": { "ts": "2026-09-07T08:05:00.000Z", "total": 8 }
 }

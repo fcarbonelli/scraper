@@ -30,6 +30,7 @@ function computeHash(p: NormalizedPromotion): string {
   const sorted = (a: string[]): string[] => [...a].sort();
   const canonical = {
     title: p.title,
+    issuer: p.issuer,
     merchant: p.merchant,
     category: p.category,
     subcategory: p.subcategory,
@@ -59,6 +60,7 @@ function toRow(p: NormalizedPromotion, contentHash: string): Record<string, unkn
     provider_id: p.providerId,
     external_id: p.externalId,
     title: p.title,
+    issuer: p.issuer,
     merchant: p.merchant,
     category: p.category,
     category_name: p.categoryName,

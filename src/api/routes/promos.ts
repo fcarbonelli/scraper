@@ -48,7 +48,7 @@ promosRouter.use((req, _res, next) => {
 
 // Columns returned in list responses (raw payload omitted to keep it small).
 const LIST_COLUMNS =
-  'id, provider_id, external_id, title, merchant, category, category_name, ' +
+  'id, provider_id, external_id, title, issuer, merchant, category, category_name, ' +
   'subcategory, subtitle, payment_methods, weekdays, purchase_modes, ' +
   'max_discount_pct, max_installments, valid_from, valid_to, url, full_url, ' +
   'logo_url, image_url, is_featured, is_active, tags, first_seen, last_seen';
@@ -68,6 +68,7 @@ const PURCHASE_MODES = ['ONLINE', 'IN_STORE'];
 const ListQuery = z
   .object({
     provider: z.string().trim().min(1).optional(),
+    issuer: z.string().trim().min(1).optional(),
     category: z.string().trim().min(1).optional(),
     paymentMethod: z.string().trim().min(1).optional(),
     weekday: z.string().trim().min(1).optional(),
@@ -95,6 +96,7 @@ promosRouter.get('/', async (req: Request, res: Response) => {
 
   if (q.activeOnly) query = query.eq('is_active', true);
   if (q.provider) query = query.eq('provider_id', q.provider);
+  if (q.issuer) query = query.ilike('issuer', `%${q.issuer}%`);
   if (q.category) query = query.eq('category', q.category.toUpperCase());
   if (q.paymentMethod) query = query.contains('payment_methods', [q.paymentMethod.toUpperCase()]);
   if (q.weekday) query = query.contains('weekdays', [q.weekday.toUpperCase()]);
@@ -172,9 +174,21 @@ promosRouter.get('/filters', async (_req: Request, res: Response) => {
     .eq('active', true)
     .order('name', { ascending: true });
 
+  // Distinct issuers (banks) across active promos — the key filter for the
+  // multi-bank aggregators. Deduped in memory (small text column).
+  const { data: issuerRows } = await db
+    .from('promotions')
+    .select('issuer')
+    .eq('is_active', true)
+    .not('issuer', 'is', null);
+  const issuers = [...new Set((issuerRows ?? []).map((r) => r.issuer as string))]
+    .filter((s) => s.length > 0)
+    .sort((a, b) => a.localeCompare(b));
+
   res.json(
     success({
       providers: (provs ?? []).map((p) => ({ id: p.id, name: p.name })),
+      issuers,
       categories,
       paymentMethods: PAYMENT_METHODS,
       weekdays: WEEKDAYS,

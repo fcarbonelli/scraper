@@ -4,11 +4,44 @@ Design for a **new, isolated module** that scrapes **bank / credit-card
 promotions** (Naranja X first, more providers later), stores them with weekly
 history, and serves a **separate dashboard** through a dedicated API path.
 
-> **Status: IMPLEMENTED (Naranja X).** The module is built and typechecks. It
-> mirrors the structure of [`REVISTA_REVIEW.md`](./REVISTA_REVIEW.md) and
+> **Status: IMPLEMENTED — 8 providers: Naranja X + MODO + BBVA + Galicia + Macro + Santander + ICBC + Cuenta DNI.** The module is built and typechecks.
+> It mirrors the structure of [`REVISTA_REVIEW.md`](./REVISTA_REVIEW.md) and
 > [`IN_STORE_PRICE_ENTRY.md`](./IN_STORE_PRICE_ENTRY.md): a self-contained
 > pipeline with its own tables, its own orchestrator entry, and its own
 > `/v1/*` routes — **completely separate from the supermarket price engine**.
+>
+> **`modo` is the second provider and the big one:** MODO's public hub API
+> (`modo.com.ar/promos`) aggregates **~26,000 promotions across 82 banks/wallets**
+> into one feed — so it covers every bank on the wishlist (Galicia, Macro, BBVA,
+> Santander, BNA, Provincia, ICBC, …) in a single adapter. Each promo is
+> attributed to its bank via a new **`issuer`** column (migration `031`).
+>
+> **`bbva` is the third provider:** BBVA's benefits catalog
+> (`bbva.com.ar/beneficios`) is backed by the public **Go** JSON API
+> (`go.bbva.com.ar/willgo/fgo/API`) — no auth, ~900 card promos across 46 pages,
+> issuer='BBVA' (migration `032`). It adds BBVA card-only promos (installments,
+> Visa/Master) that overlap but extend MODO's QR feed.
+>
+> **`galicia`, `macro`, `santander` are providers #4–6 — the F5-WAF'd trio.**
+> All three publish public JSON promo catalogs but sit behind an **F5 BIG-IP WAF
+> that fingerprints the TLS handshake (JA3)**, so a plain server-side `fetch` is
+> rejected. Their adapters use a shared **browser-fetch helper**
+> (`src/promos/browserFetch.ts`): a real Chromium loads the bank's SPA and the API
+> is called **in-page** (real Chrome JA3 + correct CORS). issuer='Banco Galicia' /
+> 'Banco Macro' / 'Banco Santander' (migration `033`).
+>
+> **`icbc` + `cuentadni` are providers #7–8.** **ICBC** (migration `034`) has a
+> public rubro-paginated JSON API (`prod-utilidades-icbc.pisol.net/api/web/v1`)
+> whose calls carry an `apikey` + `accesstoken` the SPA injects, so its adapter
+> captures both in-page via `browserFetch` — **337 merchant-level promos**,
+> issuer='ICBC'. **Cuenta DNI** (Banco Provincia, migration `035`) — the only
+> wishlist issuer **not** on MODO — turned out to have a **plain-fetch ASP.NET
+> JSON API** (no WAF, no Playwright): the adapter discovers active rubro ids from
+> the page (`filtrarPorRubro(<id>)`), fetches each, and keeps only current rows
+> — **~25 category-level wallet promos**, issuer='Cuenta DNI'. To build the
+> dashboard, read [`DASHBOARD_GUIDE.md`](./DASHBOARD_GUIDE.md). Remaining
+> low-value candidates (BNA+, Mercado Pago) — see
+> [`BANK_PROMOS_ROADMAP.md`](./BANK_PROMOS_ROADMAP.md).
 >
 > **What shipped differs from the original design in two good ways** (see
 > [§ Implementation notes](#implementation-notes--what-actually-shipped) — the
@@ -20,9 +53,15 @@ history, and serves a **separate dashboard** through a dedicated API path.
 >    bundles its individual promo **plans** (kept losslessly as `jsonb`), which
 >    matches how the source actually groups them.
 >
-> **One manual step is yours:** apply `migrations/029_promos.sql` to the
-> `scraper` Supabase project (SQL editor). The `promos-dashboard` API key has
-> already been created and scoped to `promos`.
+> **One manual step is yours:** apply the promos migrations to the `scraper`
+> Supabase project (SQL editor), in order:
+> `029_promos.sql` → `030_promotions_content_hash.sql` →
+> `031_promos_issuer_and_modo.sql` (adds the `issuer` column + registers MODO) →
+> `032_promos_bbva.sql` (registers BBVA) →
+> `033_promos_galicia_macro_santander.sql` (registers the F5-WAF'd trio) →
+> `034_promos_icbc.sql` (registers ICBC) →
+> `035_promos_cuentadni.sql` (registers Cuenta DNI).
+> The `promos-dashboard` API key has already been created and scoped to `promos`.
 
 ---
 
@@ -34,16 +73,72 @@ history, and serves a **separate dashboard** through a dedicated API path.
 src/promos/
   types.ts        ← PromoProvider contract + NormalizedPromotion / PromotionPlan
   config.ts       ← env-derived settings (enabled, cron, timeouts)
-  normalize.ts    ← pure helpers: weekday map, AR date parse, %/cuotas parse (unit-testable)
+  normalize.ts    ← pure helpers: weekday maps (ids + letters), AR date parse, %/cuotas parse, card-network + purchase-flow maps (unit-testable)
   naranjax.ts     ← provider #1: /data-for-filter + paged POST /binder/filter → normalized
-  registry.ts     ← id → provider
-  store.ts        ← upsert promotions + weekly snapshot + deactivate-missing
+  modo.ts         ← provider #2 (the hub): GET /slots?source=hub (paged) → normalized, issuer per card
+  bbva.ts         ← provider #3: GET /v3/communications?pager=N (paged) → normalized, issuer='BBVA'
+  browserFetch.ts ← shared Playwright helper: launch Chromium → navigate SPA origin → fetch API in-page (clears F5/JA3 WAFs + CORS); optional captureHeaders for public tokens
+  galicia.ts      ← provider #4: in-page GET /personalizacion/v1/promociones/catalogo?page=N → normalized, issuer='Banco Galicia'
+  macro.ts        ← provider #5: in-page GET /v1/card-benefits/provinces/{code} (per-province, deduped) w/ captured apikey → normalized, issuer='Banco Macro'
+  santander.ts    ← provider #6: in-page /bff-benefits/brands + /brands/{id} (list→detail) → normalized, issuer='Banco Santander'
+  icbc.ts         ← provider #7: in-page /beneficios/get?heading_id=<rubro>&offset=N (per-rubro) w/ captured apikey+accesstoken → normalized, issuer='ICBC'
+  cuentadni.ts    ← provider #8 (plain fetch, no Playwright): discover rubros from page → GET /Home/GetBeneficioByRubro?idRubro=<id>, keep current → normalized, issuer='Cuenta DNI'
+  registry.ts     ← id → provider (naranjax, modo, bbva, galicia, macro, santander, icbc, cuentadni)
+  store.ts        ← upsert promotions (incl. issuer) + weekly snapshot + deactivate-missing
   pipeline.ts     ← runPromoCheck(): weekly entry point (called by orchestrator)
 src/api/routes/promos.ts   ← GET /v1/promos, /:id, /providers, /filters (+ promos-scope guard)
 migrations/029_promos.sql  ← promo_providers, promotions, promotion_snapshots (+ naranjax seed)
+migrations/030_…hash.sql   ← content_hash (snapshot dedup)
+migrations/031_…issuer_and_modo.sql ← issuer column + MODO provider seed
+migrations/032_promos_bbva.sql      ← BBVA provider seed
+migrations/033_promos_galicia_macro_santander.sql ← Galicia/Macro/Santander seeds (Playwright providers)
+migrations/034_promos_icbc.sql      ← ICBC provider seed (Playwright)
+migrations/035_promos_cuentadni.sql ← Cuenta DNI provider seed (plain fetch)
 scripts/promos-run.ts      ← npm run promos:run
 scripts/promos-doctor.ts   ← npm run promos:doctor (reachability, no writes)
 ```
+
+### How MODO is fetched (verified, all public `GET`)
+
+MODO's promos hub is a Next.js SPA backed by a **public JSON BFF proxied on the
+site's own origin** — no auth, browser headers only. Base:
+`https://www.modo.com.ar/promos/api/rewards`.
+
+| Call | Purpose |
+| --- | --- |
+| `GET /categories` | taxonomy (id → slug/title) for category names |
+| `GET /banks?source=hub` | all **82 banks** + each bank's official promo URL; used to canonicalize the `issuer` name per card |
+| `GET /slots?source=hub&page=N` | the **full paged catalog** (`{ data:{ cards }, metadata:{ pagination } }`) — ~26k promos, 10/page |
+
+Each `card` → one `promotions` row. We extract: `title`, `issuer` (the bank —
+from the adhered-bank list when present, else matched against `/banks`),
+`valid_from`/`valid_to` (`start_date`/`stop_date`), `weekdays`
+(`days_of_week` "LMXJVSD"), `payment_methods` (`debit_list`/`credit_list` card
+networks → `DEBITO`/`CREDITO` + `VISA`/`MASTER`/…), `purchase_modes`
+(`payment_flow`), `max_discount_pct` (parsed from the discount text), and
+`category`. Cross-bank promos keep the adhered-bank list in `tags`. Pagination
+fans out with a small **concurrency pool** (6) so ~2,600 pages finish well inside
+the run timeout. Tune/limit via `promo_providers.config` (`maxPages`, `source`,
+`baseUrl`) — DB-driven, no redeploy.
+
+### How BBVA is fetched (verified, all public `GET`)
+
+BBVA's benefits page (`bbva.com.ar/beneficios`, a Next.js SPA) is backed by the
+public **Go / "willgo"** JSON API — no auth, browser headers only. Base:
+`https://go.bbva.com.ar/willgo/fgo/API`.
+
+| Call | Purpose |
+| --- | --- |
+| `GET /v3/communications?pager=N` | the **paged benefits list** (`{ code, message, data:[…] }`, 20/page, ~46 pages). `message` reports totals (`"Comunicaciones: 908  paginas: 46"`) |
+| `GET /v3/communication/{id}` | one benefit (bases/conditions, sales channels, `beneficios` block) — not needed for the card, so we skip the ~900 extra calls |
+| `GET /v3/rubros/filtro?filtro_padre=true` | category taxonomy |
+
+Each list item → one `promotions` row (issuer='BBVA'). We map: `cabecera`→title,
+`subcabecera`→subtitle, `fechaDesde`/`fechaHasta`→`valid_from`/`valid_to`,
+`grupoTarjeta`→`payment_methods` (crédito/débito → `CREDITO`/`DEBITO`),
+`max_discount_pct` (parsed from the title/subtitle), `montoTope`→a `cap` tag, and
+the MODO flag (`esModo`)→a `channel` tag. We enumerate `pager=0…` until an empty
+page. `promo_providers.config.maxPages` caps it (default 200; catalog is ~46).
 
 ### Snapshot deduplication (history growth)
 
@@ -76,7 +171,9 @@ aggregate `payment_methods` / `weekdays` / `purchase_modes` and convenience
 ### How to run it
 ```bash
 # 0. Apply the migrations first (Supabase SQL editor):
-#    029_promos.sql then 030_promotions_content_hash.sql
+#    029_promos.sql → 030_promotions_content_hash.sql → 031_promos_issuer_and_modo.sql
+#    → 032_promos_bbva.sql → 033_promos_galicia_macro_santander.sql
+#    → 034_promos_icbc.sql → 035_promos_cuentadni.sql
 
 # 1. Reachability check (no DB writes, no AI):
 npm run promos:doctor
@@ -84,6 +181,14 @@ npm run promos:doctor
 # 2. One-shot scrape into the DB (forces a run even if PROMOS_ENABLED=false):
 npx tsx --env-file=.env scripts/promos-run.ts               # all providers
 npx tsx --env-file=.env scripts/promos-run.ts --provider=naranjax
+npx tsx --env-file=.env scripts/promos-run.ts --provider=modo       # the hub (~26k promos)
+npx tsx --env-file=.env scripts/promos-run.ts --provider=bbva       # public JSON (~900)
+npx tsx --env-file=.env scripts/promos-run.ts --provider=cuentadni  # plain JSON (~25, no browser)
+# Playwright providers (F5-WAF'd / token-gated — launch a real Chromium, fetch in-page):
+npx tsx --env-file=.env scripts/promos-run.ts --provider=galicia    # ~1.7k
+npx tsx --env-file=.env scripts/promos-run.ts --provider=macro      # per-province, deduped
+npx tsx --env-file=.env scripts/promos-run.ts --provider=santander  # brands→benefits
+npx tsx --env-file=.env scripts/promos-run.ts --provider=icbc       # per-rubro (~337)
 npx tsx --env-file=.env scripts/promos-run.ts --dry-run     # fetch only, no writes
 # NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>`.
 
@@ -111,18 +216,19 @@ curl -s -H "X-API-Key: $KEY" "$BASE/v1/promos/filters"
 # Providers + active counts + last run time
 curl -s -H "X-API-Key: $KEY" "$BASE/v1/promos/providers"
 
-# Paginated, filterable list
+# Paginated, filterable list (e.g. all Galicia promos seen via MODO)
 curl -s -H "X-API-Key: $KEY" \
-  "$BASE/v1/promos?category=SUPERMERCADOS&paymentMethod=CREDITO&weekday=WEDNESDAY&minDiscount=20&page=1&limit=20"
+  "$BASE/v1/promos?provider=modo&issuer=Galicia&weekday=WEDNESDAY&minDiscount=20&page=1&limit=20"
 
 # One promotion (full detail incl. plans + raw)
 curl -s -H "X-API-Key: $KEY" "$BASE/v1/promos/<id>"
 ```
 
 **`GET /v1/promos` query params** (all optional, AND-combined):
-`provider`, `category`, `paymentMethod`, `weekday`, `purchaseMode`,
-`merchant` (substring search), `minDiscount` (int %), `featured` (`true|false`),
-`activeOnly` (default `true`), `page`, `limit`. Enum values come from
+`provider` (`naranjax`|`modo`|`bbva`|`galicia`|`macro`|`santander`|`icbc`|`cuentadni`), `issuer` (bank name, substring), `category`,
+`paymentMethod`, `weekday`, `purchaseMode`, `merchant` (substring search),
+`minDiscount` (int %), `featured` (`true|false`), `activeOnly` (default `true`),
+`page`, `limit`. Enum + issuer values come from
 `GET /v1/promos/filters`. Responses use the standard envelope
 (`{data, pagination, meta}` for lists, `{data, meta}` for single). See
 `examples/api/promos-*.json` for exact shapes.
@@ -134,6 +240,11 @@ curl -s -H "X-API-Key: $KEY" "$BASE/v1/promos/<id>"
 The pipeline, storage, API, and dashboard are provider-agnostic — no engine
 changes. A provider may `fetch` JSON (like Naranja X), parse HTML, or use AI;
 the engine only cares about the returned `NormalizedPromotion[]`.
+
+> **Which banks to add, in what order, and how hard each is:** see the provider
+> roadmap in [`BANK_PROMOS_ROADMAP.md`](./BANK_PROMOS_ROADMAP.md) (MODO, Galicia,
+> Macro, BBVA Go, Santander, BNA+, Cuenta DNI, Mercado Pago). Key insight: **MODO
+> is a hub** that aggregates ~30+ banks, so it's the highest-ROI next provider.
 
 ---
 

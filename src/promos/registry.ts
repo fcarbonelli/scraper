@@ -8,6 +8,13 @@
 
 import type { PromoProvider } from './types.js';
 import { naranjaxProvider } from './naranjax.js';
+import { modoProvider } from './modo.js';
+import { bbvaProvider } from './bbva.js';
+import { galiciaProvider } from './galicia.js';
+import { macroProvider } from './macro.js';
+import { santanderProvider } from './santander.js';
+import { icbcProvider } from './icbc.js';
+import { cuentadniProvider } from './cuentadni.js';
 
 const providers = new Map<string, PromoProvider>();
 
@@ -30,3 +37,10 @@ export function listProviders(): PromoProvider[] {
 
 // ---- registrations ------------------------------------------------------------
 register(naranjaxProvider);
+register(modoProvider);
+register(bbvaProvider);
+register(galiciaProvider);
+register(macroProvider);
+register(santanderProvider);
+register(icbcProvider);
+register(cuentadniProvider);

@@ -1,6 +1,20 @@
 {
   "data": {
-    "providers": [{ "id": "naranjax", "name": "Naranja X" }],
+    "providers": [
+      { "id": "naranjax", "name": "Naranja X" },
+      { "id": "modo", "name": "MODO" },
+      { "id": "bbva", "name": "BBVA" },
+      { "id": "galicia", "name": "Banco Galicia" },
+      { "id": "macro", "name": "Banco Macro" },
+      { "id": "santander", "name": "Banco Santander" },
+      { "id": "icbc", "name": "ICBC" },
+      { "id": "cuentadni", "name": "Cuenta DNI" }
+    ],
+    "issuers": [
+      "BBVA", "Banco Galicia", "Banco Macro", "Banco Nación", "Banco Santander",
+      "Credicoop", "Cuenta DNI", "Galicia", "ICBC", "Macro", "Naranja X",
+      "Santander", "Supervielle"
+    ],
     "categories": [
       { "key": "COMBUSTIBLE", "name": "Combustible" },
       { "key": "ELECTRO_Y_TECNOLOGIA", "name": "Electro y Tecnología" },

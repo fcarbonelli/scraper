@@ -221,6 +221,7 @@ function mapBinder(
     providerId: 'naranjax',
     externalId,
     title: str(b['title']),
+    issuer: 'Naranja X',
     merchant: str(b['commerceName']),
     category: str(cat['key']) ?? categoryKeyFilter,
     categoryName: str(cat['name']),

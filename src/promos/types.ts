@@ -47,6 +47,12 @@ export interface NormalizedPromotion {
   externalId: string;               // stable source id (e.g. Naranja X binder id)
 
   title: string | null;             // headline for the card
+  /**
+   * Issuing bank / card entity behind the promo ("Galicia", "Credicoop",
+   * "MODO" for cross-bank, "Naranja X"). The key filter dimension for
+   * multi-bank aggregators (MODO). Defaults to the provider name.
+   */
+  issuer: string | null;
   merchant: string | null;          // "Disco"
   category: string | null;          // taxonomy key, e.g. "SUPERMERCADOS"
   categoryName: string | null;      // "Supermercados"
