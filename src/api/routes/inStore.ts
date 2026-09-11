@@ -588,11 +588,15 @@ inStoreRouter.get('/entries', async (req: Request, res: Response) => {
 });
 
 // =============================================================================
-// GET /v1/in-store/stats — entries per supermarket per ISO week
+// GET /v1/in-store/stats — entries per supermarket BRANCH per ISO week
 //
 // Aggregation for the "productos relevados por súper por semana" table. Unlike
 // /entries (single-day, no counts), this groups the entry counts by
-// supermarket_id + ISO week over a date range. Defaults to the last 8 weeks.
+// supermarket_id + branch (localidad + direccion, from the entry's visit) + ISO
+// week over a date range. Defaults to the last 8 weeks. A chain has many
+// branches (a visit carries the branch location; for PDV relevamientos
+// `localidad` holds the region, e.g. "MORENO"/"POSADAS"), so counts are per
+// branch. Entries with no visit fall into a null-branch bucket.
 //
 //   ?from=YYYY-MM-DD  ?to=YYYY-MM-DD   inclusive range on the entry's BA day
 //   ?supermarket_id=diarco             optional single-chain filter
@@ -608,6 +612,9 @@ const StatsQuery = z.object({
 interface StatsEntryRow {
   supermarket_id: string;
   created_at: string;
+  // The entry's visit branch (null when the entry has no visit). Embedded via
+  // the instore_price_entries.visit_id FK.
+  instore_visits: { localidad: string | null; direccion: string | null } | null;
 }
 
 inStoreRouter.get('/stats', async (req: Request, res: Response) => {
@@ -619,18 +626,22 @@ inStoreRouter.get('/stats', async (req: Request, res: Response) => {
   const from = q.from ?? buenosAiresDate(defaultFrom);
   const { fromUtc, toUtc } = baDateRangeUtc(from, to);
 
-  // Pull the (small) set of entries in-window; group in JS by chain + ISO week.
+  // Pull the (small) set of entries in-window; group in JS by chain + branch +
+  // ISO week. The branch (localidad/direccion) rides on the entry's visit.
   const rows = await fetchAllPages<StatsEntryRow>((rangeFrom, rangeTo) => {
     let query = db
       .from('instore_price_entries')
-      .select('supermarket_id, created_at')
+      .select('supermarket_id, created_at, instore_visits(localidad, direccion)')
       .gte('created_at', fromUtc)
       .lt('created_at', toUtc)
       .order('created_at', { ascending: true })
       .range(rangeFrom, rangeTo);
     if (q.supermarket_id) query = query.eq('supermarket_id', q.supermarket_id);
     if (q.review_status) query = query.eq('review_status', q.review_status);
-    return query;
+    // supabase-js types a to-one FK embed as an array; at runtime it's a single
+    // object (or null). Cast to the actual shape (same convention as this file's
+    // other embeds).
+    return query as unknown as PromiseLike<{ data: StatsEntryRow[] | null; error: unknown }>;
   });
 
   // Resolve chain display names once (small table).
@@ -645,10 +656,13 @@ inStoreRouter.get('/stats', async (req: Request, res: Response) => {
     ]),
   );
 
-  // Group by supermarket_id + ISO week (of the entry's Buenos Aires day).
+  // Group by supermarket_id + branch (localidad + direccion) + ISO week (of the
+  // entry's Buenos Aires day). Entries without a visit have a null branch.
   interface Bucket {
     supermarket_id: string;
     supermarket_name: string | null;
+    localidad: string | null;
+    direccion: string | null;
     week: string;
     week_start: string;
     count: number;
@@ -657,7 +671,9 @@ inStoreRouter.get('/stats', async (req: Request, res: Response) => {
   for (const r of rows) {
     const baDate = buenosAiresDate(new Date(r.created_at));
     const iso = isoWeekOf(baDate);
-    const key = `${r.supermarket_id}|${iso.label}`;
+    const localidad = r.instore_visits?.localidad ?? null;
+    const direccion = r.instore_visits?.direccion ?? null;
+    const key = `${r.supermarket_id}|${localidad ?? ''}|${direccion ?? ''}|${iso.label}`;
     const bucket = buckets.get(key);
     if (bucket) {
       bucket.count += 1;
@@ -665,6 +681,8 @@ inStoreRouter.get('/stats', async (req: Request, res: Response) => {
       buckets.set(key, {
         supermarket_id: r.supermarket_id,
         supermarket_name: nameById.get(r.supermarket_id) ?? null,
+        localidad,
+        direccion,
         week: iso.label,
         week_start: iso.weekStart,
         count: 1,
@@ -672,13 +690,16 @@ inStoreRouter.get('/stats', async (req: Request, res: Response) => {
     }
   }
 
-  // Stable order: chain name, then week.
+  // Stable order: chain name, then locality, then address, then week.
   const items = [...buckets.values()].sort(
     (a, b) =>
       (a.supermarket_name ?? a.supermarket_id).localeCompare(
         b.supermarket_name ?? b.supermarket_id,
         'es',
-      ) || a.week.localeCompare(b.week),
+      ) ||
+      (a.localidad ?? '').localeCompare(b.localidad ?? '', 'es') ||
+      (a.direccion ?? '').localeCompare(b.direccion ?? '', 'es') ||
+      a.week.localeCompare(b.week),
   );
 
   res.json(success(items, { from, to, total: items.length }));

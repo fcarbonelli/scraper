@@ -2130,9 +2130,12 @@ Each item:
 
 ### `GET /v1/in-store/stats`
 
-Entry counts grouped by **supermarket + ISO week** — powers the "productos
-relevados por súper por semana" table. Unlike `/entries` (single day, no counts),
-this aggregates a date range.
+Entry counts grouped by **supermarket + branch (localidad + direccion) + ISO
+week** — powers the "productos relevados por súper por semana" table. The branch
+comes from each entry's **visit** (a chain has many branches; for PDV
+relevamientos `localidad` holds the region, e.g. `"MORENO"`/`"POSADAS"`), so
+counts are **per branch**. Unlike `/entries` (single day, no counts), this
+aggregates a date range.
 
 | Param | Type | Description |
 |---|---|---|
@@ -2146,17 +2149,21 @@ this aggregates a date range.
   data: Array<{
     supermarket_id: string;
     supermarket_name: string | null;
+    localidad: string | null;   // branch locality/region (from the visit); null if no visit
+    direccion: string | null;   // branch address (from the visit); null if no visit
     week: string;         // ISO-8601 week label, e.g. "2026-W34" (matches the export's Semana)
     week_start: string;   // Monday of that week, YYYY-MM-DD
-    count: number;        // entries submitted that week at that chain
+    count: number;        // entries submitted that week at that branch
   }>;
   meta: { ts: string; from: string; to: string; total: number };
 }
 ```
 
-Rows are sorted by chain name, then week. Weeks with no entries are omitted (no
-zero-rows). The week is the ISO week of the entry's Buenos Aires day, so it lines
-up with the `Semana` column in the client export.
+Rows are sorted by chain name, then locality, then address, then week. Weeks with
+no entries are omitted (no zero-rows). Entries submitted without a visit fall into
+a single null-branch bucket (`localidad`/`direccion` both `null`). The week is the
+ISO week of the entry's Buenos Aires day, so it lines up with the `Semana` column
+in the client export.
 
 ### Daily review (back-office)
 
