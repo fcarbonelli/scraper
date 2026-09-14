@@ -122,8 +122,9 @@ async function main() {
       skipped++;
       continue;
     }
-    // Vigencia comes through as a Date; keep just the calendar day.
-    const vigCell = row.getCell(cVig).value;
+    // Vigencia comes through as a Date; keep just the calendar day. The column
+    // is optional (some sheets omit it), so only read it when present.
+    const vigCell = cVig > 0 ? row.getCell(cVig).value : null;
     const vigencia = vigCell instanceof Date ? vigCell.toISOString().slice(0, 10) : null;
 
     byKey.set(`${ean}|${canal}`, {

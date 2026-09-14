@@ -222,6 +222,14 @@ export const NUEVA_CATEGORIZACION_BY_EAN = new Map<string, string>([
   ["7793253000509", "UTENDELIMP_PAÑOS_X1_A"],
   ["7791290647176", "UTENDELIMP_PAÑOS_X1_A1"],
   ["7794440005109", "UTENDELIMP_PAÑOS_X1_A1"],
+  // Client Setup V4 (2026-09): new Poett "Huellitas de Frescura" line. From
+  // "Huellitas Precios 092026.xlsx" (NUEVA_CATEGORIZACION column). EAN
+  // 7793253007621 (Natural Blends) came blank in the file → intentionally omitted.
+  ["7793253007591", "LIQUIDOS_LIVIANOS_900_A"],
+  ["7793253007607", "LIQUIDOS_LIVIANOS_1800_A"],
+  ["7793253007614", "AERO_FRAG_360_A"],
+  ["7793253007638", "PERFP/TELA_PERFP/TELA_GAT250_A"],
+  ["7793253007645", "PERFP/TELA_PERFP/TELA_DP250_A"],
 ]);
 
 /**
