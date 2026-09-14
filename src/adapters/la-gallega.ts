@@ -143,16 +143,49 @@ function parseArs(raw: string): number {
 
 // Detail page: the image tile carries "<EAN> - <name>" in its alt.
 const DETAIL_TILE_RE = /data-image="Fotos\/Articulos\/\d+\.[a-z]+"\s*alt="(\d{8,14})\s*-\s*([^"]*)"/i;
-const DETAIL_PRICE_RE = /class=["']DetallPrec["'][\s\S]{0,120}?\$\s*([\d.]+,\d{2})/i;
 const OUT_OF_STOCK_RE = /sin\s*stock|no\s+disponible|agotado/i;
+
+// Price block. La Gallega renders es-AR money with a variable number of decimal
+// digits — it used to be two ("$5.207,24") but as of 2026-09 emits one
+// ("$8.967,0"), which broke the old `,\d{2}` regex and failed every product.
+// Two layouts:
+//   no discount:  <div class="DetallPrec"><div class='izq'>$8.967,0</div></div>
+//   discount:     <div class="DetallPrec"><div class='izqdes'>$6.080,0</div>
+//                   <div class='der'><b>$5.779,0</b></div></div>
+// The selling price is `der` (bold, discounted) when present, else `izq`; the
+// crossed-out original in `izqdes` becomes the list price.
+const DETALL_PREC_RE = /class=["']DetallPrec["']/i;
+const MONEY = String.raw`\$\s*([\d.]+,\d{1,2})`;
+const DER_RE = new RegExp(`class=["']der["'][^>]*>\\s*(?:<b>)?\\s*${MONEY}`, 'i');
+const IZQDES_RE = new RegExp(`class=["']izqdes["'][^>]*>\\s*${MONEY}`, 'i');
+const IZQ_RE = new RegExp(`class=["']izq["'][^>]*>\\s*${MONEY}`, 'i');
+
+/** Extract selling price (+ optional crossed-out list price) from the detail HTML. */
+function extractGallegaPrice(html: string): { price: number; listPrice?: number } {
+  const start = html.search(DETALL_PREC_RE);
+  if (start < 0) return { price: NaN };
+  // Scope to the price block so we don't pick up unrelated money elsewhere.
+  const block = html.slice(start, start + 400);
+
+  const der = block.match(DER_RE);
+  if (der?.[1]) {
+    const izqdes = block.match(IZQDES_RE);
+    const listPrice = izqdes?.[1] ? parseArs(izqdes[1]) : NaN;
+    return Number.isFinite(listPrice) && listPrice > 0
+      ? { price: parseArs(der[1]), listPrice }
+      : { price: parseArs(der[1]) };
+  }
+  const izq = block.match(IZQ_RE);
+  if (izq?.[1]) return { price: parseArs(izq[1]) };
+  return { price: NaN };
+}
 
 /** Build a ScrapeResult from a productosdet.asp page. */
 export function parseLaGallegaHtml(
   html: string,
   ctx: Pick<ScrapeContext, 'externalId' | 'externalUrl'>,
 ): ScrapeResult {
-  const priceM = html.match(DETAIL_PRICE_RE);
-  const price = priceM?.[1] ? parseArs(priceM[1]) : NaN;
+  const { price, listPrice } = extractGallegaPrice(html);
   if (!Number.isFinite(price) || price <= 0) {
     throw new ScrapeError('price_missing', 'La Gallega product has no usable price');
   }
@@ -166,7 +199,7 @@ export function parseLaGallegaHtml(
   }
   if (tileM?.[2]) productInfo.name = tileM[2].trim();
 
-  return {
+  const result: ScrapeResult = {
     price,
     inStock,
     currency: 'ARS',
@@ -175,6 +208,9 @@ export function parseLaGallegaHtml(
     productInfo,
     rawData: { externalId: ctx.externalId },
   };
+  // Only emit a list price when it's actually higher than the selling price.
+  if (listPrice !== undefined && listPrice > price) result.listPrice = listPrice;
+  return result;
 }
 
 /** Extract { ean → Pr } from a productosnl.asp results page. */
