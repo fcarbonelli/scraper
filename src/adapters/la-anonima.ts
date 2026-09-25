@@ -94,10 +94,17 @@ const NO_RESULTS_RE = /No encontramos resultados/i;
 // -----------------------------------------------------------------------------
 // The super (grocery) catalog is scoped by the `Id-Sucursal-Super` cookie. When
 // the default attempt 302s home / has no price, we retry against each of these
-// branch ids until one stocks the product. IDs span La Anónima's super footprint
-// (Patagonia + NEA); discovered live from /sucursal/<cp>. Override the order/set
-// with LA_ANONIMA_SUCURSAL_FALLBACKS="8,22,4,…" if the assortment shifts.
-const DEFAULT_SUCURSAL_FALLBACKS = [8, 22, 4, 47, 33, 59, 32, 165, 164, 6];
+// branch ids until one stocks the product. Only ~28 of the ~180 physical
+// branches actually fulfil the online super catalog, and stock skews heavily to
+// the Patagonia/Sur region. This list is the CONFIRMED super-fulfilling set
+// (branches observed carrying stock) from the coverage experiment
+// (`npm run laanonima:coverage`, 2026-09), ordered by assortment so the sweep
+// finds stock in the fewest hops. Regenerate + override with
+// LA_ANONIMA_SUCURSAL_FALLBACKS="179,182,…" when the assortment shifts.
+const DEFAULT_SUCURSAL_FALLBACKS = [
+  179, 182, 184, 177, 181, 183, 186, 185, 91, 8, 22, 165, 4, 6, 161, 32, 85,
+  124, 131, 152, 163, 164, 33, 75, 84,
+];
 
 const SUCURSAL_FALLBACKS: number[] = (() => {
   const raw = process.env.LA_ANONIMA_SUCURSAL_FALLBACKS;
