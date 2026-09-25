@@ -67,6 +67,31 @@ export function usesProxy(supermarketId: string): boolean {
   return Boolean(PROXY_URL) && proxiedIds.has(supermarketId);
 }
 
+/**
+ * A short-lived proxy dispatcher backed by its OWN `ProxyAgent`, plus a `close`
+ * to release its sockets. Rotating residential proxies (e.g. iProyal) hand out
+ * a new exit IP per fresh connection, so building a brand-new agent is how we
+ * escape an exit IP that a site's WAF has started 403-blocking. This is
+ * DELIBERATELY separate from the pooled `getProxyDispatcher` agent: the pooled
+ * one keeps keep-alive efficiency for the happy path; these are spun up only on
+ * a block and closed right after, so we don't leak sockets.
+ */
+export interface FreshDispatcher {
+  dispatcher: Dispatcher;
+  close: () => Promise<void>;
+}
+
+/**
+ * Build a fresh, single-use proxy dispatcher (new exit IP) for the given
+ * supermarket, or `undefined` when no proxy is configured/enabled (callers then
+ * just retry the direct connection). Always `close()` the result when done.
+ */
+export function getFreshProxyDispatcher(supermarketId: string): FreshDispatcher | undefined {
+  if (!PROXY_URL || !proxiedIds.has(supermarketId)) return undefined;
+  const fresh = new ProxyAgent(PROXY_URL);
+  return { dispatcher: fresh, close: () => fresh.close().catch(() => undefined) };
+}
+
 /** Playwright-shaped proxy config (server URL + split-out credentials). */
 export interface PlaywrightProxy {
   server: string;

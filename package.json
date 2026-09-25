@@ -38,6 +38,7 @@
     "prune-ecomodico": "tsx --env-file=.env scripts/prune-ecomodico.ts",
     "scrape:url": "tsx --env-file=.env scripts/scrape-url.ts",
     "scrape:bulk": "tsx --env-file=.env scripts/import-urls.ts",
+    "laanonima:coverage": "tsx --env-file=.env scripts/laanonima-branch-coverage.ts",
     "revistas:run": "tsx --env-file=.env scripts/scrape-revistas.ts",
     "revistas:doctor": "tsx --env-file=.env scripts/revistas-doctor.ts",
     "revistas:reset": "tsx --env-file=.env scripts/reset-revista-chain.ts",

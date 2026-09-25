@@ -40,6 +40,23 @@
  * allowlist). Availability is cookie-scoped, not IP-scoped, so the proxy's exit
  * region doesn't change what we see — it only supplies a non-blocked IP.
  *
+ * WAF rotation (2026-09): the WAF also 403s INDIVIDUAL residential exit IPs
+ * intermittently. Because the pooled ProxyAgent keeps one sticky IP alive, a
+ * single blocked IP used to blackhole La Anónima for the whole process (every
+ * product 403 → mass false failures). `fetchLaAnonimaHtml` now retries a 403 on
+ * up to MAX_PROXY_ROTATIONS fresh proxy connections (new exit IPs) before
+ * giving up. No-op when no proxy is configured (a direct IP can't rotate).
+ *
+ * Sucursal coverage (2026-09): the online "super" catalog is fulfilled by only
+ * a SUBSET of the ~180 physical branches. Products stocked solely in a branch
+ * outside our sweep list come back out-of-stock even though a client finds them
+ * by browsing that branch. The sweep list (SUCURSAL_FALLBACKS) is therefore a
+ * CURATED set of super-fulfilling branches; regenerate it with
+ * `npm run laanonima:coverage` (runs on a host with working egress; read-only)
+ * and set the result via LA_ANONIMA_SUCURSAL_FALLBACKS. NB: a physical branch's
+ * code (e.g. 9 de Julio = 260) is NOT necessarily super-enabled — 260 home-
+ * redirects; only fulfilling branches resolve a super PDP.
+ *
  * Stale-id healing: La Anónima periodically REPLACES a product's `art_<id>`
  * while the EAN stays constant. The old PDP then 302s to the homepage from EVERY
  * sucursal, so once the full sweep still home-redirects we report
@@ -49,7 +66,7 @@
 
 import { fetch as undiciFetch } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
-import { getProxyDispatcher } from '../shared/proxy.js';
+import { getProxyDispatcher, getFreshProxyDispatcher, usesProxy } from '../shared/proxy.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -208,93 +225,128 @@ function extractProductIdFromUrl(canonicalUrl: string): string | null {
 // HTTP layer
 // =============================================================================
 
+// How many extra fresh-exit-IP attempts to make after the pooled agent's when
+// the WAF 403s. Rotating residential proxies hand out a new IP per fresh
+// connection, so a block that would otherwise blackhole La Anónima for the
+// whole process (pooled keep-alive = one sticky IP) is escaped by retrying on
+// brand-new agents. Only applies when a proxy is configured (direct egress
+// can't rotate its IP, so there's nothing to retry).
+const MAX_PROXY_ROTATIONS = 3;
+
 async function fetchLaAnonimaHtml(
   url: string,
   signal: AbortSignal | undefined,
   timeoutMs: number,
   cookie?: string,
 ): Promise<string> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  if (signal) {
-    signal.addEventListener('abort', () => controller.abort(), { once: true });
-  }
+  const maxRotations = usesProxy('la-anonima') ? MAX_PROXY_ROTATIONS : 0;
+  let lastBlock: ScrapeError | undefined;
 
-  // La Anónima's WAF 403s the EC2 datacenter IP, so egress through the AR proxy
-  // when one is configured (undefined otherwise — direct connection).
-  const dispatcher = getProxyDispatcher('la-anonima');
-
-  let res: Awaited<ReturnType<typeof undiciFetch>>;
-  try {
-    res = await undiciFetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml,*/*',
-        'Accept-Language': 'es-AR,es;q=0.9',
-        ...(cookie ? { Cookie: cookie } : {}),
-      },
-      redirect: 'follow',
-      signal: controller.signal,
-      ...(dispatcher ? { dispatcher } : {}),
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new ScrapeError(
-        'network_timeout',
-        `La Anónima request timed out after ${timeoutMs}ms`,
-        { cause: err },
-      );
+  for (let attempt = 0; attempt <= maxRotations; attempt++) {
+    // Attempt 0 uses the shared pooled agent (keep-alive); later attempts each
+    // spin a fresh agent (new exit IP) and close it right after.
+    let fresh: ReturnType<typeof getFreshProxyDispatcher>;
+    let dispatcher = getProxyDispatcher('la-anonima');
+    if (attempt > 0) {
+      fresh = getFreshProxyDispatcher('la-anonima');
+      dispatcher = fresh?.dispatcher;
     }
-    throw new ScrapeError(
-      'network_error',
-      `La Anónima request failed: ${(err as Error).message}`,
-      { cause: err },
-    );
-  } finally {
-    clearTimeout(timeoutId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = (): void => controller.abort();
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      let res: Awaited<ReturnType<typeof undiciFetch>>;
+      try {
+        res = await undiciFetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': USER_AGENT,
+            Accept: 'text/html,application/xhtml+xml,*/*',
+            'Accept-Language': 'es-AR,es;q=0.9',
+            ...(cookie ? { Cookie: cookie } : {}),
+          },
+          redirect: 'follow',
+          signal: controller.signal,
+          ...(dispatcher ? { dispatcher } : {}),
+        });
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new ScrapeError(
+            'network_timeout',
+            `La Anónima request timed out after ${timeoutMs}ms`,
+            { cause: err },
+          );
+        }
+        throw new ScrapeError(
+          'network_error',
+          `La Anónima request failed: ${(err as Error).message}`,
+          { cause: err },
+        );
+      }
+
+      // WAF block on this exit IP — remember it and rotate to a fresh IP if we
+      // still have attempts left; otherwise it propagates below the loop.
+      if (res.status === 403) {
+        lastBlock = new ScrapeError(
+          'network_error',
+          `La Anónima returned 403 (WAF block) for ${url}`,
+          { httpStatus: 403 },
+        );
+        continue;
+      }
+
+      if (res.status === 404) {
+        throw new ScrapeError('product_not_found', `La Anónima returned 404 for ${url}`, {
+          httpStatus: 404,
+        });
+      }
+      if (res.status === 429) {
+        throw new ScrapeError('rate_limited', `La Anónima returned 429`, {
+          httpStatus: 429,
+        });
+      }
+      if (res.status >= 500) {
+        throw new ScrapeError('site_server_error', `La Anónima returned ${res.status}`, {
+          httpStatus: res.status,
+        });
+      }
+      if (!res.ok) {
+        throw new ScrapeError('unknown', `La Anónima returned status ${res.status}`, {
+          httpStatus: res.status,
+        });
+      }
+
+      // A dead/replaced article id (or one not carried in the egress IP's
+      // sucursal) 302s to the homepage. Detect that here — a 200 at the site
+      // root for a non-root request — and surface it as product_not_found so the
+      // re-discovery healer can re-resolve the EAN to the current article.
+      // (searchByEan calls this too, but it swallows all errors and returns
+      // null, so this is safe.)
+      if (isHomeRedirect(url, res.url)) {
+        throw new ScrapeError(
+          'product_not_found',
+          `La Anónima redirected ${url} to the homepage (article delisted or not in this sucursal)`,
+        );
+      }
+      // Read the body BEFORE `finally` closes a fresh agent's sockets.
+      return await res.text();
+    } finally {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      await fresh?.close();
+    }
   }
 
-  if (res.status === 404) {
-    throw new ScrapeError('product_not_found', `La Anónima returned 404 for ${url}`, {
-      httpStatus: 404,
-    });
-  }
-  if (res.status === 403) {
-    throw new ScrapeError(
-      'network_error',
-      `La Anónima returned 403 (WAF block) for ${url}`,
-      { httpStatus: 403 },
-    );
-  }
-  if (res.status === 429) {
-    throw new ScrapeError('rate_limited', `La Anónima returned 429`, {
-      httpStatus: 429,
-    });
-  }
-  if (res.status >= 500) {
-    throw new ScrapeError('site_server_error', `La Anónima returned ${res.status}`, {
-      httpStatus: res.status,
-    });
-  }
-  if (!res.ok) {
-    throw new ScrapeError('unknown', `La Anónima returned status ${res.status}`, {
-      httpStatus: res.status,
-    });
-  }
-
-  // A dead/replaced article id (or one not carried in the egress IP's sucursal)
-  // 302s to the homepage. Detect that here — a 200 at the site root for a
-  // non-root request — and surface it as product_not_found so the re-discovery
-  // healer can re-resolve the EAN to the current article. (searchByEan calls
-  // this too, but it swallows all errors and returns null, so this is safe.)
-  if (isHomeRedirect(url, res.url)) {
-    throw new ScrapeError(
-      'product_not_found',
-      `La Anónima redirected ${url} to the homepage (article delisted or not in this sucursal)`,
-    );
-  }
-  return res.text();
+  // Every attempt (pooled + rotations) hit the WAF 403.
+  throw (
+    lastBlock ??
+    new ScrapeError('network_error', `La Anónima returned 403 (WAF block) for ${url}`, {
+      httpStatus: 403,
+    })
+  );
 }
 
 /**
