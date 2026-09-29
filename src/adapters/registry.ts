@@ -84,14 +84,22 @@ export function listAdapters(): SupermarketAdapter[] {
 export interface AdapterCapabilities {
   hasAdapter: boolean;
   hasSearch: boolean;
+  /**
+   * Search engine when `hasSearch` is true (`"vtex"` for the shared VTEX
+   * catalog search, otherwise the adapter's own id). Null when the chain
+   * cannot be searched by EAN.
+   */
+  searchProvider: string | null;
 }
 
 /** Check what capabilities exist for a given supermarket. */
 export function getAdapterCapabilities(supermarketId: string): AdapterCapabilities {
   const adapter = adapters.get(supermarketId);
-  if (!adapter) return { hasAdapter: false, hasSearch: false };
+  if (!adapter) return { hasAdapter: false, hasSearch: false, searchProvider: null };
+  const hasSearch = typeof adapter.searchByEan === 'function';
   return {
     hasAdapter: true,
-    hasSearch: typeof adapter.searchByEan === 'function',
+    hasSearch,
+    searchProvider: hasSearch ? (adapter.searchProvider ?? adapter.id) : null,
   };
 }

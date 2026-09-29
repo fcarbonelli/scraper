@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     const log = logger.child({ index: i + 1, total: urls.length });
 
     try {
-      const result = await ingestUrl(url, { skipScrapeIfExists: !rescrape });
+      const result = await ingestUrl(url, { skipScrapeIfExists: !rescrape, mappingSource: 'manual_url' });
 
       if (result.alreadyExisted && !rescrape) {
         counts.skipped++;

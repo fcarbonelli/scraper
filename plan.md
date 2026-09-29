@@ -385,6 +385,19 @@ instore_price_entries (
   created_at                        timestamptz
 )
 
+discovery_jobs (                   -- durable discovery / Sunday-sweep summaries (migration 036)
+  id             text PK          -- BullMQ job id
+  scope          text             -- ean | supermarket | ean_at_supermarket | sweep
+  status         text             -- queued | running | completed | failed
+  ean            text
+  supermarket_id text
+  progress       jsonb
+  chain_summary  jsonb            -- sweep rollup: { supermarket_id, ingested, not_found, errors }[]
+  created_at     timestamptz
+  finished_at    timestamptz
+  failed_reason  text
+)
+
 instore_photos (                    -- flyer/offer photos per visit (migration 010)
   id              uuid PK
   visit_id        uuid FK

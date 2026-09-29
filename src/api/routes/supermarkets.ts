@@ -9,6 +9,8 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '../../shared/db.js';
+import { getAdapterCapabilities } from '../../adapters/registry.js';
+import { chainProfileFields } from '../../shared/chainProfile.js';
 import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseQuery, PaginationQuery } from '../lib/parseQuery.js';
@@ -22,10 +24,16 @@ export const supermarketsRouter = Router();
 supermarketsRouter.get('/', async (_req: Request, res: Response) => {
   const { data, error } = await db
     .from('supermarkets')
-    .select('id, name, is_active, base_url, health_status, last_run_at, created_at')
+    .select('id, name, is_active, base_url, health_status, last_run_at, created_at, config')
     .order('name', { ascending: true });
   if (error) throw error;
-  res.json(success(data ?? []));
+  // `config` stays server-side (it can hold session cookies). The client gets
+  // channels + whether the Sunday sweep can search this chain.
+  const items = (data ?? []).map((row) => {
+    const { config, ...rest } = row;
+    return { ...rest, ...chainProfileFields(config, getAdapterCapabilities(row.id)) };
+  });
+  res.json(success(items));
 });
 
 // =============================================================================
@@ -42,7 +50,12 @@ supermarketsRouter.get('/:id', async (req: Request, res: Response) => {
     .maybeSingle();
   if (error) throw error;
   if (!data) throw ApiError.notFound('Supermarket');
-  res.json(success(data));
+  res.json(
+    success({
+      ...data,
+      ...chainProfileFields(data.config, getAdapterCapabilities(data.id)),
+    }),
+  );
 });
 
 // =============================================================================

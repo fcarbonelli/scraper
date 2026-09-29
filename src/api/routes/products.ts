@@ -152,6 +152,7 @@ productsRouter.post('/', async (req: Request, res: Response) => {
       // ones we still skip to keep this endpoint cheap.
       skipScrapeIfExists: true,
       ean: body.ean,
+      mappingSource: 'manual_url',
     });
   } catch (err) {
     // Anything thrown here means the URL is genuinely unprocessable —
@@ -207,6 +208,7 @@ productsRouter.post('/bulk-import', async (req: Request, res: Response) => {
       const r = await ingestUrl(url, {
         runInitialScrape: body.scrape_immediately ?? false,
         skipScrapeIfExists: true,
+        mappingSource: 'manual_url',
       });
       results.push(ingestResultToResponse(r));
       if (r.alreadyExisted) skipped++;

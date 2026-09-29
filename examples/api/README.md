@@ -16,7 +16,8 @@ Each file is a complete response body — `data` + `meta` (and `pagination` for 
 | `product-detail.json`       | `GET /v1/products/:id`                    | Single product detail                                                 |
 | `product-compare.json`      | `GET /v1/products/:id/compare`            | Same product across 3 supermarkets, with savings summary              |
 | `product-history.json`      | `GET /v1/products/:id/history`            | 14 days of price history including a price drop with promotions       |
-| `supermarkets-list.json`    | `GET /v1/supermarkets`                    | 3 supermarkets — one healthy, one degraded, one down                  |
+| `supermarkets-list.json`    | `GET /v1/supermarkets`                    | Chains with channels, has_search, search_provider                    |
+| `discover-weekly.json`      | `GET /v1/data/discover/weekly?weeks=8`    | One ISO week: a chain without search and a VTEX sweep                 |
 | `supermarket-products.json` | `GET /v1/supermarkets/:id/products`       | Products mapped to a supermarket with latest snapshot                 |
 | `runs-list.json`            | `GET /v1/runs?limit=10`                   | Mix of completed and one currently-running run                        |
 | `run-detail.json`           | `GET /v1/runs/:id`                        | Run detail with per-supermarket breakdown and top errors              |

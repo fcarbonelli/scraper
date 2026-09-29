@@ -237,11 +237,16 @@ Discovery searches supermarket sites live, so it runs as a background job. You g
 | `{ "sweep": true }` | Re-search **missing** EANs at every searchable chain | Manually run the weekly coverage sweep |
 
 > **Weekly coverage sweep (automatic):** a cron (default Sunday 02:00 BA time)
-> fires `{ sweep: true }` automatically — it re-searches only the *missing*
-> `(EAN × chain)` pairs so products that were out of stock reappear in coverage,
-> and posts a Telegram summary of what it added. Paused products are never
-> resurrected. You can also trigger it on demand with the body above; poll it via
-> `GET /v1/data/discover/:jobId` like any other discovery job.
+> fires `{ sweep: true }` automatically — the same job `POST /v1/data/discover`
+> creates. It re-searches only the *missing* `(EAN × chain)` pairs on **active
+> chains with `has_search`** (everyone else is left out of `targets`), posts a
+> Telegram summary of what it added, and writes a `discovery_jobs` row so the
+> job stays in `GET /v1/data/discover?status=all` after Redis expires it.
+> Paused products are never resurrected. Poll it via
+> `GET /v1/data/discover/:jobId` like any other discovery job. `chains` on the
+> summary (and `?summary=1` on the job) is the per-chain rollup, so you don't
+> have to download every EAN. `GET /v1/data/discover/weekly?weeks=8` is the
+> week-by-week view, including chains that cannot be searched.
 
 **Response (201):**
 ```json
@@ -256,8 +261,10 @@ Discovery searches supermarket sites live, so it runs as a background job. You g
 }
 ```
 
-`targets` is the list of supermarkets that will actually be searched (only those with
-`hasSearch: true` — see the `hasSearch` flag on `GET /v1/data/coverage`).
+`targets` is the list of supermarkets that will actually be searched. For a
+sweep that is the **active** chains with `has_search` (see `GET /v1/supermarkets`
+and the `hasSearch` flag on `GET /v1/data/coverage`). A sweep's `targets` never
+includes a chain that cannot search by EAN.
 
 ## `GET /v1/data/discover` — list recent/active jobs
 
@@ -300,7 +307,10 @@ Each item is the **summary** form (no `results[]` — open one via
 `GET /v1/data/discover/:jobId` for the per-target detail). `targets` = units of
 work (chains for `ean`/`sweep`, EANs for a whole-chain scope); it mirrors
 `progress.total` and is `0` until the job starts. `sweep`-scope jobs appear here
-too — label unknown scopes generically.
+too — label unknown scopes generically. With `status=all`, sweeps from the last
+8 weeks stay on the page even if newer small jobs would fill `limit` (the
+dashboard asks for 100 and filters `scope === "sweep"`). Sweep rows include
+`chains`: `{ supermarket_id, ingested, not_found, errors }[]`.
 
 ## `GET /v1/data/discover/:jobId` — poll progress
 

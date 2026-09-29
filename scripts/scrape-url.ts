@@ -28,7 +28,7 @@ async function main(): Promise<void> {
 
   // skipScrapeIfExists: false — single-URL command always rescrapes,
   // because the user explicitly asked for a fresh snapshot.
-  const result = await ingestUrl(url, { skipScrapeIfExists: false });
+  const result = await ingestUrl(url, { skipScrapeIfExists: false, mappingSource: 'manual_url' });
 
   logger.info(
     {

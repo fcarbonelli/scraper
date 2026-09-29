@@ -160,9 +160,10 @@ export function getDiscoveryQueue(
   discoveryQueue = new Queue<DiscoveryJobData, unknown, DiscoveryJobName>(DISCOVERY_QUEUE_NAME, {
     connection: connection ?? createRedisConnection(),
     defaultJobOptions: {
-      // Discovery is idempotent and observable via the results — keep a
-      // window of finished jobs so the status endpoint can read them.
-      removeOnComplete: { age: 60 * 60 * 24, count: 500 },
+      // The list endpoint and GET /:jobId read finished jobs back. Sweeps are
+      // weekly and the UI asks for them days later, so keep two weeks of
+      // return values here; the `discovery_jobs` table keeps the summary longer.
+      removeOnComplete: { age: 60 * 60 * 24 * 14, count: 2000 },
       removeOnFail: { age: 60 * 60 * 24 * 7 },
     },
   });

@@ -6,8 +6,9 @@
  * discovery core against each, reports progress via `job.updateProgress()`,
  * and returns the full per-target results array as the job's return value.
  *
- * The API's GET /v1/data/discover/:jobId reads both progress and return value
- * back off the BullMQ job — no separate state table needed.
+ * The API's GET /v1/data/discover/:jobId reads progress and the return value
+ * off the BullMQ job while it still exists. A summary row is also written to
+ * `discovery_jobs` so the Sunday sweep stays in the list after Redis drops it.
  */
 
 import { Worker, type Job, type WorkerOptions } from 'bullmq';
@@ -19,16 +20,17 @@ import {
   type DiscoveryJobData,
 } from '../shared/queue.js';
 import { getCatalogEans } from '../shared/catalog.js';
-import { db } from '../shared/db.js';
 import { notifyAlert } from '../alerts/notify.js';
 import {
   discoverEanAtSupermarket,
   discoverEanEverywhere,
   discoverAllEansAtSupermarket,
   missingEansForSupermarket,
+  activeSearchableChainIds,
   adaptersWithSearch,
   type DiscoverOutcome,
 } from '../discovery/index.js';
+import { rollupSweepChains, saveDiscoveryJob } from '../discovery/jobs.js';
 
 /** Running tallies mirrored into job progress so the UI can show a bar. */
 export interface DiscoveryProgress {
@@ -61,6 +63,9 @@ function tally(progress: DiscoveryProgress, o: DiscoverOutcome): void {
 async function runJob(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
   const data = job.data;
   const log = logger.child({ discoveryJobId: job.id, scope: data.scope });
+  if (job.id) {
+    await saveDiscoveryJob(job.id, { scope: data.scope, status: 'running' });
+  }
 
   // Weekly coverage sweep — re-search missing EANs across every searchable chain.
   if (data.scope === 'sweep') {
@@ -75,6 +80,7 @@ async function runJob(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
     tally(progress, outcome);
     await job.updateProgress(progress);
     log.info({ progress }, 'discovery job complete');
+    await persistFinished(job, progress);
     return [outcome];
   }
 
@@ -97,6 +103,7 @@ async function runJob(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
     await job.updateProgress(progress);
     const outcomes = await discoverEanEverywhere(data.ean, 1500, cb);
     log.info({ progress }, 'discovery job complete');
+    await persistFinished(job, progress);
     return outcomes;
   }
 
@@ -106,7 +113,26 @@ async function runJob(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
   await job.updateProgress(progress);
   const outcomes = await discoverAllEansAtSupermarket(data.supermarketId, 1500, cb);
   log.info({ progress }, 'discovery job complete');
+  await persistFinished(job, progress);
   return outcomes;
+}
+
+/** How often a long sweep flushes its summary so the list isn't stuck at 0. */
+const SWEEP_FLUSH_EVERY = 25;
+
+async function persistFinished(
+  job: Job<DiscoveryJobData>,
+  progress: DiscoveryProgress,
+  outcomes?: DiscoverOutcome[],
+): Promise<void> {
+  if (!job.id) return;
+  await saveDiscoveryJob(job.id, {
+    scope: job.data.scope,
+    status: 'completed',
+    progress: { ...progress },
+    chainSummary: job.data.scope === 'sweep' && outcomes ? rollupSweepChains(outcomes) : null,
+    finishedAt: new Date().toISOString(),
+  });
 }
 
 /**
@@ -118,16 +144,9 @@ async function runJob(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
 async function runSweep(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> {
   const log = logger.child({ discoveryJobId: job.id, scope: 'sweep' });
 
-  // Active supermarkets (DB) that also have EAN search (adapter).
-  const { data: activeRows, error } = await db
-    .from('supermarkets')
-    .select('id')
-    .eq('is_active', true);
-  if (error) throw error;
-  const searchable = new Set(adaptersWithSearch());
-  const chains = (activeRows ?? [])
-    .map((r) => r.id as string)
-    .filter((id) => searchable.has(id));
+  // Active + searchable only. In-store / revista / scrape-without-search
+  // chains are not targets.
+  const chains = await activeSearchableChainIds();
 
   // Plan up front so progress has an exact denominator and we don't double-query.
   const plan: Array<{ id: string; missing: string[] }> = [];
@@ -150,12 +169,21 @@ async function runSweep(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> 
       if (outcome.result === 'ingested') {
         addedByChain[id] = (addedByChain[id] ?? 0) + 1;
       }
+      if (job.id && progress.done % SWEEP_FLUSH_EVERY === 0) {
+        await saveDiscoveryJob(job.id, {
+          scope: 'sweep',
+          status: 'running',
+          progress: { ...progress },
+          chainSummary: rollupSweepChains(outcomes),
+        });
+      }
       // Be polite: short pause on misses, longer after a hit.
       await sleep(outcome.result === 'not_found' ? 300 : 1500);
     }
   }
 
   await sendSweepSummary(progress, addedByChain);
+  await persistFinished(job, progress, outcomes);
   log.info({ progress, addedByChain }, 'coverage sweep complete');
   return outcomes;
 }
@@ -213,6 +241,14 @@ export function createDiscoveryWorker(): Worker<DiscoveryJobData, DiscoverOutcom
   worker.on('failed', (job, err) => {
     logger.error({ err, jobId: job?.id }, 'discovery job failed');
     captureError(err, { worker: 'discovery', jobId: job?.id });
+    if (job?.id) {
+      void saveDiscoveryJob(job.id, {
+        scope: job.data.scope,
+        status: 'failed',
+        failedReason: err.message,
+        finishedAt: new Date().toISOString(),
+      });
+    }
   });
 
   return worker;

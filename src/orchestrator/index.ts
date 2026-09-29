@@ -21,7 +21,8 @@ import cron from 'node-cron';
 import { env } from '../shared/env.js';
 import { logger } from '../shared/logger.js';
 import { initSentry, captureError } from '../shared/sentry.js';
-import { closeAllQueues, getDiscoveryQueue } from '../shared/queue.js';
+import { closeAllQueues } from '../shared/queue.js';
+import { enqueueDiscoveryJob } from '../discovery/jobs.js';
 import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { emitPhantomMarkers } from './phantomMarkers.js';
@@ -127,7 +128,9 @@ function parseSupermarketArg(argv: string[]): string | undefined {
  */
 async function enqueueCoverageSweep(): Promise<void> {
   try {
-    const job = await getDiscoveryQueue().add('discover', { scope: 'sweep' });
+    // Same payload as POST /v1/data/discover { sweep: true }, and persisted
+    // so the dashboard list still has the job after Redis expires it.
+    const job = await enqueueDiscoveryJob({ scope: 'sweep' });
     logger.info({ jobId: job.id }, 'weekly coverage sweep enqueued');
   } catch (err) {
     logger.error({ err }, 'failed to enqueue coverage sweep');

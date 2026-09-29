@@ -850,14 +850,27 @@ List all supermarkets with their health status. Not paginated — there are at m
       "base_url": "https://www.cotodigital.com.ar",
       "health_status": "healthy",
       "last_run_at": "2026-04-30T09:32:14.000Z",
-      "created_at": "2026-04-29T19:39:18.941Z"
+      "created_at": "2026-04-29T19:39:18.941Z",
+      "channels": ["online"],
+      "has_search": true,
+      "search_provider": "coto"
     }
   ],
   "meta": { "ts": "..." }
 }
 ```
 
-`health_status` ∈ `{ "healthy", "degraded", "down", "unknown" }`. See *Alerts* for what each means.
+`health_status` ∈ `{ "healthy", "degraded", "down", "unknown" }`. See *Alerts* for what each means. The dashboard no longer uses it as the card state.
+
+One row is one chain. In-store and revistas are channels on that same `id` (they are not separate supermarket ids).
+
+| Field | Meaning |
+|---|---|
+| `channels` | Any of `"online"` (web scrape), `"presencial"` (in-store tool), `"revistas"` (magazine pipeline). A chain can have more than one. |
+| `has_search` | The Sunday sweep can search EANs here (`searchByEan`). Chains without it are never sweep targets. |
+| `search_provider` | How that search works when `has_search` is true. `"vtex"` is the shared VTEX catalog search; other engines use a short id (`"coto"`, `"la-anonima"`, …). `null` when `has_search` is false. |
+
+`GET /v1/supermarkets/:id` adds the same three fields next to `rate_limit_ms`, `concurrency`, and `config`.
 
 ---
 
@@ -972,21 +985,73 @@ Async EAN discovery across supermarket sites. Full shapes + polling workflow:
 
 Enqueue a discovery job. Body is one of `{ ean }` (all searchable chains),
 `{ supermarket }` (all catalog EANs at one chain), `{ ean, supermarket }`, or
-`{ sweep: true }` (re-search missing EANs at every searchable chain — the weekly
-coverage sweep, also run automatically via `SWEEP_CRON`).
+`{ sweep: true }` (re-search missing EANs at every **active** chain with
+`has_search` — the weekly coverage sweep, also run automatically via `SWEEP_CRON`).
+Chains without search are not included in `targets`.
 Returns `{ jobId, scope, targets, status: "queued" }` (201).
+
+The Sunday cron enqueues the same payload (`{ scope: "sweep" }`) and writes a
+`discovery_jobs` row, so the job stays in the list after Redis expires it.
 
 ### `GET /v1/data/discover`
 
-List recent/active discovery jobs (`?status=active|all&limit=20`, newest first) so
-the UI can re-attach after a reload. Each item is the summary form
-`{ jobId, scope, ean, supermarketId, status, targets, progress, createdAt, finishedAt }`
+List recent/active discovery jobs (`?status=active|all&limit=20`, cap 100, newest
+first) so the UI can re-attach after a reload. Each item is the summary form
+`{ jobId, scope, ean, supermarketId, status, targets, progress, chains, createdAt, finishedAt }`
 (no `results[]` — fetch the per-job endpoint for that).
+
+`chains` is `null` except on `scope: "sweep"`, where it is the per-chain rollup
+`{ supermarket_id, ingested, not_found, errors }[]` (so a large sweep does not
+have to be downloaded in full).
+
+With `status=all`, completed sweeps from the last 8 weeks are kept on the page
+even when newer small jobs would otherwise fill the `limit`. The dashboard asks
+for `limit=100` and filters `scope === "sweep"`.
+
+### `GET /v1/data/discover/weekly?weeks=8`
+
+Altas reales por cadena y por semana ISO (Buenos Aires), más el barrido de esa
+semana si corrió. `weeks` is 1–26, default 8, newest week first.
+
+```json
+{
+  "data": {
+    "weeks": [
+      {
+        "week": "2026-W39",
+        "sweep_job_id": null,
+        "chains": [
+          {
+            "supermarket_id": "coto",
+            "has_search": false,
+            "channels": ["online"],
+            "mappings_added": 4,
+            "mappings_added_by": { "scrape": 0, "manual_url": 1, "instore": 3, "revista": 0 },
+            "sweep": null
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`sweep` is `{ ingested, not_found, errors }` when that chain was a target of
+the week's sweep. It is `null` when the chain has no search, or when it was
+not in the job (inactive, or nothing missing). `mappings_added_by` counts new
+`supermarket_products` rows that week: `scrape` (discovery), `manual_url`
+(pasted URL), `instore`, `revista`. A chain with zeros is included so a quiet
+week is visible. The Sunday sweep is dated on the ISO week that contains that
+Sunday (Monday-start).
+
+Fixture: [`examples/api/discover-weekly.json`](examples/api/discover-weekly.json).
 
 ### `GET /v1/data/discover/:jobId`
 
-Poll a job: `{ jobId, scope, status, progress, results, failedReason }` where
-`status ∈ queued|running|completed|failed`.
+Poll a job: `{ jobId, scope, status, progress, chains, results, failedReason }` where
+`status ∈ queued|running|completed|failed`. `?summary=1` returns `results: []`
+and keeps `chains` for sweeps. If Redis has already dropped the job, the
+persisted summary is returned with `results: []`.
 
 > `GET /v1/data/coverage` (detail mode) now also returns a `paused` count and a
 > per-product `active` flag. See `docs/COVERAGE_API_GUIDE.md`.
@@ -2185,11 +2250,41 @@ One visit + all its entries, for the review screen:
   visit: { /* visit shape */ };
   entries: {
     id: string; ean: string; product_id: string | null;
-    product_name: string | null; brand: string | null; image_url: string | null;
+    product_name: string | null; brand: string | null;
+    image_url: string | null;
+    thumb_url: string | null;          // resized Storage URL, or the original CDN url
     price: number | null; wholesale_price: number | null; wholesale_min_units: number | null;
     no_price: boolean;                  // "En stock sin precio" — publishes as a marker
     note: string | null; review_status: string; created_at: string;
   }[];
+  photos: {
+    id: string; url: string | null; thumb_url: string | null;
+    caption: string | null; created_at: string;
+  }[];
+  pagination?: { page: number; limit: number; total: number; totalPages: number };
+}
+```
+
+Without `page`/`limit`, every entry is returned (same as before). Pass either to
+paginate (`limit` 1–500; `page` alone uses `limit=50`). `images=0` nulls
+`image_url`, `thumb_url`, and photo `url`s. `width` (32–1600, default 480) sets
+the thumbnail size for flyer photos stored in Supabase. Product images that
+live on a supermarket CDN cannot be resized here — `thumb_url` is that original
+URL.
+
+#### `GET /v1/in-store/review/visits/:id/duplicate-eans`
+
+EANs already typed on **other** visits of the same PDV (same chain, same
+localidad + dirección, case- and space-insensitive). Replaces downloading each
+sibling visit in full.
+
+```ts
+{
+  visit_id: string;
+  supermarket_id: string;
+  localidad: string | null;
+  direccion: string | null;
+  sessions: { visit_id: string; started_at: string; eans: string[] }[];
 }
 ```
 
@@ -2278,7 +2373,7 @@ Fixture: [`examples/api/in-store-review-price-outliers.json`](examples/api/in-st
 
 | Param | Default | Meaning |
 | --- | --- | --- |
-| `date` | today (BA) | Buenos Aires calendar day |
+| `date` | today (BA) | One Buenos Aires calendar day. Omitting it is the same as today — it does not scan 90 days of entries. `window` is only the baseline look-back for the EANs typed that day. |
 | `supermarket_id` | — | Only one chain |
 | `threshold` | `30` | Min `|deviation_pct|` (percent) to include |
 | `window` | `90` | Days of prior in-store history |

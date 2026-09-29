@@ -74,6 +74,12 @@ export interface IngestOptions {
    * the product would still count as "missing" in coverage.
    */
   ean?: string;
+  /**
+   * Stamped onto a newly created mapping (`metadata.source`) so the weekly
+   * altas rollup can tell a discovery hit from a pasted URL. Omitted on
+   * rows that already existed.
+   */
+  mappingSource?: 'discover' | 'manual_url';
 }
 
 export interface IngestResult {
@@ -174,7 +180,7 @@ export async function loadSupermarketConfig(
 export async function ensureSupermarketProduct(
   supermarketId: string,
   externalUrl: string,
-  opts: { preResolvedExternalId?: string; ean?: string } = {},
+  opts: { preResolvedExternalId?: string; ean?: string; mappingSource?: 'discover' | 'manual_url' } = {},
 ): Promise<EnsureResult> {
   const adapter = getAdapter(supermarketId);
   const canonical = adapter.canonicalizeUrl
@@ -313,6 +319,7 @@ export async function ensureSupermarketProduct(
       external_id: externalId,
       external_url: canonical,
       is_active: true,
+      ...(opts.mappingSource ? { metadata: { source: opts.mappingSource } } : {}),
     })
     .select('id')
     .single();
@@ -346,6 +353,7 @@ export async function ingestUrl(
   const ensured = await ensureSupermarketProduct(supermarketId, url, {
     preResolvedExternalId: opts.preResolvedExternalId,
     ean: opts.ean,
+    mappingSource: opts.mappingSource,
   });
 
   const skipScrape = opts.skipScrapeIfExists ?? true;

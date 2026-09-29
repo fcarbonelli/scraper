@@ -431,13 +431,18 @@ Flow:
 1. **Review queue** — `GET /v1/in-store/review/pending` lists finished visits
    awaiting review (oldest first), each with `supermarket_name`, location, worker,
    and `pending_entries` count. Filter by `supermarket_id`.
-2. **Review a visit** — `GET /v1/in-store/review/visits/:id` returns the visit +
-   all its entries (with `product_name`, `brand`, `image_url`, the four price
-   fields, `no_price`, and `review_status`). Entries with `no_price: true` show a
-   `Sin precio` chip (no price to check — they publish as an "En stock sin precio"
-   marker). Show the flyer photos too via `GET /v1/in-store/visits/:id/photos`.
+2. **Review a visit** — `GET /v1/in-store/review/visits/:id` returns the visit,
+   its entries (with `product_name`, `brand`, `image_url`, `thumb_url`, the four
+   price fields, `no_price`, and `review_status`) and `photos[]` (`url` +
+   `thumb_url`). Use `thumb_url` for flyer photos (Supabase resize, `?width=`,
+   default 480). `?images=0` omits image URLs; `?page=&limit=` paginates entries
+   (omit both to get every entry). Entries with `no_price: true` show a
+   `Sin precio` chip. `GET /v1/in-store/review/visits/:id/duplicate-eans` returns
+   only the EANs of other sessions at the same PDV.
 3. **Precios desviados** — `GET /v1/in-store/review/price-outliers?date=`
-   (same idea as the online publicación panel). Lists typed prices that
+   always scores **one** Buenos Aires day (default today). `window` (default 90)
+   is the baseline history for those EANs, not a wider entry list.
+   Lists typed prices that
    deviate ≥30% from a baseline so extra/missing-zero typos jump out before
    approval. Each row has `field` (`price` \| `wholesale_price`), signed
    `deviation_pct`, and `source` (`self-history` \| `cross-store` \| `target`).

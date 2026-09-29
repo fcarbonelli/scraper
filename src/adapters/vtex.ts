@@ -732,6 +732,7 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
   return {
     id: opts.id,
     name: opts.name,
+    searchProvider: 'vtex',
 
     canonicalizeUrl,
     resolveExternalId,

@@ -18,7 +18,7 @@ import { ApiError } from '../lib/apiError.js';
 import { success } from '../lib/envelope.js';
 import { parseBody, parseQuery } from '../lib/parseQuery.js';
 import { getCatalogEans, invalidateCatalogCache, isBuiltInEan } from '../../shared/catalog.js';
-import { getDiscoveryQueue } from '../../shared/queue.js';
+import { enqueueDiscoveryJob } from '../../discovery/jobs.js';
 import { adaptersWithSearch } from '../../discovery/index.js';
 import type { TaxonomyEntry } from '../../shared/taxonomy.js';
 
@@ -167,7 +167,7 @@ catalogRouter.post('/eans', async (req: Request, res: Response) => {
   // Optionally kick off discovery across all searchable chains immediately.
   let discovery: { jobId: string | undefined; status: string; targets: number } | undefined;
   if (body.auto_discover) {
-    const job = await getDiscoveryQueue().add('discover', { scope: 'ean', ean: body.ean });
+    const job = await enqueueDiscoveryJob({ scope: 'ean', ean: body.ean });
     discovery = { jobId: job.id, status: 'queued', targets: adaptersWithSearch().length };
   }
 

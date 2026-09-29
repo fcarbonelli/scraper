@@ -38,6 +38,8 @@ import {
 } from '../../instore/resolve.js';
 import { recordInStoreEntry, updatePendingEntry, InStoreError } from '../../instore/entry.js';
 import { createVisit, finishVisit, getVisit, countVisit, type Visit, type VisitCounts } from '../../instore/visits.js';
+import { branchKey } from '../../instore/branch.js';
+import { DEFAULT_THUMB_WIDTH, thumbUrl } from '../../instore/thumbs.js';
 import { uploadVisitPhoto } from '../../instore/storage.js';
 import { approveVisit, type ReviewDecision } from '../../instore/review.js';
 import {
@@ -364,7 +366,7 @@ inStoreRouter.post(
       .single();
     if (insert.error) throw insert.error;
 
-    res.status(201).json(success(insert.data));
+    res.status(201).json(success({ ...insert.data, thumb_url: thumbUrl(insert.data.url) }));
   },
 );
 
@@ -377,7 +379,11 @@ inStoreRouter.get('/visits/:id/photos', async (req: Request, res: Response) => {
     .eq('visit_id', id)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  res.json(success(data ?? [], { total: (data ?? []).length }));
+  const photos = (data ?? []).map((p) => ({
+    ...p,
+    thumb_url: thumbUrl(p.url as string),
+  }));
+  res.json(success(photos, { total: photos.length }));
 });
 
 // =============================================================================
@@ -760,6 +766,10 @@ inStoreRouter.get('/review/export', async (req: Request, res: Response) => {
 // a baseline (self-history → other stores → EDP target). Same role as
 // GET /v1/runs/:id/price-outliers on the online publicación tab — catch
 // extra/missing-zero typos before the visit is approved.
+//
+// `date` (default: today in Buenos Aires) selects a single calendar day of
+// entries. Omitting it does not widen that set. `window` (default 90) is only
+// the baseline look-back for those EANs, and it stops at the start of `date`.
 const ReviewOutliersQuery = z.object({
   date: z.iso.date().optional(),
   supermarket_id: z.string().trim().min(1).optional(),
@@ -863,7 +873,18 @@ inStoreRouter.get('/review/pending', async (req: Request, res: Response) => {
   res.json(paginated(items, count ?? 0, page, limit));
 });
 
-// GET /v1/in-store/review/visits/:id — one visit + all its entries for review.
+// GET /v1/in-store/review/visits/:id — one visit + its entries for review.
+//
+// Without page/limit every entry is returned (existing clients). Pass either
+// to paginate. `images=0` drops image URLs so the screen can render before
+// photos download. Flyer photos and product images include `thumb_url`.
+const ReviewVisitQuery = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  images: z.enum(['0', '1']).optional(),
+  width: z.coerce.number().int().min(32).max(1600).optional(),
+});
+
 interface ReviewEntryRow {
   id: string;
   ean: string;
@@ -879,39 +900,162 @@ interface ReviewEntryRow {
   products: { name: string; brand: string | null; metadata: { imageUrl?: string | null } | null } | null;
 }
 
+interface ReviewPhotoRow {
+  id: string;
+  url: string;
+  caption: string | null;
+  created_at: string;
+}
+
 inStoreRouter.get('/review/visits/:id', async (req: Request, res: Response) => {
+  requireFullAccess(req);
+  const q = parseQuery(req, ReviewVisitQuery);
+  const id = req.params.id as string;
+  const visit = await getVisit(id);
+  if (!visit) throw ApiError.notFound('Visit');
+
+  const includeImages = q.images !== '0';
+  const width = q.width ?? DEFAULT_THUMB_WIDTH;
+  const paginate = q.page !== undefined || q.limit !== undefined;
+  const page = q.page ?? 1;
+  const limit = q.limit ?? 50;
+
+  let entriesQuery = db
+    .from('instore_price_entries')
+    .select(
+      'id, ean, product_id, product_name, price, no_price, promo_price, promo_min_units, note, review_status, created_at, products(name, brand, metadata)',
+      paginate ? { count: 'exact' } : undefined,
+    )
+    .eq('visit_id', id)
+    .order('created_at', { ascending: true });
+  if (paginate) {
+    const offset = (page - 1) * limit;
+    entriesQuery = entriesQuery.range(offset, offset + limit - 1);
+  }
+
+  const [entriesRes, photosRes] = await Promise.all([
+    entriesQuery,
+    db
+      .from('instore_photos')
+      .select('id, url, caption, created_at')
+      .eq('visit_id', id)
+      .order('created_at', { ascending: true }),
+  ]);
+  if (entriesRes.error) throw entriesRes.error;
+  if (photosRes.error) throw photosRes.error;
+
+  const entries = ((entriesRes.data ?? []) as unknown as ReviewEntryRow[]).map((e) => {
+    const imageUrl = e.products?.metadata?.imageUrl ?? null;
+    return {
+      id: e.id,
+      ean: e.ean,
+      product_id: e.product_id,
+      product_name: e.products?.name ?? e.product_name ?? null,
+      brand: e.products?.brand ?? null,
+      image_url: includeImages ? imageUrl : null,
+      thumb_url: includeImages ? thumbUrl(imageUrl, width) : null,
+      price: e.price,
+      wholesale_price: e.promo_price,
+      wholesale_min_units: e.promo_min_units,
+      no_price: e.no_price,
+      note: e.note,
+      review_status: e.review_status,
+      created_at: e.created_at,
+    };
+  });
+
+  const photos = ((photosRes.data ?? []) as ReviewPhotoRow[]).map((p) => ({
+    id: p.id,
+    url: includeImages ? p.url : null,
+    thumb_url: includeImages ? thumbUrl(p.url, width) : null,
+    caption: p.caption,
+    created_at: p.created_at,
+  }));
+
+  const body: Record<string, unknown> = { visit: toApiVisit(visit), entries, photos };
+  if (paginate) {
+    const total = entriesRes.count ?? entries.length;
+    body.pagination = {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
+  res.json(success(body));
+});
+
+// GET /v1/in-store/review/visits/:id/duplicate-eans
+//
+// EANs already captured on other visits of the same PDV (same chain + branch).
+// The review screen used to download each sibling visit in full.
+inStoreRouter.get('/review/visits/:id/duplicate-eans', async (req: Request, res: Response) => {
   requireFullAccess(req);
   const id = req.params.id as string;
   const visit = await getVisit(id);
   if (!visit) throw ApiError.notFound('Visit');
 
-  const entriesRes = await db
-    .from('instore_price_entries')
-    .select(
-      'id, ean, product_id, product_name, price, no_price, promo_price, promo_min_units, note, review_status, created_at, products(name, brand, metadata)',
-      { count: 'exact' },
-    )
-    .eq('visit_id', id)
-    .order('created_at', { ascending: true });
-  if (entriesRes.error) throw entriesRes.error;
+  const siblingRows = await fetchAllPages<{
+    id: string;
+    localidad: string | null;
+    direccion: string | null;
+    started_at: string;
+  }>((from, to) =>
+    db
+      .from('instore_visits')
+      .select('id, localidad, direccion, started_at')
+      .eq('supermarket_id', visit.supermarketId)
+      .neq('id', id)
+      .order('started_at', { ascending: false })
+      .range(from, to),
+  );
 
-  const entries = ((entriesRes.data ?? []) as unknown as ReviewEntryRow[]).map((e) => ({
-    id: e.id,
-    ean: e.ean,
-    product_id: e.product_id,
-    product_name: e.products?.name ?? e.product_name ?? null,
-    brand: e.products?.brand ?? null,
-    image_url: e.products?.metadata?.imageUrl ?? null,
-    price: e.price,
-    wholesale_price: e.promo_price,
-    wholesale_min_units: e.promo_min_units,
-    no_price: e.no_price,
-    note: e.note,
-    review_status: e.review_status,
-    created_at: e.created_at,
-  }));
+  const key = branchKey(visit.localidad, visit.direccion);
+  const siblings = siblingRows.filter(
+    (s) => branchKey(s.localidad, s.direccion) === key,
+  );
 
-  res.json(success({ visit: toApiVisit(visit), entries }));
+  const sessions: Array<{ visit_id: string; started_at: string; eans: string[] }> = [];
+  if (siblings.length > 0) {
+    const ids = siblings.map((s) => s.id);
+    const entries: Array<{ visit_id: string; ean: string }> = [];
+    // Chunk the `.in()` so a chain with a long visit history stays under the URL limit.
+    for (let i = 0; i < ids.length; i += 80) {
+      const chunk = ids.slice(i, i + 80);
+      const page = await fetchAllPages<{ visit_id: string; ean: string }>((from, to) =>
+        db
+          .from('instore_price_entries')
+          .select('visit_id, ean')
+          .in('visit_id', chunk)
+          .order('created_at', { ascending: true })
+          .range(from, to),
+      );
+      entries.push(...page);
+    }
+    const byVisit = new Map<string, string[]>();
+    for (const e of entries) {
+      const list = byVisit.get(e.visit_id) ?? [];
+      if (!list.includes(e.ean)) list.push(e.ean);
+      byVisit.set(e.visit_id, list);
+    }
+    for (const s of siblings) {
+      sessions.push({
+        visit_id: s.id,
+        started_at: s.started_at,
+        eans: byVisit.get(s.id) ?? [],
+      });
+    }
+  }
+
+  res.json(
+    success({
+      visit_id: visit.id,
+      supermarket_id: visit.supermarketId,
+      localidad: visit.localidad,
+      direccion: visit.direccion,
+      sessions,
+    }),
+  );
 });
 
 // POST /v1/in-store/review/visits/:id/approve — approve (with inline edits/rejects).

@@ -8,15 +8,31 @@
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { db } from '../../shared/db.js';
+import { db, fetchAllPages } from '../../shared/db.js';
 import { logger } from '../../shared/logger.js';
 import { success } from '../lib/envelope.js';
 import { parseQuery, parseBody } from '../lib/parseQuery.js';
 import { ApiError } from '../lib/apiError.js';
 import { getCatalogEans } from '../../shared/catalog.js';
 import { getAdapterCapabilities } from '../../adapters/registry.js';
-import { adaptersWithSearch, type DiscoverOutcome } from '../../discovery/index.js';
+import {
+  activeSearchableChainIds,
+  adaptersWithSearch,
+  type DiscoverOutcome,
+} from '../../discovery/index.js';
+import {
+  enqueueDiscoveryJob,
+  loadDiscoveryJob,
+  loadDiscoveryJobs,
+  loadSweepsSince,
+  rollupSweepChains,
+  type DiscoveryJobRecord,
+} from '../../discovery/jobs.js';
+import { selectDiscoveryList } from '../../discovery/listing.js';
+import { buildWeeklyReport, recentIsoWeeks, type ChainSweepStat } from '../../discovery/weeklyReport.js';
 import { getDiscoveryQueue, type DiscoveryJobData } from '../../shared/queue.js';
+import { chainProfileFields } from '../../shared/chainProfile.js';
+import { baDayRangeUtc } from '../../instore/dates.js';
 import {
   fetchAllClientBase,
   loadAyudinPriceRef,
@@ -531,8 +547,8 @@ dataRouter.post('/discover', async (req: Request, res: Response) => {
   let targets: string[];
   if (body.sweep) {
     job = { scope: 'sweep' };
-    // Actual active-chain filtering happens at run time; report the searchable universe.
-    targets = adaptersWithSearch();
+    // Same set the worker will search: active chains that implement searchByEan.
+    targets = await activeSearchableChainIds();
   } else if (body.ean && body.supermarket) {
     job = { scope: 'ean_at_supermarket', ean: body.ean, supermarketId: body.supermarket };
     targets = [body.supermarket];
@@ -545,7 +561,7 @@ dataRouter.post('/discover', async (req: Request, res: Response) => {
     targets = [body.supermarket!];
   }
 
-  const enqueued = await getDiscoveryQueue().add('discover', job);
+  const enqueued = await enqueueDiscoveryJob(job);
   logger.info({ jobId: enqueued.id, scope: job.scope }, 'discovery job enqueued');
 
   res.status(201).json(
@@ -566,6 +582,11 @@ dataRouter.post('/discover', async (req: Request, res: Response) => {
 //
 // Light summary form (no results[] — fetch GET /discover/:jobId for that) so the
 // UI can re-attach to a running discovery after a reload and show recent jobs.
+//
+// Completed sweeps from the last 8 weeks are pinned into a `status=all` page
+// so a week of small EAN jobs cannot push Sunday's sweep off the 100 the
+// dashboard asks for. History lives in `discovery_jobs`; Redis overlays live
+// progress while the job is still there.
 // =============================================================================
 
 const DiscoverListQuery = z.object({
@@ -573,11 +594,60 @@ const DiscoverListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+interface DiscoveryProgressView {
+  total: number;
+  done: number;
+  found: number;
+  ingested: number;
+  notFound: number;
+  errors: number;
+}
+
+interface DiscoveryListItem {
+  jobId: string;
+  scope: string;
+  ean: string | null;
+  supermarketId: string | null;
+  status: string;
+  targets: number;
+  progress: DiscoveryProgressView;
+  chains: ChainSweepStat[] | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+function progressOf(value: unknown): DiscoveryProgressView {
+  const p = (typeof value === 'object' && value ? value : null) as Record<string, number> | null;
+  return {
+    total: p?.total ?? 0,
+    done: p?.done ?? 0,
+    found: p?.found ?? 0,
+    ingested: p?.ingested ?? 0,
+    notFound: p?.notFound ?? 0,
+    errors: p?.errors ?? 0,
+  };
+}
+
+function listItemFromRow(row: DiscoveryJobRecord): DiscoveryListItem {
+  const progress = progressOf(row.progress);
+  return {
+    jobId: row.id,
+    scope: row.scope,
+    ean: row.ean,
+    supermarketId: row.supermarket_id,
+    status: row.status,
+    targets: progress.total,
+    progress,
+    chains: row.scope === 'sweep' ? (row.chain_summary ?? []) : null,
+    createdAt: row.created_at,
+    finishedAt: row.finished_at,
+  };
+}
+
 /** Normalize a BullMQ discovery job to the summary shape the UI expects. */
 async function summarizeDiscoveryJob(
-  job: Awaited<ReturnType<ReturnType<typeof getDiscoveryQueue>['getJob']>>,
-): Promise<Record<string, unknown>> {
-  if (!job) throw new Error('unreachable: null job');
+  job: NonNullable<Awaited<ReturnType<ReturnType<typeof getDiscoveryQueue>['getJob']>>>,
+): Promise<DiscoveryListItem> {
   const data = job.data as DiscoveryJobData;
   const state = await job.getState();
   const status =
@@ -586,28 +656,22 @@ async function summarizeDiscoveryJob(
     : state === 'active' ? 'running'
     : 'queued';
 
-  const p = (typeof job.progress === 'object' && job.progress ? job.progress : null) as
-    | Record<string, number>
-    | null;
-  const progress = {
-    total: p?.total ?? 0,
-    done: p?.done ?? 0,
-    found: p?.found ?? 0,
-    ingested: p?.ingested ?? 0,
-    notFound: p?.notFound ?? 0,
-    errors: p?.errors ?? 0,
-  };
+  const progress = progressOf(job.progress);
+  const results = (job.returnvalue as DiscoverOutcome[] | undefined) ?? [];
+  const chains =
+    data.scope === 'sweep' && results.length > 0 ? rollupSweepChains(results) : null;
 
   return {
-    jobId: job.id,
+    jobId: job.id ?? '',
     scope: data.scope,
     ean: 'ean' in data ? data.ean : null,
     supermarketId: 'supermarketId' in data ? data.supermarketId : null,
     status,
-    // `targets` = units of work for this job (chains for ean/sweep, EANs for a
-    // whole-chain scope). progress.total carries exactly that once it starts.
+    // `targets` = units of work (chains for ean/sweep, EANs for a whole-chain
+    // scope). progress.total carries exactly that once the job starts.
     targets: progress.total,
     progress,
+    chains,
     createdAt: new Date(job.timestamp).toISOString(),
     finishedAt: job.finishedOn ? new Date(job.finishedOn).toISOString() : null,
   };
@@ -622,28 +686,138 @@ dataRouter.get('/discover', async (req: Request, res: Response) => {
       ? (['active', 'waiting', 'delayed', 'completed', 'failed'] as const)
       : (['active', 'waiting', 'delayed'] as const);
 
-  // Fetch a generous window, sort newest-first by enqueue time, then trim to
-  // `limit` before resolving each job's state (bounds the getState() calls).
-  const jobs = await queue.getJobs([...types], 0, 200);
-  jobs.sort((a, b) => (b?.timestamp ?? 0) - (a?.timestamp ?? 0));
-  const trimmed = jobs.filter((j): j is NonNullable<typeof j> => Boolean(j)).slice(0, q.limit);
+  // DB holds jobs after Redis expires them. Redis still has the live ones,
+  // including anything enqueued before the table existed.
+  const [rows, redisJobs] = await Promise.all([
+    loadDiscoveryJobs(500),
+    queue.getJobs([...types], 0, 499),
+  ]);
 
-  const data = await Promise.all(trimmed.map((job) => summarizeDiscoveryJob(job)));
+  const byId = new Map<string, DiscoveryListItem>();
+  for (const row of rows) byId.set(row.id, listItemFromRow(row));
+
+  const live = redisJobs.filter((j): j is NonNullable<typeof j> => Boolean(j?.id));
+  const summarized = await Promise.all(live.map((job) => summarizeDiscoveryJob(job)));
+  for (const item of summarized) {
+    if (!item.jobId) continue;
+    const prev = byId.get(item.jobId);
+    byId.set(item.jobId, {
+      ...(prev ?? item),
+      ...item,
+      chains: item.chains ?? prev?.chains ?? null,
+    });
+  }
+
+  const filtered =
+    q.status === 'all'
+      ? [...byId.values()]
+      : [...byId.values()].filter((j) => j.status === 'queued' || j.status === 'running');
+
+  const data = selectDiscoveryList(filtered, {
+    limit: q.limit,
+    pinSweeps: q.status === 'all',
+    nowMs: Date.now(),
+  });
   res.json(success(data));
 });
 
 // =============================================================================
-// GET /v1/data/discover/:jobId — poll discovery progress + results
+// GET /v1/data/discover/weekly — altas + sweep rollup per ISO week
+//
+// Registered before /:jobId so "weekly" is not captured as a job id.
 // =============================================================================
 
+const WeeklyQuery = z.object({
+  weeks: z.coerce.number().int().min(1).max(26).default(8),
+});
+
+dataRouter.get('/discover/weekly', async (req: Request, res: Response) => {
+  const q = parseQuery(req, WeeklyQuery);
+  const today = todayInBuenosAires();
+  const weeks = recentIsoWeeks(today, q.weeks);
+  const oldest = weeks[weeks.length - 1];
+  const fromUtc = oldest ? baDayRangeUtc(oldest.weekStart).fromUtc : new Date(0).toISOString();
+
+  const { data: sms, error: smErr } = await db
+    .from('supermarkets')
+    .select('id, config')
+    .order('name', { ascending: true });
+  if (smErr) throw smErr;
+
+  const chains = (sms ?? []).map((sm) => {
+    const profile = chainProfileFields(sm.config, getAdapterCapabilities(sm.id as string));
+    return { id: sm.id as string, hasSearch: profile.has_search, channels: profile.channels };
+  });
+
+  const mappingRows = await fetchAllPages<{
+    supermarket_id: string;
+    external_id: string;
+    metadata: unknown;
+    created_at: string;
+  }>((from, to) =>
+    db
+      .from('supermarket_products')
+      .select('supermarket_id, external_id, metadata, created_at')
+      .gte('created_at', fromUtc)
+      .order('created_at', { ascending: true })
+      .range(from, to),
+  );
+
+  const sweeps = await loadSweepsSince(fromUtc);
+  const report = buildWeeklyReport({
+    weeks,
+    chains,
+    mappings: mappingRows.map((r) => ({
+      supermarketId: r.supermarket_id,
+      createdAt: r.created_at,
+      externalId: r.external_id,
+      metadata: r.metadata,
+    })),
+    sweeps,
+  });
+
+  res.json(success({ weeks: report }));
+});
+
+// =============================================================================
+// GET /v1/data/discover/:jobId — poll discovery progress + results
+//
+// `?summary=1` omits the per-EAN `results` array. Sweep jobs also return
+// `chains`, the per-chain rollup, so a large sweep doesn't have to be downloaded
+// in full.
+// =============================================================================
+
+const DiscoverJobQuery = z.object({
+  summary: z.enum(['0', '1']).optional(),
+});
+
 dataRouter.get('/discover/:jobId', async (req: Request, res: Response) => {
+  const q = parseQuery(req, DiscoverJobQuery);
   const jobId = typeof req.params.jobId === 'string' ? req.params.jobId : '';
   if (!jobId) throw ApiError.badRequest('Missing path parameter: jobId');
 
   const job = await getDiscoveryQueue().getJob(jobId);
+  const stored = job ? null : await loadDiscoveryJob(jobId);
+  if (!job && !stored) throw ApiError.notFound('Discovery job');
+
+  if (!job && stored) {
+    const progress = progressOf(stored.progress);
+    res.json(
+      success({
+        jobId: stored.id,
+        scope: stored.scope,
+        status: stored.status,
+        progress,
+        chains: stored.scope === 'sweep' ? (stored.chain_summary ?? []) : null,
+        results: [],
+        failedReason: stored.failed_reason,
+      }),
+    );
+    return;
+  }
+
   if (!job) throw ApiError.notFound('Discovery job');
 
-  // Map BullMQ states to a simple lifecycle for the UI.
   const state = await job.getState();
   const status =
     state === 'completed' ? 'completed'
@@ -651,18 +825,19 @@ dataRouter.get('/discover/:jobId', async (req: Request, res: Response) => {
     : state === 'active' ? 'running'
     : 'queued';
 
-  const progress = (typeof job.progress === 'object' ? job.progress : null) as
-    | Record<string, number>
-    | null;
+  const progress = progressOf(job.progress);
   const results = (job.returnvalue as DiscoverOutcome[] | undefined) ?? [];
+  const scope = (job.data as DiscoveryJobData).scope;
+  const chains = scope === 'sweep' ? rollupSweepChains(results) : null;
 
   res.json(
     success({
       jobId: job.id,
-      scope: (job.data as DiscoveryJobData).scope,
+      scope,
       status,
       progress,
-      results,
+      chains,
+      results: q.summary === '1' ? [] : results,
       failedReason: job.failedReason ?? null,
     }),
   );

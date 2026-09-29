@@ -302,6 +302,7 @@ async function resolveExternalId(
 export const carrefourAdapter: SupermarketAdapter = {
   id: 'carrefour',
   name: 'Carrefour Argentina',
+  searchProvider: 'vtex',
 
   canonicalizeUrl,
   resolveExternalId,

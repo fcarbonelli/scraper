@@ -125,6 +125,18 @@ export function adaptersWithSearch(): string[] {
 }
 
 /**
+ * Active chains the Sunday sweep is allowed to search. Inactive rows and
+ * chains without `searchByEan` (in-store only, revista only, scrape-without-
+ * search) are left out — they never become targets.
+ */
+export async function activeSearchableChainIds(): Promise<string[]> {
+  const { data, error } = await db.from('supermarkets').select('id').eq('is_active', true);
+  if (error) throw error;
+  const searchable = new Set(adaptersWithSearch());
+  return (data ?? []).map((r) => r.id as string).filter((id) => searchable.has(id));
+}
+
+/**
  * EANs already covered at a supermarket — i.e. any mapping exists (active OR
  * paused). Paused counts as covered so a weekly sweep never resurrects a product
  * an operator intentionally paused.
@@ -189,6 +201,7 @@ async function ingestWithRetry(
         runInitialScrape: false,
         preResolvedExternalId: externalId,
         ean,
+        mappingSource: 'discover',
       });
       return ingested.alreadyExisted ? 'existed' : 'ingested';
     } catch (err) {

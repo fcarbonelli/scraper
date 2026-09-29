@@ -123,6 +123,13 @@ export interface SupermarketAdapter {
   /** Human-readable name for logs and alerts. */
   name: string;
   /**
+   * How `searchByEan` is implemented, when the adapter has one.
+   * `"vtex"` means the shared VTEX catalog search (`fq=alternateIds_Ean`).
+   * Other engines use a short id (`"coto"`, `"prestashop"`, …). Omitted when
+   * the adapter cannot search by EAN — capabilities then report null.
+   */
+  searchProvider?: string;
+  /**
    * Convert any URL into the canonical, user-facing URL (no scraping params).
    * Used when ingesting URLs into the DB so we always store the clean form.
    */

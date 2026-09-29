@@ -1,0 +1,29 @@
+{
+  "data": {
+    "weeks": [
+      {
+        "week": "2026-W39",
+        "sweep_job_id": "42",
+        "chains": [
+          {
+            "supermarket_id": "coto",
+            "has_search": false,
+            "channels": ["online"],
+            "mappings_added": 4,
+            "mappings_added_by": { "scrape": 0, "manual_url": 1, "instore": 3, "revista": 0 },
+            "sweep": null
+          },
+          {
+            "supermarket_id": "carrefour",
+            "has_search": true,
+            "channels": ["online", "presencial"],
+            "mappings_added": 12,
+            "mappings_added_by": { "scrape": 9, "manual_url": 0, "instore": 2, "revista": 1 },
+            "sweep": { "ingested": 9, "not_found": 140, "errors": 2 }
+          }
+        ]
+      }
+    ]
+  },
+  "meta": { "ts": "2026-09-29T15:00:00.000Z" }
+}
