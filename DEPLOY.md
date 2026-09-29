@@ -573,6 +573,7 @@ Open the failed run in the Actions tab on GitHub.
 - `**ssh: connect to host ... port 22: Connection timed out**` → `EC2_HOST` secret has wrong IP, or the security group blocks port 22.
 - `**npm ci` fails** → likely a lockfile mismatch. Pull main locally, run `npm install`, commit the lockfile, push again.
 - `**npm run build` fails** → typecheck error introduced. The CI should catch this in the typecheck job before deploy. If it slipped through, fix locally and push.
+- **`Killed` / exit 137 during `npm run build`** → the kernel OOM-killed `tsc` (4GB box, PM2 still running). The deploy script creates a 2GB `/swapfile` before compiling. If it still dies, `free -h` on the box and confirm swap is on (`swapon --show`).
 - **Telegram notification didn't fire** → `TELEGRAM_`* secrets not set, or bot was kicked from the chat.
 
 ### Maxi Carrefour fails with "Executable doesn't exist at .../chrome-headless-shell"

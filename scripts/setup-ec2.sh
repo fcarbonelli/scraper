@@ -150,6 +150,23 @@ sudo apt-get install -y \
   fonts-liberation
 
 # -----------------------------------------------------------------------------
+# Swap — the box is 4GB and `tsc` runs while PM2 is up. Without swap the
+# kernel OOM-kills the compile (deploy exits 137, log line "Killed").
+# -----------------------------------------------------------------------------
+step "Ensuring a 2GB swap file"
+if ! swapon --show | grep -q .; then
+  if [ ! -f /swapfile ]; then
+    sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+  fi
+  sudo swapon /swapfile
+  if ! grep -q '^/swapfile ' /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+  fi
+fi
+
+# -----------------------------------------------------------------------------
 # Firewall (UFW)
 # -----------------------------------------------------------------------------
 step "Configuring firewall (UFW)"
