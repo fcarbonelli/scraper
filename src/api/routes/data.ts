@@ -809,7 +809,7 @@ dataRouter.get('/discover/:jobId', async (req: Request, res: Response) => {
         status: stored.status,
         progress,
         chains: stored.scope === 'sweep' ? (stored.chain_summary ?? []) : null,
-        results: [],
+        results: stored.scope === 'sweep' ? (stored.results ?? []) : [],
         failedReason: stored.failed_reason,
       }),
     );

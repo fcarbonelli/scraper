@@ -3,8 +3,9 @@
  *
  * BullMQ drops completed jobs (the queue is a work list, not an archive).
  * The dashboard lists sweeps for weeks after Sunday, so each job is also
- * written to `discovery_jobs`. A missing table must not fail a scrape or a
- * sweep — persistence logs and continues; Redis still runs the job.
+ * written to `discovery_jobs`, including the per-EAN `results` list. A missing
+ * table must not fail a scrape or a sweep — persistence logs and continues;
+ * Redis still runs the job.
  */
 
 import type { Job } from 'bullmq';
@@ -24,6 +25,8 @@ export interface DiscoveryJobRecord {
   supermarket_id: string | null;
   progress: Record<string, number>;
   chain_summary: ChainSweepStat[] | null;
+  /** Per-EAN outcomes for a sweep. Absent on the list query, which stays light. */
+  results?: DiscoverOutcome[] | null;
   created_at: string;
   finished_at: string | null;
   failed_reason: string | null;
@@ -36,6 +39,8 @@ export interface DiscoveryJobPatch {
   supermarketId?: string | null;
   progress?: Record<string, number>;
   chainSummary?: ChainSweepStat[] | null;
+  /** Full per-EAN list. Sweeps store this so the dashboard can show it after Redis drops the job. */
+  results?: DiscoverOutcome[] | null;
   createdAt?: string;
   finishedAt?: string | null;
   failedReason?: string | null;
@@ -55,6 +60,7 @@ export async function saveDiscoveryJob(id: string, patch: DiscoveryJobPatch): Pr
   if (patch.supermarketId !== undefined) row.supermarket_id = patch.supermarketId;
   if (patch.progress !== undefined) row.progress = patch.progress;
   if (patch.chainSummary !== undefined) row.chain_summary = patch.chainSummary;
+  if (patch.results !== undefined) row.results = patch.results;
   if (patch.createdAt !== undefined) row.created_at = patch.createdAt;
   if (patch.finishedAt !== undefined) row.finished_at = patch.finishedAt;
   if (patch.failedReason !== undefined) row.failed_reason = patch.failedReason;
@@ -93,16 +99,27 @@ export async function enqueueDiscoveryJob(
   return job;
 }
 
-/** Per-chain tallies for a sweep, from the worker's outcome list. */
-export function rollupSweepChains(outcomes: DiscoverOutcome[]): ChainSweepStat[] {
+/**
+ * Per-chain tallies for a sweep.
+ *
+ * `plannedChainIds` are the chains the sweep intended to search. A chain with
+ * nothing missing still gets a zero row, so the dashboard can tell "searched,
+ * already complete" apart from "this chain was not in the job".
+ */
+export function rollupSweepChains(
+  outcomes: DiscoverOutcome[],
+  plannedChainIds: string[] = [],
+): ChainSweepStat[] {
   const byId = new Map<string, ChainSweepStat>();
+  const blank = (id: string): ChainSweepStat => ({
+    supermarket_id: id,
+    ingested: 0,
+    not_found: 0,
+    errors: 0,
+  });
+  for (const id of plannedChainIds) byId.set(id, blank(id));
   for (const o of outcomes) {
-    const cur = byId.get(o.supermarketId) ?? {
-      supermarket_id: o.supermarketId,
-      ingested: 0,
-      not_found: 0,
-      errors: 0,
-    };
+    const cur = byId.get(o.supermarketId) ?? blank(o.supermarketId);
     if (o.result === 'ingested') cur.ingested += 1;
     else if (o.result === 'not_found' || o.result === 'no_search') cur.not_found += 1;
     else if (o.result === 'error') cur.errors += 1;
@@ -148,6 +165,34 @@ export async function loadSweepsSince(
   }));
 }
 
+/** Accept the outcome list we wrote, and drop anything that isn't one. */
+function parseDiscoverOutcomes(value: unknown): DiscoverOutcome[] {
+  if (!Array.isArray(value)) return [];
+  const out: DiscoverOutcome[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.ean !== 'string' || typeof row.supermarketId !== 'string') continue;
+    if (
+      row.result !== 'ingested' &&
+      row.result !== 'existed' &&
+      row.result !== 'not_found' &&
+      row.result !== 'no_search' &&
+      row.result !== 'error'
+    ) {
+      continue;
+    }
+    out.push({
+      ean: row.ean,
+      supermarketId: row.supermarketId,
+      result: row.result,
+      url: typeof row.url === 'string' ? row.url : undefined,
+      error: typeof row.error === 'string' ? row.error : undefined,
+    });
+  }
+  return out;
+}
+
 function parseChainSummary(value: unknown): ChainSweepStat[] {
   if (!Array.isArray(value)) return [];
   const out: ChainSweepStat[] = [];
@@ -170,7 +215,7 @@ export async function loadDiscoveryJob(id: string): Promise<DiscoveryJobRecord |
   const { data, error } = await db
     .from('discovery_jobs')
     .select(
-      'id, scope, status, ean, supermarket_id, progress, chain_summary, created_at, finished_at, failed_reason',
+      'id, scope, status, ean, supermarket_id, progress, chain_summary, results, created_at, finished_at, failed_reason',
     )
     .eq('id', id)
     .maybeSingle();
@@ -178,5 +223,7 @@ export async function loadDiscoveryJob(id: string): Promise<DiscoveryJobRecord |
     if (isMissingTable(error)) return null;
     throw error;
   }
-  return (data as DiscoveryJobRecord | null) ?? null;
+  if (!data) return null;
+  const row = data as DiscoveryJobRecord & { results?: unknown };
+  return { ...row, results: parseDiscoverOutcomes(row.results) };
 }

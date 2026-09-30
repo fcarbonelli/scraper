@@ -124,13 +124,17 @@ async function persistFinished(
   job: Job<DiscoveryJobData>,
   progress: DiscoveryProgress,
   outcomes?: DiscoverOutcome[],
+  plannedChainIds?: string[],
 ): Promise<void> {
   if (!job.id) return;
+  const isSweep = job.data.scope === 'sweep';
   await saveDiscoveryJob(job.id, {
     scope: job.data.scope,
     status: 'completed',
     progress: { ...progress },
-    chainSummary: job.data.scope === 'sweep' && outcomes ? rollupSweepChains(outcomes) : null,
+    chainSummary: isSweep && outcomes ? rollupSweepChains(outcomes, plannedChainIds) : null,
+    // The per-EAN list is what the Barrido view expands. Redis drops it; the row does not.
+    results: isSweep && outcomes ? outcomes : undefined,
     finishedAt: new Date().toISOString(),
   });
 }
@@ -154,9 +158,22 @@ async function runSweep(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> 
     plan.push({ id, missing: await missingEansForSupermarket(id) });
   }
   const total = plan.reduce((n, p) => n + p.missing.length, 0);
+  const plannedIds = plan.map((p) => p.id);
   const progress = emptyProgress(total);
   await job.updateProgress(progress);
   log.info({ chains: chains.length, total }, 'coverage sweep starting');
+
+  // Seed every target, including chains that already cover the catalog, so a
+  // quiet chain shows up as "searched, nothing missing" instead of missing.
+  if (job.id) {
+    await saveDiscoveryJob(job.id, {
+      scope: 'sweep',
+      status: 'running',
+      progress: { ...progress },
+      chainSummary: rollupSweepChains([], plannedIds),
+      results: [],
+    });
+  }
 
   const outcomes: DiscoverOutcome[] = [];
   const addedByChain: Record<string, number> = {};
@@ -174,7 +191,8 @@ async function runSweep(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> 
           scope: 'sweep',
           status: 'running',
           progress: { ...progress },
-          chainSummary: rollupSweepChains(outcomes),
+          chainSummary: rollupSweepChains(outcomes, plannedIds),
+          results: outcomes,
         });
       }
       // Be polite: short pause on misses, longer after a hit.
@@ -183,7 +201,7 @@ async function runSweep(job: Job<DiscoveryJobData>): Promise<DiscoverOutcome[]> 
   }
 
   await sendSweepSummary(progress, addedByChain);
-  await persistFinished(job, progress, outcomes);
+  await persistFinished(job, progress, outcomes, plannedIds);
   log.info({ progress, addedByChain }, 'coverage sweep complete');
   return outcomes;
 }
