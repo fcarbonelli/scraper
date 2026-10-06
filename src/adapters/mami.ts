@@ -10,14 +10,17 @@
  *   - Price is a plain `sku.activePrice` number (Coto uses a JSON `sku.dtoPrice`).
  *   - Product pages live at `/super/producto/<slug>/_/A-<id>` (Coto: `/_/R-<id>`).
  *
- * Sale / regular price (2026-09): `sku.activePrice` is the CURRENT price — the
- * discounted one when the item is on sale — and the JSON exposes NO regular
- * price. The site can run store-wide sales, so publishing `activePrice` as the
- * regular price is wrong. The regular price lives ONLY in the HTML page as an
- * `antes $…` line, so `scrape()` fetches the HTML alongside the JSON and sets
- * `listPrice` to the "antes" amount when on sale (see `extractRegularPrice`).
- * The export then derives Precio_Regular (list) and Precio_c_Oferta_1 (active)
- * from `list_price`/`price`.
+ * Sale / regular price (updated 2026-10): the JSON's `sku.activePrice` is an
+ * UNRELIABLE source for the shelf price — on store-wide sales it has been seen
+ * to return the REGULAR price for discounted items (so the discount went
+ * undetected). The authoritative prices live in the HTML price block:
+ *   - the big `$…` figure is the CURRENT price the customer pays, and
+ *   - an `antes $…` line (present only on sale) is the REGULAR price.
+ * So `scrape()` fetches the HTML alongside the JSON and, when the block parses,
+ * uses the HTML `current` as the price and the `antes` value as `listPrice`
+ * (see `extractMamiPrices`); the JSON price is only a fallback if the HTML
+ * fetch fails. The export then derives Precio_Regular (list) and
+ * Precio_c_Oferta_1 (active) from `list_price`/`price`.
  *
  * URL pattern: `https://www.supermami.com.ar/super/producto/<slug>/_/A-<id>`
  *   → `<id>` (e.g. "2811471-2811471-s") is the external_id. Endeca resolves the
@@ -329,17 +332,42 @@ function parseMamiMoney(raw: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+// The current selling price is the FIRST money token inside the price block
+// (the big `<span style="font-size:25px">$2,790.00</span> x un.`), ahead of the
+// "Precio s/Imp.Nac." and "antes" lines.
+const CURRENT_RE = /\$\s*([\d.,]+)/;
+
 /**
- * Extract the regular ("antes") price from a product's HTML page, scoped to the
- * main price block so carousel items can't leak in. Returns undefined when the
- * product isn't on sale (no "antes" line) or the block can't be found.
+ * Extract both prices from a product's HTML price block (scoped to the main
+ * block so related-product carousels can't leak in):
+ *   - `current`: the price the customer pays today (first money token)
+ *   - `regular`: the "antes" price shown only when the product is on sale
+ *
+ * This is the authoritative shelf price. We prefer it over the JSON's
+ * `sku.activePrice`, which has been observed to lag — returning the regular
+ * price for on-sale items (so the discount went undetected). Returns an empty
+ * object when the block can't be found.
+ */
+export function extractMamiPrices(html: string): {
+  current?: number;
+  regular?: number;
+} {
+  const block = html.match(PRICE_BLOCK_RE)?.[1];
+  if (!block) return {};
+  const current = block.match(CURRENT_RE)?.[1];
+  const regular = block.match(ANTES_RE)?.[1];
+  return {
+    current: current ? parseMamiMoney(current) : undefined,
+    regular: regular ? parseMamiMoney(regular) : undefined,
+  };
+}
+
+/**
+ * Backwards-compatible helper: the regular ("antes") price only.
+ * Prefer {@link extractMamiPrices} which also recovers the current price.
  */
 export function extractRegularPrice(html: string): number | undefined {
-  const block = html.match(PRICE_BLOCK_RE)?.[1];
-  if (!block) return undefined;
-  const m = block.match(ANTES_RE);
-  if (!m?.[1]) return undefined;
-  return parseMamiMoney(m[1]);
+  return extractMamiPrices(html).regular;
 }
 
 // =============================================================================
@@ -410,20 +438,25 @@ export const mamiAdapter: SupermarketAdapter = {
     const body = await fetchMami(jsonUrl, ctx.signal, REQUEST_TIMEOUT_MS);
     const result = parseMamiResponse(body, ctx);
 
-    // The JSON only carries the current (possibly discounted) price. Fetch the
-    // HTML page to recover the regular ("antes") price when the product is on
-    // sale, so we don't publish the discounted price as the regular one. This
-    // is best-effort: a failure here must not fail an otherwise-good scrape.
+    // The JSON's `sku.activePrice` is an unreliable source for on-sale items —
+    // it sometimes returns the regular price, hiding the discount. Fetch the
+    // HTML page and read the price block, which is the authoritative shelf
+    // price: `current` is what the customer pays, `regular` ("antes") is the
+    // pre-discount price. Best-effort — a failure here must not fail an
+    // otherwise-good scrape (we fall back to the JSON price).
     try {
       const html = await fetchMamiText(ctx.externalUrl, ctx.signal, REQUEST_TIMEOUT_MS);
-      const regular = extractRegularPrice(html);
+      const { current, regular } = extractMamiPrices(html);
+      if (current !== undefined && current > 0) {
+        result.price = current;
+      }
       if (regular !== undefined && regular > result.price + 0.01) {
         result.listPrice = regular;
       }
     } catch (err) {
       ctx.logger.debug(
         { err },
-        'Super Mami regular-price HTML fetch failed; publishing current price without listPrice',
+        'Super Mami price-block HTML fetch failed; publishing JSON price without listPrice',
       );
     }
 

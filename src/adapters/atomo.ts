@@ -87,6 +87,12 @@ function canonicalizeUrl(rawUrl: string): string {
   }
 }
 
+/** Extract the trailing EAN of `<id>-<slug>---<EAN>.html` (8–14 digits). */
+function extractEanFromUrl(url: string): string | null {
+  const m = url.match(/(\d{8,14})\.html(?:[?#]|$)/);
+  return m?.[1] ?? null;
+}
+
 /** Extract the leading numeric `<id>` of `<id>-<slug>---<EAN>.html`. */
 function extractProductIdFromUrl(canonicalUrl: string): string | null {
   try {
@@ -105,19 +111,13 @@ function extractProductIdFromUrl(canonicalUrl: string): string | null {
 // HTTP layer
 // =============================================================================
 
-/**
- * Fetch the product HTML. We do NOT auto-follow redirects so we can detect
- * the site's "unknown id → 302 to home" behavior as `product_not_found`.
- */
-async function fetchAtomoHtml(
+/** Low-level GET returning the raw undici Response (redirect handling per arg). */
+async function atomoFetch(
   url: string,
   signal: AbortSignal | undefined,
-  timeoutMs: number = REQUEST_TIMEOUT_MS,
-  // The search path 301-redirects to the canonical results URL, so it must
-  // follow redirects; the product (scrape) path keeps `manual` so an unknown
-  // id redirecting to home is detected as `product_not_found`.
-  followRedirects = false,
-): Promise<string> {
+  timeoutMs: number,
+  redirect: 'manual' | 'follow',
+): Promise<Awaited<ReturnType<typeof undiciFetch>>> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   if (signal) {
@@ -128,16 +128,15 @@ async function fetchAtomoHtml(
   // one is configured (undefined otherwise — direct connection).
   const dispatcher = getProxyDispatcher('atomo');
 
-  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await undiciFetch(url, {
+    return await undiciFetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
         Accept: 'text/html,application/xhtml+xml,*/*',
         'Accept-Language': 'es-AR,es;q=0.9',
       },
-      redirect: followRedirects ? 'follow' : 'manual',
+      redirect,
       signal: controller.signal,
       ...(dispatcher ? { dispatcher } : {}),
     });
@@ -157,37 +156,94 @@ async function fetchAtomoHtml(
   } finally {
     clearTimeout(timeoutId);
   }
+}
 
-  // PrestaShop redirects to homepage when the id is unknown.
-  if (res.status >= 300 && res.status < 400) {
-    throw new ScrapeError(
-      'product_not_found',
-      `Atomo redirected (status=${res.status}) — product likely doesn't exist: ${url}`,
-      { httpStatus: res.status },
-    );
-  }
-  if (res.status === 404) {
+/** Map a non-OK, non-redirect HTTP status to a ScrapeError. 3xx is handled by callers. */
+function throwForAtomoStatus(status: number, url: string): void {
+  if (status === 404) {
     throw new ScrapeError('product_not_found', `Atomo returned 404 for ${url}`, {
       httpStatus: 404,
     });
   }
-  if (res.status === 429) {
+  if (status === 429) {
     throw new ScrapeError('rate_limited', `Atomo returned 429`, { httpStatus: 429 });
   }
-  if (res.status >= 500) {
+  if (status >= 500) {
+    throw new ScrapeError('site_server_error', `Atomo returned ${status}`, {
+      httpStatus: status,
+    });
+  }
+  if (status < 200 || status >= 300) {
+    throw new ScrapeError('unknown', `Atomo returned unexpected status ${status}`, {
+      httpStatus: status,
+    });
+  }
+}
+
+/**
+ * Fetch for the SEARCH path: follow redirects, since the search endpoint
+ * 301-redirects to the canonical results URL.
+ */
+async function fetchAtomoHtml(
+  url: string,
+  signal: AbortSignal | undefined,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<string> {
+  const res = await atomoFetch(url, signal, timeoutMs, 'follow');
+  throwForAtomoStatus(res.status, url);
+  return res.text();
+}
+
+/**
+ * Fetch a product page for the SCRAPE path with manual redirect handling.
+ *
+ * Átomo periodically renames product slugs while keeping the PrestaShop id AND
+ * the EAN (e.g. "…-ayudin-tradicional-…" → "…-ayudin-original-…"), which
+ * 301-redirects the stored URL. We follow such a redirect ONLY when the
+ * destination is a product page for the SAME EAN — healing the rename in place.
+ * Any other redirect (unknown id → home, id reassigned to a different EAN, or a
+ * category page) stays `product_not_found`.
+ */
+async function fetchAtomoProductHtml(
+  url: string,
+  signal: AbortSignal | undefined,
+  logger: ScrapeContext['logger'],
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<string> {
+  const res = await atomoFetch(url, signal, timeoutMs, 'manual');
+
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get('location') ?? '';
+    const dest = location ? new URL(location, url).toString() : '';
+    const expectedEan = extractEanFromUrl(url);
+    const destEan = dest ? extractEanFromUrl(dest) : null;
+
+    // Same-EAN product page → a slug rename we can safely heal.
+    if (dest && expectedEan && destEan && destEan === expectedEan) {
+      logger.info(
+        { from: url, to: dest },
+        'Átomo slug change — following redirect to same-EAN product',
+      );
+      const res2 = await atomoFetch(dest, signal, timeoutMs, 'manual');
+      if (res2.status >= 300 && res2.status < 400) {
+        throw new ScrapeError(
+          'product_not_found',
+          `Atomo redirect chained again: ${url} -> ${dest}`,
+          { httpStatus: res2.status },
+        );
+      }
+      throwForAtomoStatus(res2.status, dest);
+      return res2.text();
+    }
+
     throw new ScrapeError(
-      'site_server_error',
-      `Atomo returned ${res.status}`,
+      'product_not_found',
+      `Atomo redirected (status=${res.status}) to a different/absent product: ${url} -> ${dest || '(no location)'}`,
       { httpStatus: res.status },
     );
   }
-  if (!res.ok) {
-    throw new ScrapeError(
-      'unknown',
-      `Atomo returned unexpected status ${res.status}`,
-      { httpStatus: res.status },
-    );
-  }
+
+  throwForAtomoStatus(res.status, url);
   return res.text();
 }
 
@@ -267,7 +323,7 @@ async function searchByEan(
 
   let html: string;
   try {
-    html = await fetchAtomoHtml(searchUrl, signal, SEARCH_TIMEOUT_MS, true);
+    html = await fetchAtomoHtml(searchUrl, signal, SEARCH_TIMEOUT_MS);
   } catch {
     // Discovery treats any failure (incl. the "no results" redirect) as not found.
     return null;
@@ -315,7 +371,7 @@ export const atomoAdapter: SupermarketAdapter = {
       );
     }
     ctx.logger.debug({ url: ctx.externalUrl }, 'fetching Atomo product HTML');
-    const html = await fetchAtomoHtml(ctx.externalUrl, ctx.signal);
+    const html = await fetchAtomoProductHtml(ctx.externalUrl, ctx.signal, ctx.logger);
     return parseAtomoHtml(html, ctx);
   },
 };

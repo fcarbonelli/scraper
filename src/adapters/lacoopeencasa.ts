@@ -452,20 +452,29 @@ export function parseLcecResponse(
     );
   }
 
-  // -- Price: prefer current `precio`; if a promo price is set, use it as the
-  //    "what the user pays" value and surface the regular `precio` as listPrice.
-  const regular = parseFloatOrUndefined(a.precio);
+  // -- Price semantics (verified 2026-10 against live payloads):
+  //    `precio`          = CURRENT selling price (already reflects any discount)
+  //    `precio_anterior` = REGULAR ("before") price; equals `precio` when there's no promo
+  //    `precio_promo`    = mirror of `precio` when a promo is active (not a 2nd price)
+  //    So the customer pays `precio`, and the regular/list price is `precio_anterior`.
+  //    (Earlier logic treated `precio` as the regular price and never set a
+  //    listPrice, so the export published the discounted price as the regular.)
+  const current = parseFloatOrUndefined(a.precio);
   const promo = parseFloatOrUndefined(a.precio_promo);
-  const price = promo ?? regular;
+  const previous = parseFloatOrUndefined(a.precio_anterior);
+  const price = current ?? promo;
   if (price === undefined || price <= 0) {
     throw new ScrapeError(
       'price_missing',
       `LCEC offer has no usable price (cod_interno=${ctx.externalId})`,
     );
   }
+  // Surface the regular price as listPrice only when it's genuinely above what
+  // the customer pays today (a real discount) — this drives Precio_Regular vs
+  // Precio_c_Oferta_1 in the export.
   let listPrice: number | undefined;
-  if (promo !== undefined && regular !== undefined && regular > promo + 0.01) {
-    listPrice = regular;
+  if (previous !== undefined && previous > price + 0.01) {
+    listPrice = previous;
   }
 
   // -- Stock: explicit `disponibilidad` flag wins; fall back to numeric stock.
