@@ -277,8 +277,11 @@ const SUPERMARKETS: SupermarketSeed[] = [
     rate_limit_ms: 1000,
     concurrency: 2,
     is_active: true,
-    provincia: 'BUENOS AIRES',
-    zona: 'CAPITAL Y GBA',
+    // Online super catalog is fulfilled by Patagonia/Sur branches (Rada Tilly,
+    // Río Gallegos, Bariloche, Neuquén, Comodoro, …) — not CABA/GBA. The
+    // adapter pins a known sucursal cookie so Zona matches where we scrape.
+    provincia: 'CHUBUT',
+    zona: 'PATAGONIA',
     canal: 'SPM NACIONAL',
     cadena_display_name: 'LA ANONIMA',
   },

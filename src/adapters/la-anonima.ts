@@ -27,11 +27,12 @@
  * `seleccionocp=1`) reveals the product and its price for any branch that stocks
  * it. Verified live: a plain GET with just those cookies recovers products that
  * otherwise redirect home. Different branches carry different assortments (a SKU
- * stocked in Neuquén may be absent in Bariloche), so when the default attempt
- * 302s home / yields no price we sweep a list of super sucursal ids (Patagonia +
- * NEA — BA/Córdoba/Mendoza have no super catalog) until one resolves. The sweep
- * is purely additive: the first attempt keeps today's IP-default behaviour, so
- * products that already work are untouched; the sweep only RECOVERS failures.
+ * stocked in Neuquén may be absent in Bariloche), so we pin a known primary
+ * sucursal cookie (default 179 Rada Tilly) and, on home-redirect / no price,
+ * sweep the rest of the curated super-branch list (Patagonia/Sur, plus a few
+ * PBA/Santa Fe outliers). Every attempt is cookie-scoped so the snapshot can
+ * record which sucursal served the price — we never scrape under an anonymous
+ * IP-default branch and then label the row CABA/GBA.
  *
  * WAF note (2026-07): La Anónima's WAF began returning a hard 403 to the EC2
  * datacenter IP for every product (works fine from residential IPs). So the
@@ -116,14 +117,17 @@ const SUCURSAL_FALLBACKS: number[] = (() => {
   return ids.length > 0 ? ids : DEFAULT_SUCURSAL_FALLBACKS;
 })();
 
-// Optional: force a specific super sucursal as the PRIMARY attempt (deterministic
-// pricing). Unset → the first attempt uses the egress IP's default sucursal,
-// preserving today's behaviour for products that already scrape fine.
-const PRIMARY_SUCURSAL: number | null = (() => {
+// Primary super sucursal (deterministic pricing + a known region label).
+// Default is the first curated fallback (179 Rada Tilly / Chubut) so we never
+// scrape under an anonymous IP-default branch that we then mis-label as
+// CABA/GBA. Override with LA_ANONIMA_SUCURSAL_SUPER=<id> to pin another one.
+const PRIMARY_SUCURSAL: number = (() => {
   const raw = process.env.LA_ANONIMA_SUCURSAL_SUPER;
-  if (!raw) return null;
-  const n = Number(raw.trim());
-  return Number.isInteger(n) && n > 0 ? n : null;
+  if (raw) {
+    const n = Number(raw.trim());
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return SUCURSAL_FALLBACKS[0] ?? DEFAULT_SUCURSAL_FALLBACKS[0]!;
 })();
 
 /** Cookie header that scopes the storefront to a given super sucursal branch. */
@@ -132,24 +136,38 @@ function buildSucursalCookie(id: number): string {
 }
 
 /**
- * Ordered list of Cookie headers to try for a product scrape. The first entry is
- * the PRIMARY attempt (configured branch, else `undefined` = IP default); the
- * rest are the fallback-sweep branches (deduped against the primary).
+ * The branch an attempt scopes to: the numeric `Id-Sucursal-Super` from the
+ * cookie, or `'ip-default'` when no cookie is set (the egress IP's own branch).
+ * Recorded on each snapshot (`rawData.laAnonimaSucursal`) so we know WHICH
+ * sucursal/region served the price instead of assuming the chain-level zona.
  */
-function buildSucursalAttempts(): Array<string | undefined> {
-  if (PRIMARY_SUCURSAL !== null) {
-    const rest = SUCURSAL_FALLBACKS.filter((id) => id !== PRIMARY_SUCURSAL);
-    return [buildSucursalCookie(PRIMARY_SUCURSAL), ...rest.map(buildSucursalCookie)];
-  }
-  return [undefined, ...SUCURSAL_FALLBACKS.map(buildSucursalCookie)];
+function sucursalOfCookie(cookie: string | undefined): number | 'ip-default' {
+  if (!cookie) return 'ip-default';
+  const m = cookie.match(/Id-Sucursal-Super=(\d+)/);
+  return m?.[1] ? Number(m[1]) : 'ip-default';
+}
+
+/** Record on the result which super sucursal served this price (forensics + region labeling). */
+function tagSucursal(result: ScrapeResult, sucursal: number | 'ip-default'): ScrapeResult {
+  result.rawData = { ...(result.rawData ?? {}), laAnonimaSucursal: sucursal };
+  return result;
+}
+
+/**
+ * Ordered list of Cookie headers to try for a product scrape. Every attempt is
+ * scoped to a known super branch (no anonymous IP-default) so the snapshot can
+ * record which sucursal/region the price came from. Primary first, then the
+ * rest of the curated sweep (deduped).
+ */
+function buildSucursalAttempts(): string[] {
+  const rest = SUCURSAL_FALLBACKS.filter((id) => id !== PRIMARY_SUCURSAL);
+  return [PRIMARY_SUCURSAL, ...rest].map(buildSucursalCookie);
 }
 
 // Cookie used for discovery (EAN / free-text search) so the super catalog is
 // visible to the search index. Uses the configured primary branch, else the
 // first fallback (a large hipermercado with a broad assortment).
-const DISCOVERY_COOKIE = buildSucursalCookie(
-  PRIMARY_SUCURSAL ?? SUCURSAL_FALLBACKS[0] ?? DEFAULT_SUCURSAL_FALLBACKS[0]!,
-);
+const DISCOVERY_COOKIE = buildSucursalCookie(PRIMARY_SUCURSAL);
 
 /**
  * Errors a different sucursal might fix: a home-redirect (product_not_found),
@@ -552,9 +570,11 @@ export const laAnonimaAdapter: SupermarketAdapter = {
     // healer can re-resolve the EAN.
     const attempts = buildSucursalAttempts();
     let fallbackResult: ScrapeResult | undefined; // parsed but out of stock
+    let fallbackSucursal: number | 'ip-default' = 'ip-default';
     let lastError: unknown;
     for (let i = 0; i < attempts.length; i++) {
       const cookie = attempts[i];
+      const sucursal = sucursalOfCookie(cookie);
       try {
         const html = await fetchLaAnonimaHtml(
           ctx.externalUrl,
@@ -570,11 +590,14 @@ export const laAnonimaAdapter: SupermarketAdapter = {
               'La Anónima resolved via fallback sucursal sweep',
             );
           }
-          return result;
+          return tagSucursal(result, sucursal);
         }
         // Listed but out of stock at this branch — keep the first (primary) as a
         // continuity fallback and keep sweeping for a branch that has stock.
-        if (!fallbackResult) fallbackResult = result;
+        if (!fallbackResult) {
+          fallbackResult = result;
+          fallbackSucursal = sucursal;
+        }
       } catch (err) {
         if (err instanceof ScrapeError && isSucursalRecoverable(err.type)) {
           lastError = err;
@@ -585,7 +608,7 @@ export const laAnonimaAdapter: SupermarketAdapter = {
     }
     // No branch had stock: return an out-of-stock result if any branch had a
     // price (price continuity), else propagate the last recoverable error.
-    if (fallbackResult) return fallbackResult;
+    if (fallbackResult) return tagSucursal(fallbackResult, fallbackSucursal);
     throw lastError;
   },
 };

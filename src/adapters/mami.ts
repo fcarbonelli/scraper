@@ -10,17 +10,14 @@
  *   - Price is a plain `sku.activePrice` number (Coto uses a JSON `sku.dtoPrice`).
  *   - Product pages live at `/super/producto/<slug>/_/A-<id>` (Coto: `/_/R-<id>`).
  *
- * Sale / regular price (updated 2026-10): the JSON's `sku.activePrice` is an
- * UNRELIABLE source for the shelf price — on store-wide sales it has been seen
- * to return the REGULAR price for discounted items (so the discount went
- * undetected). The authoritative prices live in the HTML price block:
- *   - the big `$…` figure is the CURRENT price the customer pays, and
- *   - an `antes $…` line (present only on sale) is the REGULAR price.
- * So `scrape()` fetches the HTML alongside the JSON and, when the block parses,
- * uses the HTML `current` as the price and the `antes` value as `listPrice`
- * (see `extractMamiPrices`); the JSON price is only a fallback if the HTML
- * fetch fails. The export then derives Precio_Regular (list) and
- * Precio_c_Oferta_1 (active) from `list_price`/`price`.
+ * Sale / regular price (updated 2026-10): `sku.activePrice` and the HTML price
+ * block disagree in BOTH directions (JSON lags a new sale, or JSON lags a
+ * sale ending), and the "antes" line is not always rendered. The HTML big
+ * figure is what a customer sees on the PDP, so that is `price`. The regular
+ * price is the highest of the "antes" line (when present) and the JSON
+ * `activePrice`, when that is above the HTML figure. JSON-only is the
+ * fallback if the HTML fetch fails. The export then derives Precio_Regular
+ * (list) and Precio_c_Oferta_1 (active) from `list_price`/`price`.
  *
  * URL pattern: `https://www.supermami.com.ar/super/producto/<slug>/_/A-<id>`
  *   → `<id>` (e.g. "2811471-2811471-s") is the external_id. Endeca resolves the
@@ -223,6 +220,7 @@ async function fetchMamiText(
   url: string,
   signal: AbortSignal | undefined,
   timeoutMs: number,
+  accept = 'application/json,text/plain,*/*',
 ): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -240,7 +238,7 @@ async function fetchMamiText(
       method: 'GET',
       headers: {
         'User-Agent': USER_AGENT,
-        Accept: 'application/json,text/plain,*/*',
+        Accept: accept,
         'Accept-Language': 'es-AR,es;q=0.9',
       },
       signal: controller.signal,
@@ -437,21 +435,34 @@ export const mamiAdapter: SupermarketAdapter = {
     ctx.logger.debug({ jsonUrl }, 'fetching Super Mami JSON');
     const body = await fetchMami(jsonUrl, ctx.signal, REQUEST_TIMEOUT_MS);
     const result = parseMamiResponse(body, ctx);
+    const jsonPrice = result.price;
 
-    // The JSON's `sku.activePrice` is an unreliable source for on-sale items —
-    // it sometimes returns the regular price, hiding the discount. Fetch the
-    // HTML page and read the price block, which is the authoritative shelf
-    // price: `current` is what the customer pays, `regular` ("antes") is the
-    // pre-discount price. Best-effort — a failure here must not fail an
-    // otherwise-good scrape (we fall back to the JSON price).
+    // The HTML price-block figure is what the PDP shows, so it wins as `price`
+    // whenever we can parse it. `sku.activePrice` has been observed BOTH above
+    // the HTML figure (stale regular, hiding a sale — e.g. 6190 vs page 3990)
+    // and below it (stale promo). Best-effort: HTML fetch failure keeps JSON.
     try {
-      const html = await fetchMamiText(ctx.externalUrl, ctx.signal, REQUEST_TIMEOUT_MS);
+      // Ask for HTML explicitly — the shared fetch helper defaults to JSON
+      // Accept (for `?format=json`). Sending that on the PDP makes Endeca
+      // return JSON (no price-block comments), so extractMamiPrices silently
+      // finds nothing and we publish the stale JSON regular price.
+      const html = await fetchMamiText(
+        ctx.externalUrl,
+        ctx.signal,
+        REQUEST_TIMEOUT_MS,
+        'text/html,application/xhtml+xml,*/*',
+      );
       const { current, regular } = extractMamiPrices(html);
       if (current !== undefined && current > 0) {
         result.price = current;
       }
-      if (regular !== undefined && regular > result.price + 0.01) {
-        result.listPrice = regular;
+      // Regular = explicit "antes" if present, else the JSON price when it is
+      // genuinely above what the page is charging.
+      const candidate = [regular, jsonPrice].filter(
+        (n): n is number => n !== undefined && n > result.price + 0.01,
+      );
+      if (candidate.length > 0) {
+        result.listPrice = Math.max(...candidate);
       }
     } catch (err) {
       ctx.logger.debug(
