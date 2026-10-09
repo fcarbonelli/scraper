@@ -904,6 +904,13 @@ Decisions locked in:
   instead of typing a fake $1/$0. On approval it writes a MARKER snapshot
   (`status='no_price'`, price NULL) so the export shows `Estado='En stock sin precio'` with
   blank prices — same pattern as the scraper's out_of_stock markers.
+  **Approval conflict policy** (`materializeInStoreEntry`): per store+EAN+day a real price
+  always wins — it supersedes an older real price or a `no_price` marker, but a `no_price`
+  entry NEVER erases a real price already published that day; duplicate EANs within a visit
+  collapse to one snapshot (real beats marker, else last wins). The mapping find-or-create is
+  an atomic `ON CONFLICT DO NOTHING` upsert (no approve-time race), and `approveVisit` resolves
+  every EAN before any write so a bad EAN aborts cleanly (supabase-js has no client tx; the
+  write loop is idempotent/resumable off `review_status='pending'`).
   Frontend contract: `docs/IN_STORE_PRICE_ENTRY.md`.
 
 ### Phase 7 — Bank & card promotions (IMPLEMENTED, Naranja X) — see `docs/BANK_PROMOS.md`

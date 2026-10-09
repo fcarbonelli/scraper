@@ -36,6 +36,12 @@ fixtures in [`examples/api/`](../examples/api/) (`in-store-*.json`).
   it with **"Sin precio / hay stock"** (`no_price`) instead of a fake $1/$0. On
   approval it publishes as a **marker** (`Estado = "En stock sin precio"`, price
   columns blank) — the client sees the product is stocked, price unknown.
+- **A real price always wins over "sin precio."** On approval, for a given store +
+  EAN + day: a real price supersedes an older real price or a marker, but a
+  `no_price` marker **never** erases a real price already published that day
+  (whether from this visit or another). Duplicate EANs inside one visit collapse to
+  a single published snapshot (real beats marker; otherwise the last one wins), so
+  the export never shows two rows for the same product/store/day.
 - A **visit** groups the work: one worker at one **store branch** on one occasion.
   It holds the branch **location** (address / locality / province — a chain has
   many branches) and owns the product entries and flyer photos taken there.

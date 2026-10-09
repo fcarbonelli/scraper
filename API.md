@@ -2310,7 +2310,11 @@ snapshot (reaches the client base); rejecting discards it. Marks the visit
 }
 ```
 
-→ `{ visit_id: string; approved: number; rejected: number; snapshots: number }`.
+→ `{ visit_id: string; approved: number; rejected: number; snapshots: number }`
+(`snapshots` = distinct products published; duplicate EANs in the visit collapse to
+one). Conflict policy on materialize: for a given store + EAN + day a **real price
+always wins** — it supersedes an older real price or a `no_price` marker, but a
+`no_price` entry **never** overwrites a real price already published that day.
 Errors: `403 FORBIDDEN` (scoped key), `404 NOT_FOUND` (unknown visit),
 `400 INVALID_REQUEST` (visit not finished).
 

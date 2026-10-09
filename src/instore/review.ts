@@ -17,8 +17,10 @@ import {
   InStoreError,
   materializeInStoreEntry,
   wholesalePromoText,
+  type MaterializeResult,
   type VisitLocation,
 } from './entry.js';
+import { ensureMasterProductForEan } from './resolve.js';
 
 /** One reviewer decision for a pending entry (edits optional). */
 export interface ReviewDecision {
@@ -97,11 +99,13 @@ export async function approveVisit(
     direccion: visit.direccion,
   };
 
+  // created_at order makes "last wins" deterministic for duplicate EANs (Fix 4).
   const entriesRes = await db
     .from('instore_price_entries')
     .select('id, ean, price, no_price, promo_price, promo_min_units, note, api_key_id')
     .eq('visit_id', visitId)
-    .eq('review_status', 'pending');
+    .eq('review_status', 'pending')
+    .order('created_at', { ascending: true });
   if (entriesRes.error) throw entriesRes.error;
   const entries = (entriesRes.data ?? []) as PendingEntryRow[];
 
@@ -109,27 +113,32 @@ export async function approveVisit(
   const nowIso = new Date().toISOString();
   const result: ApproveVisitResult = { visitId, approved: 0, rejected: 0, snapshots: 0 };
 
+  // ---------------------------------------------------------------------------
+  // Phase 1 — build the plan (NO DB writes). All validation happens here, before
+  // anything is mutated, so a bad input can't leave the visit half-approved.
+  // ---------------------------------------------------------------------------
+  interface ApprovePlan {
+    entry: PendingEntryRow;
+    ean: string;
+    price: number | null;
+    wholesalePrice: number | null;
+    wholesaleMinUnits: number | null;
+    noPrice: boolean;
+    note: string | null;
+  }
+  const toReject: { entry: PendingEntryRow; note: string | null }[] = [];
+  const toApprove: ApprovePlan[] = [];
+
   for (const entry of entries) {
     const decision = byId.get(entry.id);
 
     if (decision?.action === 'reject') {
-      const upd = await db
-        .from('instore_price_entries')
-        .update({
-          review_status: 'rejected',
-          reviewed_at: nowIso,
-          reviewed_by: input.reviewedBy,
-          note: decision.note !== undefined ? decision.note : entry.note,
-        })
-        .eq('id', entry.id);
-      if (upd.error) throw upd.error;
-      result.rejected++;
+      toReject.push({ entry, note: decision.note !== undefined ? decision.note : entry.note });
       continue;
     }
 
-    // Approve — apply any inline edits, else keep the entered values.
-    // Resolve no_price: explicit flag wins; else a provided price implies a
-    // real price; else keep the entered state.
+    // Apply inline edits, else keep the entered values. Resolve no_price:
+    // explicit flag wins; else a provided price implies a real price; else keep.
     const note = decision && decision.note !== undefined ? decision.note : entry.note;
     const noPrice =
       decision?.noPrice !== undefined
@@ -161,40 +170,109 @@ export async function approveVisit(
           : entry.promo_min_units;
     }
 
-    const mat = await materializeInStoreEntry({
-      supermarketId: visit.supermarket_id,
-      ean: entry.ean,
-      price,
-      wholesalePrice,
-      wholesaleMinUnits,
-      noPrice,
-      enteredBy: visit.entered_by,
-      note,
-      visitId,
-      location,
-      apiKeyId: entry.api_key_id,
-    });
+    toApprove.push({ entry, ean: entry.ean, price, wholesalePrice, wholesaleMinUnits, noPrice, note });
+  }
 
+  // ---------------------------------------------------------------------------
+  // Phase 2 — collapse duplicate EANs within the visit (Fix 4). Only ONE snapshot
+  // per EAN is published; the winner is deterministic: a real price beats a
+  // no_price marker, and among the same kind the LAST (most recent) entry wins.
+  // Loser entries are still marked approved and linked to the winner's snapshot.
+  // ---------------------------------------------------------------------------
+  const winnerIdxByEan = new Map<string, number>();
+  toApprove.forEach((p, i) => {
+    const prevIdx = winnerIdxByEan.get(p.ean);
+    if (prevIdx === undefined) {
+      winnerIdxByEan.set(p.ean, i);
+      return;
+    }
+    const prev = toApprove[prevIdx]!;
+    if (!p.noPrice && prev.noPrice) {
+      winnerIdxByEan.set(p.ean, i); // real price beats an existing marker
+    } else if (p.noPrice === prev.noPrice) {
+      winnerIdxByEan.set(p.ean, i); // same kind → later entry wins
+    }
+    // else: prev is a real price and p is a marker → keep prev
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 3 — resolve/create the master product for every winning EAN BEFORE any
+  // write (Fix 3). An EAN no longer in the catalog throws here, so the approval
+  // aborts with zero snapshots/entries mutated.
+  // ---------------------------------------------------------------------------
+  const productIdByEan = new Map<string, string>();
+  for (const [ean] of winnerIdxByEan) {
+    const pid = await ensureMasterProductForEan(ean);
+    if (!pid) throw new InStoreError('not_found', `EAN ${ean} is not in the catalog`);
+    productIdByEan.set(ean, pid);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 4 — writes. supabase-js has no client-side transaction, so this is not
+  // a single atomic commit; instead all failure-prone work (validation + product
+  // resolution) already ran above, and every write here is idempotent + driven
+  // off review_status='pending'. So a transient mid-loop failure leaves the visit
+  // still 'pending' and re-running approve safely resumes.
+  // ---------------------------------------------------------------------------
+  for (const r of toReject) {
     const upd = await db
       .from('instore_price_entries')
       .update({
-        price,
-        no_price: noPrice,
-        promo_price: wholesalePrice,
-        promo_min_units: wholesaleMinUnits,
-        promo_text: wholesalePromoText(wholesalePrice, wholesaleMinUnits),
-        note,
+        review_status: 'rejected',
+        reviewed_at: nowIso,
+        reviewed_by: input.reviewedBy,
+        note: r.note,
+      })
+      .eq('id', r.entry.id);
+    if (upd.error) throw upd.error;
+    result.rejected++;
+  }
+
+  // Materialize exactly one snapshot per winning EAN (conflict-aware; see
+  // materializeInStoreEntry).
+  const matByEan = new Map<string, MaterializeResult>();
+  for (const [ean, idx] of winnerIdxByEan) {
+    const p = toApprove[idx]!;
+    const mat = await materializeInStoreEntry({
+      supermarketId: visit.supermarket_id,
+      ean,
+      productId: productIdByEan.get(ean),
+      price: p.price,
+      wholesalePrice: p.wholesalePrice,
+      wholesaleMinUnits: p.wholesaleMinUnits,
+      noPrice: p.noPrice,
+      enteredBy: visit.entered_by,
+      note: p.note,
+      visitId,
+      location,
+      apiKeyId: p.entry.api_key_id,
+    });
+    matByEan.set(ean, mat);
+    result.snapshots++;
+  }
+
+  // Mark every approved entry (winners + deduped losers) approved, each linked to
+  // its EAN's published snapshot.
+  for (const p of toApprove) {
+    const mat = matByEan.get(p.ean)!;
+    const upd = await db
+      .from('instore_price_entries')
+      .update({
+        price: p.price,
+        no_price: p.noPrice,
+        promo_price: p.wholesalePrice,
+        promo_min_units: p.wholesaleMinUnits,
+        promo_text: wholesalePromoText(p.wholesalePrice, p.wholesaleMinUnits),
+        note: p.note,
         resulting_supermarket_product_id: mat.supermarketProductId,
         resulting_snapshot_id: mat.snapshotId,
         review_status: 'approved',
         reviewed_at: nowIso,
         reviewed_by: input.reviewedBy,
       })
-      .eq('id', entry.id);
+      .eq('id', p.entry.id);
     if (upd.error) throw upd.error;
-
     result.approved++;
-    result.snapshots++;
   }
 
   const visitUpd = await db

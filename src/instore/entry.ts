@@ -124,6 +124,15 @@ export async function assertInStoreSupermarket(supermarketId: string): Promise<v
  * Find-or-create the in-store mapping for (supermarket, product). Idempotent via
  * the synthetic external_id + UNIQUE(supermarket_id, external_id): repeated
  * visits reuse the mapping and just append new snapshots.
+ *
+ * ATOMIC (Fix 2): a single `ON CONFLICT DO NOTHING` upsert followed by a
+ * read-back, instead of check-then-insert. That removes the race where two
+ * visits approved near-simultaneously both see "no mapping" and both insert —
+ * one of which used to hit UNIQUE(supermarket_id, external_id) and throw. The
+ * external_id fully determines product_id (it's `instore-<productId>`), so an
+ * existing row already has the right product_id — hence DO NOTHING is correct
+ * and, by not updating columns, it preserves a mapping an operator may have
+ * paused (is_active=false).
  */
 export async function ensureInStoreMapping(
   supermarketId: string,
@@ -131,29 +140,29 @@ export async function ensureInStoreMapping(
 ): Promise<string> {
   const externalId = inStoreExternalId(productId);
 
-  const existing = await db
-    .from('supermarket_products')
-    .select('id')
-    .eq('supermarket_id', supermarketId)
-    .eq('external_id', externalId)
-    .maybeSingle();
-  if (existing.error) throw existing.error;
-  if (existing.data) return existing.data.id as string;
-
-  const inserted = await db
-    .from('supermarket_products')
-    .insert({
+  const up = await db.from('supermarket_products').upsert(
+    {
       supermarket_id: supermarketId,
       product_id: productId,
       external_id: externalId,
       external_url: null,
       is_active: true,
       metadata: { source: IN_STORE_SOURCE },
-    })
+    },
+    { onConflict: 'supermarket_id,external_id', ignoreDuplicates: true },
+  );
+  if (up.error) throw up.error;
+
+  // Read back the id — the row is guaranteed to exist now (we just inserted it
+  // or it already existed). Safe under concurrency: no unique-violation path.
+  const sel = await db
+    .from('supermarket_products')
     .select('id')
+    .eq('supermarket_id', supermarketId)
+    .eq('external_id', externalId)
     .single();
-  if (inserted.error) throw inserted.error;
-  return inserted.data.id as string;
+  if (sel.error) throw sel.error;
+  return sel.data.id as string;
 }
 
 interface SnapshotInput {
@@ -233,17 +242,27 @@ export async function writeSnapshot(
   return data.id as number;
 }
 
+/** The latest same-day run-less in-store snapshot for a mapping. */
+interface SameDaySnapshot {
+  id: number;
+  status: string;
+  /** null for a 'no_price' marker. */
+  price: number | null;
+}
+
 /**
- * Drop any run-less in-store snapshot for this mapping already dated today (an
- * earlier approval, or a legacy carry-forward re-emission), so an approved fresh
- * price is the single row for the day. Keeps the export clean (one row per
- * mapping/day). The 'instore-carry-forward' source is matched only to clean up
- * rows written before carry-forward was removed.
+ * Find this mapping's run-less in-store snapshots dated today (BA time): the full
+ * set of ids (so a real price can supersede them) plus the latest one's
+ * status/price (so the conflict policy can decide whether to overwrite it).
+ * The 'instore-carry-forward' source is matched only to clean up rows written
+ * before carry-forward was removed.
  */
-async function purgeSameDayInStoreSnapshots(supermarketProductId: string): Promise<void> {
+async function findSameDayInStoreSnapshots(
+  supermarketProductId: string,
+): Promise<{ ids: number[]; latest: SameDaySnapshot | null }> {
   const { data, error } = await db
     .from('price_snapshots')
-    .select('id, scraped_at, raw_data')
+    .select('id, scraped_at, status, price, raw_data')
     .eq('supermarket_product_id', supermarketProductId)
     .is('scrape_run_id', null)
     .order('id', { ascending: false })
@@ -251,22 +270,30 @@ async function purgeSameDayInStoreSnapshots(supermarketProductId: string): Promi
   if (error) throw error;
 
   const today = buenosAiresDate(new Date());
-  const toDelete = (data ?? [])
-    .filter((r) => {
-      const src = (r.raw_data as { source?: string } | null)?.source ?? '';
-      const isInStore = src === IN_STORE_SOURCE || src === 'instore-carry-forward';
-      return isInStore && buenosAiresDate(new Date(r.scraped_at as string)) === today;
-    })
-    .map((r) => r.id as number);
+  const sameDay = (data ?? []).filter((r) => {
+    const src = (r.raw_data as { source?: string } | null)?.source ?? '';
+    const isInStore = src === IN_STORE_SOURCE || src === 'instore-carry-forward';
+    return isInStore && buenosAiresDate(new Date(r.scraped_at as string)) === today;
+  });
 
-  if (toDelete.length === 0) return;
-  const { error: delErr } = await db.from('price_snapshots').delete().in('id', toDelete);
-  if (delErr) throw delErr;
+  const first = sameDay[0];
+  return {
+    ids: sameDay.map((r) => r.id as number),
+    latest: first
+      ? { id: first.id as number, status: first.status as string, price: first.price as number | null }
+      : null,
+  };
 }
 
 export interface MaterializeInput {
   supermarketId: string;
   ean: string;
+  /**
+   * Pre-resolved master product id. When omitted, materialize resolves/creates
+   * it from the catalog. The review flow resolves every EAN BEFORE any write
+   * (so a bad EAN aborts cleanly) and passes it here to avoid re-resolving.
+   */
+  productId?: string;
   /** null when noPrice is true. */
   price: number | null;
   wholesalePrice: number | null;
@@ -287,23 +314,59 @@ export interface MaterializeResult {
 
 /**
  * Turn an approved entry into a live price: resolve/create the master product,
- * ensure the mapping, drop any same-day in-store snapshot, and write the
- * run-less snapshot. Called from the review approval flow.
+ * ensure the mapping, then write (or deliberately NOT write) the run-less
+ * snapshot according to a conflict-aware policy. Called from the review flow.
+ *
+ * CONFLICT POLICY (Fix 1) — against the mapping's latest same-day in-store
+ * snapshot, so "sin precio" can never erase a real price:
+ *   - incoming real price → supersede any same-day in-store rows (an older real
+ *     price OR a no_price marker): delete them, write the new price.
+ *   - incoming no_price + an existing same-day snapshot (real OR marker) → keep
+ *     it, write nothing. Point the audit trail at that existing snapshot.
+ *   - incoming no_price + nothing today → write the marker.
+ * Net: a real price always wins over "sin precio"; a real price may replace an
+ * older real price; "sin precio" never overwrites anything already there today.
  */
 export async function materializeInStoreEntry(input: MaterializeInput): Promise<MaterializeResult> {
-  const productId = await ensureMasterProductForEan(input.ean);
+  const productId = input.productId ?? (await ensureMasterProductForEan(input.ean)) ?? undefined;
   if (!productId) {
     throw new InStoreError('not_found', `EAN ${input.ean} is not in the catalog`);
   }
   const spId = await ensureInStoreMapping(input.supermarketId, productId);
-  await purgeSameDayInStoreSnapshots(spId);
+  const existing = await findSameDayInStoreSnapshots(spId);
+
+  if (input.noPrice) {
+    // Never erase what's already there today; collapse repeated markers.
+    if (existing.latest) {
+      return { productId, supermarketProductId: spId, snapshotId: existing.latest.id };
+    }
+    const snapshotId = await writeSnapshot(
+      spId,
+      { price: null, wholesalePrice: null, wholesaleMinUnits: null, noPrice: true },
+      {
+        enteredBy: input.enteredBy,
+        ean: input.ean,
+        apiKeyId: input.apiKeyId,
+        note: input.note,
+        visitId: input.visitId,
+        location: input.location,
+      },
+    );
+    return { productId, supermarketProductId: spId, snapshotId };
+  }
+
+  // Real price → supersede any same-day in-store rows, then write.
+  if (existing.ids.length > 0) {
+    const { error } = await db.from('price_snapshots').delete().in('id', existing.ids);
+    if (error) throw error;
+  }
   const snapshotId = await writeSnapshot(
     spId,
     {
-      price: input.noPrice ? null : input.price,
+      price: input.price,
       wholesalePrice: input.wholesalePrice,
       wholesaleMinUnits: input.wholesaleMinUnits,
-      noPrice: input.noPrice,
+      noPrice: false,
     },
     {
       enteredBy: input.enteredBy,
