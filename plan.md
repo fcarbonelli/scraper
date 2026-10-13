@@ -910,7 +910,12 @@ Decisions locked in:
   collapse to one snapshot (real beats marker, else last wins). The mapping find-or-create is
   an atomic `ON CONFLICT DO NOTHING` upsert (no approve-time race), and `approveVisit` resolves
   every EAN before any write so a bad EAN aborts cleanly (supabase-js has no client tx; the
-  write loop is idempotent/resumable off `review_status='pending'`).
+  write loop is idempotent/resumable off `review_status='pending'`). Approval is **set-based**
+  (no per-entry round-trips): products resolve in parallel, snapshots materialize in bulk
+  (`materializeInStoreEntries`), and all entries flip to their final state in one upsert — so
+  latency no longer scales with the entry count. A back-office operator can also add a missed
+  product to a finished-but-pending visit via `POST /v1/in-store/review/visits/:id/entries`
+  (`addReviewEntry`; the field app only writes to open visits).
   Frontend contract: `docs/IN_STORE_PRICE_ENTRY.md`.
 
 ### Phase 7 — Bank & card promotions (IMPLEMENTED, Naranja X) — see `docs/BANK_PROMOS.md`

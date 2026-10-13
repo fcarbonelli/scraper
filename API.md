@@ -2272,6 +2272,33 @@ the thumbnail size for flyer photos stored in Supabase. Product images that
 live on a supermarket CDN cannot be resized here — `thumb_url` is that original
 URL.
 
+#### `POST /v1/in-store/review/visits/:id/entries`
+
+Add a product to a **finished, still-pending** visit while reviewing it (the
+operator noticed a missing item). The field app's `POST /v1/in-store/entries`
+only writes to **open** visits, so this is a separate back-office path. The row
+is created `review_status: "pending"` and inherits the visit's `supermarket_id`
+and `entered_by`; it materializes on approval like any other entry. Full-access.
+Body:
+
+```ts
+{
+  ean: string;                          // 8–14 digits, must be on the catalog
+  price?: number;                       // > 0; required unless no_price
+  wholesale_price?: number | null;
+  wholesale_min_units?: number | null;
+  no_price?: boolean;                   // exactly one of price / no_price
+  note?: string | null;
+}
+```
+
+→ `201` with the created row in the review-entry shape (`id`, `ean`,
+`product_id`, `product_name`, `brand`, `image_url`, `thumb_url`, `price`,
+`wholesale_price`, `wholesale_min_units`, `no_price`, `note`, `review_status`,
+`created_at`). Errors: `403 FORBIDDEN` (scoped key), `404 NOT_FOUND` (unknown
+visit or EAN not on the catalog), `409 CONFLICT` (visit not finished, or already
+approved), `400 INVALID_REQUEST` (bad body).
+
 #### `GET /v1/in-store/review/visits/:id/duplicate-eans`
 
 EANs already typed on **other** visits of the same PDV (same chain, same

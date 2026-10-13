@@ -36,7 +36,12 @@ import {
   resolveEan,
   type ResolvedProduct,
 } from '../../instore/resolve.js';
-import { recordInStoreEntry, updatePendingEntry, InStoreError } from '../../instore/entry.js';
+import {
+  addReviewEntry,
+  recordInStoreEntry,
+  updatePendingEntry,
+  InStoreError,
+} from '../../instore/entry.js';
 import { createVisit, finishVisit, getVisit, countVisit, type Visit, type VisitCounts } from '../../instore/visits.js';
 import { branchKey } from '../../instore/branch.js';
 import { DEFAULT_THUMB_WIDTH, thumbUrl } from '../../instore/thumbs.js';
@@ -59,6 +64,7 @@ export const inStoreRouter = Router();
 function toApiError(err: unknown): never {
   if (err instanceof InStoreError) {
     if (err.kind === 'not_found') throw new ApiError('NOT_FOUND', err.message);
+    if (err.kind === 'conflict') throw ApiError.conflict(err.message);
     throw ApiError.badRequest(err.message);
   }
   throw err;
@@ -983,6 +989,67 @@ inStoreRouter.get('/review/visits/:id', async (req: Request, res: Response) => {
     };
   }
   res.json(success(body));
+});
+
+// POST /v1/in-store/review/visits/:id/entries — add a product to a finished
+// visit while reviewing it (back-office). The field app only writes to OPEN
+// visits (POST /entries), so this dedicated path accepts a finished-but-pending
+// visit and inserts a PENDING entry that materializes on approval. Full-access.
+const ReviewEntryBody = z
+  .object({
+    ean: z.string().trim().regex(/^\d{8,14}$/, 'EAN must be 8–14 digits'),
+    // Precio Regular (unitario). Omit when no_price=true.
+    price: z.number().positive().optional(),
+    // Precio con oferta (precio mayorista)
+    wholesale_price: z.number().positive().nullable().optional(),
+    // A partir de cuántas unidades es precio mayorista
+    wholesale_min_units: z.number().int().positive().nullable().optional(),
+    // "Sin precio / hay stock": product seen but price unreadable.
+    no_price: z.boolean().optional(),
+    // Observaciones
+    note: z.string().trim().max(1000).nullable().optional(),
+  })
+  .refine((b) => (b.no_price === true) !== (b.price !== undefined), {
+    message: 'Provide a price, or set no_price=true (not both)',
+  });
+
+inStoreRouter.post('/review/visits/:id/entries', async (req: Request, res: Response) => {
+  requireFullAccess(req);
+  const id = req.params.id as string;
+  const body = parseBody(req, ReviewEntryBody);
+  try {
+    const result = await addReviewEntry(id, {
+      ean: body.ean,
+      price: body.price ?? null,
+      wholesalePrice: body.wholesale_price ?? null,
+      wholesaleMinUnits: body.wholesale_min_units ?? null,
+      noPrice: body.no_price ?? false,
+      note: body.note ?? null,
+      apiKeyId: req.apiKey?.id ?? null,
+    });
+    // Mirror the GET /review/visits/:id entry shape so the frontend can slot the
+    // created row straight into the list (it refetches anyway).
+    res.status(201).json(
+      success({
+        id: result.entryId,
+        ean: result.ean,
+        product_id: result.productId,
+        product_name: result.productName,
+        brand: result.brand,
+        image_url: result.imageUrl,
+        thumb_url: thumbUrl(result.imageUrl),
+        price: result.price,
+        wholesale_price: result.wholesalePrice,
+        wholesale_min_units: result.wholesaleMinUnits,
+        no_price: result.noPrice,
+        note: result.note,
+        review_status: result.reviewStatus,
+        created_at: result.createdAt,
+      }),
+    );
+  } catch (err) {
+    toApiError(err);
+  }
 });
 
 // GET /v1/in-store/review/visits/:id/duplicate-eans

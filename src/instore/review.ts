@@ -15,9 +15,8 @@ import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import {
   InStoreError,
-  materializeInStoreEntry,
+  materializeInStoreEntries,
   wholesalePromoText,
-  type MaterializeResult,
   type VisitLocation,
 } from './entry.js';
 import { ensureMasterProductForEan } from './resolve.js';
@@ -70,6 +69,7 @@ interface PendingEntryRow {
   promo_price: number | null;
   promo_min_units: number | null;
   note: string | null;
+  entered_by: string;
   api_key_id: string | null;
 }
 
@@ -102,7 +102,7 @@ export async function approveVisit(
   // created_at order makes "last wins" deterministic for duplicate EANs (Fix 4).
   const entriesRes = await db
     .from('instore_price_entries')
-    .select('id, ean, price, no_price, promo_price, promo_min_units, note, api_key_id')
+    .select('id, ean, price, no_price, promo_price, promo_min_units, note, entered_by, api_key_id')
     .eq('visit_id', visitId)
     .eq('review_status', 'pending')
     .order('created_at', { ascending: true });
@@ -198,66 +198,69 @@ export async function approveVisit(
   // ---------------------------------------------------------------------------
   // Phase 3 — resolve/create the master product for every winning EAN BEFORE any
   // write (Fix 3). An EAN no longer in the catalog throws here, so the approval
-  // aborts with zero snapshots/entries mutated.
+  // aborts with zero snapshots/entries mutated. Resolved in PARALLEL — these are
+  // independent catalog look-ups, so a visit with many new EANs no longer pays N
+  // sequential round-trips.
   // ---------------------------------------------------------------------------
+  const winningEans = [...winnerIdxByEan.keys()];
+  const resolvedPids = await Promise.all(
+    winningEans.map((ean) => ensureMasterProductForEan(ean)),
+  );
   const productIdByEan = new Map<string, string>();
-  for (const [ean] of winnerIdxByEan) {
-    const pid = await ensureMasterProductForEan(ean);
+  winningEans.forEach((ean, i) => {
+    const pid = resolvedPids[i];
     if (!pid) throw new InStoreError('not_found', `EAN ${ean} is not in the catalog`);
     productIdByEan.set(ean, pid);
-  }
+  });
 
   // ---------------------------------------------------------------------------
   // Phase 4 — writes. supabase-js has no client-side transaction, so this is not
   // a single atomic commit; instead all failure-prone work (validation + product
   // resolution) already ran above, and every write here is idempotent + driven
-  // off review_status='pending'. So a transient mid-loop failure leaves the visit
+  // off review_status='pending'. So a transient mid-step failure leaves the visit
   // still 'pending' and re-running approve safely resumes.
+  //
+  // Writes are SET-BASED (one round-trip each) instead of per-entry loops, so
+  // approval latency no longer scales with the entry count:
+  //   1. materialize all winning snapshots in bulk (materializeInStoreEntries)
+  //   2. one upsert that flips every entry (approved + rejected) to its final
+  //      state, each approved entry linked to its EAN's published snapshot.
   // ---------------------------------------------------------------------------
-  for (const r of toReject) {
-    const upd = await db
-      .from('instore_price_entries')
-      .update({
-        review_status: 'rejected',
-        reviewed_at: nowIso,
-        reviewed_by: input.reviewedBy,
-        note: r.note,
-      })
-      .eq('id', r.entry.id);
-    if (upd.error) throw upd.error;
-    result.rejected++;
-  }
 
   // Materialize exactly one snapshot per winning EAN (conflict-aware; see
-  // materializeInStoreEntry).
-  const matByEan = new Map<string, MaterializeResult>();
-  for (const [ean, idx] of winnerIdxByEan) {
-    const p = toApprove[idx]!;
-    const mat = await materializeInStoreEntry({
-      supermarketId: visit.supermarket_id,
-      ean,
-      productId: productIdByEan.get(ean),
-      price: p.price,
-      wholesalePrice: p.wholesalePrice,
-      wholesaleMinUnits: p.wholesaleMinUnits,
-      noPrice: p.noPrice,
-      enteredBy: visit.entered_by,
-      note: p.note,
-      visitId,
-      location,
-      apiKeyId: p.entry.api_key_id,
-    });
-    matByEan.set(ean, mat);
-    result.snapshots++;
-  }
+  // materializeInStoreEntries).
+  const matByEan = await materializeInStoreEntries(
+    [...winnerIdxByEan].map(([ean, idx]) => {
+      const p = toApprove[idx]!;
+      return {
+        supermarketId: visit.supermarket_id,
+        ean,
+        productId: productIdByEan.get(ean),
+        price: p.price,
+        wholesalePrice: p.wholesalePrice,
+        wholesaleMinUnits: p.wholesaleMinUnits,
+        noPrice: p.noPrice,
+        enteredBy: visit.entered_by,
+        note: p.note,
+        visitId,
+        location,
+        apiKeyId: p.entry.api_key_id,
+      };
+    }),
+  );
+  result.snapshots = matByEan.size;
 
-  // Mark every approved entry (winners + deduped losers) approved, each linked to
-  // its EAN's published snapshot.
-  for (const p of toApprove) {
-    const mat = matByEan.get(p.ean)!;
-    const upd = await db
-      .from('instore_price_entries')
-      .update({
+  // Build one uniform upsert row per entry (approved winners + deduped losers +
+  // rejects). A uniform column set is required for a bulk upsert, so rejected
+  // entries carry their existing price/promo values unchanged and null results.
+  const entryRows = [
+    ...toApprove.map((p) => {
+      const mat = matByEan.get(p.ean)!;
+      return {
+        id: p.entry.id,
+        supermarket_id: visit.supermarket_id,
+        ean: p.ean,
+        entered_by: p.entry.entered_by,
         price: p.price,
         no_price: p.noPrice,
         promo_price: p.wholesalePrice,
@@ -269,11 +272,35 @@ export async function approveVisit(
         review_status: 'approved',
         reviewed_at: nowIso,
         reviewed_by: input.reviewedBy,
-      })
-      .eq('id', p.entry.id);
-    if (upd.error) throw upd.error;
-    result.approved++;
+      };
+    }),
+    ...toReject.map((r) => ({
+      id: r.entry.id,
+      supermarket_id: visit.supermarket_id,
+      ean: r.entry.ean,
+      entered_by: r.entry.entered_by,
+      price: r.entry.price,
+      no_price: r.entry.no_price,
+      promo_price: r.entry.promo_price,
+      promo_min_units: r.entry.promo_min_units,
+      promo_text: wholesalePromoText(r.entry.promo_price, r.entry.promo_min_units),
+      note: r.note,
+      resulting_supermarket_product_id: null,
+      resulting_snapshot_id: null,
+      review_status: 'rejected',
+      reviewed_at: nowIso,
+      reviewed_by: input.reviewedBy,
+    })),
+  ];
+
+  if (entryRows.length > 0) {
+    const entryUpd = await db
+      .from('instore_price_entries')
+      .upsert(entryRows, { onConflict: 'id' });
+    if (entryUpd.error) throw entryUpd.error;
   }
+  result.approved = toApprove.length;
+  result.rejected = toReject.length;
 
   const visitUpd = await db
     .from('instore_visits')

@@ -445,6 +445,12 @@ Flow:
    (omit both to get every entry). Entries with `no_price: true` show a
    `Sin precio` chip. `GET /v1/in-store/review/visits/:id/duplicate-eans` returns
    only the EANs of other sessions at the same PDV.
+   To **add a product the worker missed**, `POST /v1/in-store/review/visits/:id/entries`
+   with `{ ean, price? , wholesale_price?, wholesale_min_units?, no_price?, note? }`
+   (same body as the field app's entry, minus visit/worker — those are inherited).
+   It creates a pending entry on the finished visit; returns `201` with the new
+   row in the entry shape above. `409` if the visit isn't finished-and-pending,
+   `404` if the EAN isn't on the catalog. The screen just refetches the visit.
 3. **Precios desviados** — `GET /v1/in-store/review/price-outliers?date=`
    always scores **one** Buenos Aires day (default today). `window` (default 90)
    is the baseline history for those EANs, not a wider entry list.
