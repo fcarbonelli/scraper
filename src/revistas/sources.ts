@@ -177,10 +177,16 @@ async function discoverPubhtml5Url(offersUrl: string, fallback?: string): Promis
     const html = await (
       await fetchRetry(offersUrl, { headers: { 'User-Agent': UA } }, offersUrl)
     ).text();
-    const m = html.match(/https?:\/\/[a-z0-9-]*\.?pubhtml5\.com\/[a-z0-9]+\/[a-z0-9]+\/?/i);
-    if (m) {
-      const url = m[0].endsWith('/') ? m[0] : `${m[0]}/`;
-      logger.info({ offersUrl, url }, 'revista: discovered PubHTML5 book');
+    const found = [
+      ...html.matchAll(/https?:\/\/[a-z0-9-]*\.?pubhtml5\.com\/[a-z0-9]+\/[a-z0-9]+\/?/gi),
+    ].map((m) => (m[0].endsWith('/') ? m[0] : `${m[0]}/`));
+    if (found.length > 0) {
+      // Rosental's home can carry several flipbooks (since 2026-10 a 4-page
+      // "CAJAS NAVIDEÑAS" sits first). Taking the first one superseded the
+      // real quincena, so prefer the configured book whenever the page links it.
+      const norm = (u: string) => u.toLowerCase().replace(/^https?:\/\//, '');
+      const url = (fallback && found.find((u) => norm(u) === norm(fallback))) || found[0]!;
+      logger.info({ offersUrl, url, candidates: [...new Set(found)] }, 'revista: discovered PubHTML5 book');
       return url;
     }
     logger.warn({ offersUrl }, 'revista: no PubHTML5 flipbook found on page');

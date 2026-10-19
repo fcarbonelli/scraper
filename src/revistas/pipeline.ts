@@ -175,7 +175,7 @@ async function processCandidate(
     // 5. Persist the FULL analysis (every extracted product + why it did/didn't
     //    match) and all page-image URLs, so the debug/analyze view can show what
     //    the AI actually saw. This is the key diagnostic for "0 matched".
-    await db
+    const { error: metaErr } = await db
       .from('revista_magazines')
       .update({
         metadata: {
@@ -209,6 +209,9 @@ async function processCandidate(
         },
       })
       .eq('id', magazineId);
+    // Non-fatal: the review items already carry their page images. Rosental's
+    // 09-21 and 10-19 issues lost this silently (unchecked), so at least log it.
+    if (metaErr) log.warn({ err: metaErr }, 'revista: saving magazine metadata failed');
 
     await setMagazineStatus(magazineId, 'in_review');
 
