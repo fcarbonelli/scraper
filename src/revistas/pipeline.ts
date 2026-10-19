@@ -26,6 +26,7 @@ import { extractProductsFromPage, type ExtractedProduct } from './extract.js';
 import { loadCatalog } from './catalog.js';
 import { buildCatalogIndex, matchItems } from './match.js';
 import { mapPool, withTimeout } from './pool.js';
+import { withRetry } from './retry.js';
 import { recordRevistaCheck } from './checkLog.js';
 import { uploadPageImage } from './storage.js';
 import {
@@ -175,43 +176,41 @@ async function processCandidate(
     // 5. Persist the FULL analysis (every extracted product + why it did/didn't
     //    match) and all page-image URLs, so the debug/analyze view can show what
     //    the AI actually saw. This is the key diagnostic for "0 matched".
-    const { error: metaErr } = await db
-      .from('revista_magazines')
-      .update({
-        metadata: {
-          matched: matched.length,
-          total: results.length,
-          page_images: [...pageUrls.entries()]
-            .map(([page, url]) => ({ page, url }))
-            .sort((a, b) => a.page - b.page),
-          analysis: results.map((r) => ({
-            page: r.page,
-            extracted: {
-              name: r.item.name,
-              brand: r.item.brand,
-              ean: r.item.ean,
-              price: r.item.price,
-              promo_price: r.item.promo_price,
-              promo_text: r.item.promo_text,
-              quantity: r.item.quantity,
-            },
-            matched: Boolean(r.matched),
-            method: r.method,
-            confidence: r.confidence,
-            reason: r.reason,
-            matched_ean: r.matched?.ean ?? r.matched?.id ?? null,
-            top_candidates: r.candidates.slice(0, 3).map((c) => ({
-              ean: c.ean ?? c.id,
-              name: c.name,
-              brand: c.brand ?? null,
-            })),
-          })),
-        },
-      })
-      .eq('id', magazineId);
-    // Non-fatal: the review items already carry their page images. Rosental's
-    // 09-21 and 10-19 issues lost this silently (unchecked), so at least log it.
-    if (metaErr) log.warn({ err: metaErr }, 'revista: saving magazine metadata failed');
+    //    Two writes on purpose: Rosental's 2026-09-21 and 2026-10-19 issues lost
+    //    BOTH in one unchecked update (all pages were in Storage, metadata stayed
+    //    {}), so the small page list goes first and a rejected multi-MB analysis
+    //    can no longer take it down. Neither is fatal: items carry their own image.
+    const baseMeta = {
+      matched: matched.length,
+      total: results.length,
+      page_images: [...pageUrls.entries()]
+        .map(([page, url]) => ({ page, url }))
+        .sort((a, b) => a.page - b.page),
+    };
+    const analysis = results.map((r) => ({
+      page: r.page,
+      extracted: {
+        name: r.item.name,
+        brand: r.item.brand,
+        ean: r.item.ean,
+        price: r.item.price,
+        promo_price: r.item.promo_price,
+        promo_text: r.item.promo_text,
+        quantity: r.item.quantity,
+      },
+      matched: Boolean(r.matched),
+      method: r.method,
+      confidence: r.confidence,
+      reason: r.reason,
+      matched_ean: r.matched?.ean ?? r.matched?.id ?? null,
+      top_candidates: r.candidates.slice(0, 3).map((c) => ({
+        ean: c.ean ?? c.id,
+        name: c.name,
+        brand: c.brand ?? null,
+      })),
+    }));
+    await saveMagazineMetadata(magazineId, baseMeta, log, 'page images');
+    await saveMagazineMetadata(magazineId, { ...baseMeta, analysis }, log, 'analysis');
 
     await setMagazineStatus(magazineId, 'in_review');
 
@@ -300,6 +299,42 @@ async function mapPages(
       return { page, products: [] as ExtractedProduct[] };
     }
   });
+}
+
+/**
+ * Write `revista_magazines.metadata`, retrying transient failures. Logs instead
+ * of throwing: the review queue is already persisted, and losing the debug view
+ * must not leave the magazine stuck in `processing`. The log carries the
+ * PostgREST error fields + payload size, which the old unchecked write never did.
+ */
+async function saveMagazineMetadata(
+  magazineId: string,
+  metadata: Record<string, unknown>,
+  log: Logger,
+  what: string,
+): Promise<void> {
+  try {
+    await withRetry(
+      async () => {
+        const { error } = await db.from('revista_magazines').update({ metadata }).eq('id', magazineId);
+        if (error) throw error;
+      },
+      { label: `metadata ${what}`, retries: 2 },
+    );
+  } catch (err) {
+    const e = err as { code?: string; message?: string; details?: string; hint?: string };
+    log.warn(
+      {
+        what,
+        code: e.code,
+        message: e.message,
+        details: e.details,
+        hint: e.hint,
+        bytes: Buffer.byteLength(JSON.stringify(metadata)),
+      },
+      'revista: saving magazine metadata failed',
+    );
+  }
 }
 
 /** Upload EVERY page image so the review/analyze UI can show the full magazine. */
