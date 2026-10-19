@@ -1,0 +1,28 @@
+[
+  {
+    "id": 259154,
+    "price": 4399,
+    "list_price": null,
+    "offer_price_1": null,
+    "promotion_1": "OFERTA",
+    "promotions": [
+      {
+        "type": "unknown",
+        "description": "OFERTA"
+      }
+    ]
+  },
+  {
+    "id": 259309,
+    "price": 5290,
+    "list_price": null,
+    "offer_price_1": null,
+    "promotion_1": "F",
+    "promotions": [
+      {
+        "type": "unknown",
+        "description": "F"
+      }
+    ]
+  }
+]
