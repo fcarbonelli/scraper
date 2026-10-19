@@ -56,6 +56,7 @@ import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
 import { previewRevistaChains } from '../../revistas/preview.js';
+import { listMagazinePageImages } from '../../revistas/storage.js';
 import type { IngestOutcome } from '../../revistas/pipeline.js';
 import { getRevistaIngestQueue, type RevistaIngestJobData } from '../../shared/queue.js';
 
@@ -1253,10 +1254,14 @@ revistasRouter.get('/:magazineId/analysis', async (req: Request, res: Response) 
 
   const m = data as MagazineRow;
   const meta = (data.metadata ?? {}) as MagazineMetadata;
+  // The page list lives in metadata, which the pipeline can fail to write while
+  // every page is already in Storage (Rosental 09-21 / 10-19 showed no pages).
+  // Rebuild it from Storage rather than show an empty flyer.
+  const pageImages = meta.page_images?.length ? meta.page_images : await listMagazinePageImages(m.id);
   res.json(
     success({
       magazine: magazineResponse(m, await supermarketName(m.supermarket_id), await countsFor(m.id)),
-      page_images: meta.page_images ?? [],
+      page_images: pageImages,
       extracted_total: meta.total ?? 0,
       matched_total: meta.matched ?? 0,
       analysis: meta.analysis ?? [],

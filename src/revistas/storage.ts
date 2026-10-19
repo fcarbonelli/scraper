@@ -8,6 +8,7 @@ import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
 import { revistaConfig } from './config.js';
 import { detectImage } from './image.js';
+import { withRetry } from './retry.js';
 
 let bucketReady = false;
 
@@ -35,14 +36,64 @@ export async function uploadPageImage(
   const { ext, mime } = detectImage(image);
   const path = `${magazineId}/page-${String(pageNumber).padStart(3, '0')}.${ext}`;
 
-  const { error } = await db.storage
-    .from(revistaConfig.storageBucket)
-    .upload(path, image, { contentType: mime, upsert: true });
-  if (error) {
-    logger.warn({ err: error, path }, 'revista: page image upload failed');
+  // Storage throws transient 520s mid-run (2026-10-19 lost page 28 of a
+  // 166-page Rosental issue to one); StorageApiError carries `status`, so
+  // withRetry retries 5xx and gives up on real 4xx.
+  try {
+    await withRetry(
+      async () => {
+        const { error } = await db.storage
+          .from(revistaConfig.storageBucket)
+          .upload(path, image, { contentType: mime, upsert: true });
+        if (error) throw error;
+      },
+      { label: `upload ${path}` },
+    );
+  } catch (err) {
+    logger.warn({ err, path }, 'revista: page image upload failed');
     return null;
   }
   return db.storage.from(revistaConfig.storageBucket).getPublicUrl(path).data.publicUrl;
+}
+
+/**
+ * Every file stored under a magazine's folder. Storage `list()` returns 100
+ * entries by DEFAULT (that silently truncated a 144-page delete on 2026-08-05),
+ * so page until a short batch comes back. Returns null when Storage errors.
+ */
+async function listMagazineFiles(magazineId: string): Promise<string[] | null> {
+  const PAGE = 1000;
+  const names: string[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await db.storage
+      .from(revistaConfig.storageBucket)
+      .list(magazineId, { limit: PAGE, offset });
+    if (error) {
+      logger.warn({ err: error, magazineId }, 'revista: list page images failed');
+      return null;
+    }
+    const batch = data ?? [];
+    for (const f of batch) names.push(f.name);
+    if (batch.length < PAGE) break;
+  }
+  return names;
+}
+
+/**
+ * Page-image URLs rebuilt from what is actually in Storage, sorted by page.
+ * The fallback for magazines whose `metadata.page_images` never got written
+ * (Rosental 2026-09-21 and 2026-10-19: all pages uploaded, metadata empty).
+ */
+export async function listMagazinePageImages(
+  magazineId: string,
+): Promise<Array<{ page: number; url: string }>> {
+  const names = (await listMagazineFiles(magazineId)) ?? [];
+  const bucket = db.storage.from(revistaConfig.storageBucket);
+  return names
+    .map((name) => ({ name, page: Number(name.match(/^page-(\d+)\./)?.[1]) }))
+    .filter((f) => Number.isInteger(f.page) && f.page > 0)
+    .sort((a, b) => a.page - b.page)
+    .map((f) => ({ page: f.page, url: bucket.getPublicUrl(`${magazineId}/${f.name}`).data.publicUrl }));
 }
 
 /**
@@ -55,23 +106,9 @@ export async function deleteMagazineImages(magazineId: string): Promise<number> 
   await ensureBucket();
   const bucket = revistaConfig.storageBucket;
 
-  // Storage `list()` returns 100 entries by DEFAULT. Deleting a 144-page
-  // Rosental quincena on 2026-08-05 removed exactly 100 files and silently left
-  // 44 behind, so anything over 100 pages has been leaking since this existed.
-  // Page until a short batch comes back.
-  const PAGE = 1000;
-  const paths: string[] = [];
-  for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await db.storage.from(bucket).list(magazineId, { limit: PAGE, offset });
-    if (error) {
-      logger.warn({ err: error, magazineId }, 'revista: list page images failed (continuing)');
-      return 0;
-    }
-    const batch = data ?? [];
-    for (const f of batch) paths.push(`${magazineId}/${f.name}`);
-    if (batch.length < PAGE) break;
-  }
-  if (paths.length === 0) return 0;
+  const names = await listMagazineFiles(magazineId);
+  if (!names || names.length === 0) return 0;
+  const paths = names.map((n) => `${magazineId}/${n}`);
 
   // `remove()` takes a list; keep the request bounded for very long magazines.
   let removed = 0;
