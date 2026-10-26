@@ -90,6 +90,18 @@ const EnvSchema = z.object({
   // See src/adapters/maxi-carrefour-auth.ts for the full lifecycle.
   MAXI_CARREFOUR_PHPSESSID: z.string().optional().default(''),
 
+  // Maxi Carrefour session keepalive. The PHPSESSID is seeded from a
+  // residential IP but PHP reaps idle sessions in ~24 min, so the orchestrator
+  // "touches" every seeded session on this cron to keep it warm (plain fetch,
+  // no reCAPTCHA — runs fine on EC2). Without this the seed dies overnight and
+  // the next daily scrape fails with auth_required. Default: every 10 minutes.
+  // Enabled by default so deploying the code turns it on with no env change.
+  MAXI_KEEPALIVE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  MAXI_KEEPALIVE_CRON: z.string().default('*/10 * * * *'),
+
   // MercadoLibre official API (OAuth). The Client ID / Secret come from the
   // app registered in the ML DevCenter; the redirect URI must match exactly
   // what's registered there. The access/refresh tokens themselves are NOT env

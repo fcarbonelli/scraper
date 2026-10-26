@@ -27,6 +27,7 @@ import { runDailyScrape } from './enqueue.js';
 import { finalizePendingRuns } from './finalize.js';
 import { emitPhantomMarkers } from './phantomMarkers.js';
 import { runRevistaCheck } from '../revistas/pipeline.js';
+import { runMaxiKeepalive } from '../adapters/maxi-carrefour-keepalive.js';
 import { runPromoCheck } from '../promos/pipeline.js';
 import { promosConfig } from '../promos/config.js';
 import { checkRevistaConfigHealth, checkStuckMagazines } from '../revistas/health.js';
@@ -168,6 +169,22 @@ async function runPhantomMarkersWithErrorHandling(): Promise<void> {
   }
 }
 
+/**
+ * Keep every seeded Maxi Carrefour PHPSESSID warm. PHP reaps idle sessions in
+ * ~24 min, so without this periodic touch the residential-IP seed dies before
+ * the once-a-day scrape runs and the adapter fails with auth_required. Plain
+ * fetch (no reCAPTCHA), so it runs fine from EC2. Isolated so a failure here
+ * never affects the scrape.
+ */
+async function runMaxiKeepaliveWithErrorHandling(): Promise<void> {
+  try {
+    await runMaxiKeepalive(logger);
+  } catch (err) {
+    logger.error({ err }, 'maxi-carrefour keepalive failed');
+    captureError(err, { phase: 'maxi-keepalive' });
+  }
+}
+
 async function runFinalizerWithErrorHandling(): Promise<void> {
   try {
     const finalized = await finalizePendingRuns();
@@ -240,6 +257,10 @@ async function main(): Promise<void> {
     logger.fatal({ cron: promosConfig.cron }, 'invalid PROMOS_CRON expression');
     process.exit(1);
   }
+  if (env.MAXI_KEEPALIVE_ENABLED && !cron.validate(env.MAXI_KEEPALIVE_CRON)) {
+    logger.fatal({ cron: env.MAXI_KEEPALIVE_CRON }, 'invalid MAXI_KEEPALIVE_CRON expression');
+    process.exit(1);
+  }
 
   logger.info(
     {
@@ -247,9 +268,10 @@ async function main(): Promise<void> {
       sweepCron: env.SWEEP_CRON,
       promosCron: promosConfig.cron,
       promosEnabled: promosConfig.enabled,
+      maxiKeepaliveCron: env.MAXI_KEEPALIVE_ENABLED ? env.MAXI_KEEPALIVE_CRON : 'disabled',
       tz: env.TZ,
     },
-    'orchestrator: scheduling daily scrape + weekly sweep + weekly promos',
+    'orchestrator: scheduling daily scrape + weekly sweep + weekly promos + maxi keepalive',
   );
 
   // 1. Daily scrape cron.
@@ -277,6 +299,17 @@ async function main(): Promise<void> {
   cron.schedule(promosConfig.cron, () => void runPromoCheckWithErrorHandling(), {
     timezone: env.TZ,
   });
+
+  // 1d. Maxi Carrefour session keepalive cron. Touches every seeded PHPSESSID
+  // frequently so PHP doesn't reap it between daily scrapes. Run once at
+  // startup too, so a fresh deploy warms the sessions immediately instead of
+  // waiting for the first cron tick.
+  if (env.MAXI_KEEPALIVE_ENABLED) {
+    void runMaxiKeepaliveWithErrorHandling();
+    cron.schedule(env.MAXI_KEEPALIVE_CRON, () => void runMaxiKeepaliveWithErrorHandling(), {
+      timezone: env.TZ,
+    });
+  }
 
   // 2. Finalizer interval — also run once at startup to catch any stuck runs
   // from a previous process that died mid-run.
