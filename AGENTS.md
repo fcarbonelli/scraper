@@ -8,13 +8,16 @@ A Node/TypeScript backend service that scrapes 100+ products across 30+ supermar
 
 ## Read these first
 
-- `**plan.md**` — canonical design doc (architecture, full DB schema, all key decisions, phase plan). If anything in this file conflicts with `plan.md`, `plan.md` wins; update it.
+- `**README.md**` — human entry point. Start here if you inherited the repo.
+- `**docs/COMO_FUNCIONA.md**` — how the system actually runs today (daily timeline, the three price sources, the publish gate, which older docs lag the code).
+- `**docs/CADENAS.md**` — one operational card per supermarket (stack, where the price comes from, failure modes we already hit, env/config). Open this when a chain breaks. Update the card in the same change if you change that adapter's behavior.
+- `**plan.md**` — canonical design doc (architecture, full DB schema, all key decisions, phase plan). If anything in this file conflicts with `plan.md`, `plan.md` wins; update it. The phase checklist in §10 lags production; `docs/COMO_FUNCIONA.md` is the current-behavior summary.
 - `**API.md**` — external-facing REST API reference (auth, endpoints, TypeScript types, response shapes, UI workflows). The source of truth for API consumers (frontend, partners). Keep it in sync when changing routes.
 - `**examples/api/**` — JSON response fixtures matching the API envelope exactly. Used for frontend dev before deploy and as test data. Update any time a route's response shape changes.
 - `**DEPLOY.md**` — step-by-step deployment guide (AWS setup, server bootstrap, first deploy, GitHub Actions, troubleshooting). Read when working on infra; keep in sync when changing the deploy flow.
 - `**docs/ADDING_SUPERMARKETS.md**` — hands-on playbook for mapping a new supermarket: the VTEX factory, verification commands, the preview-vs-go-live distinction, and the gotchas (Cencosud WAF, `listPrice` sentinel). Read this before adding a store.
 - `**docs/REVISTA_CHECK_BUTTON.md**` — spec del boton "que folletos faltan" (`POST /v1/revistas/check`): descubrimiento en vivo, read-only y sin costo de IA, que dice que haria el chequeo diario si corriera ahora. Lee esto junto con REVISTA_REVIEW.md.
-- `**docs/REVISTA_REVIEW.md**` — design + frontend contract for the **magazine (revista) review** path (IMPLEMENTED): AI reads promo PDFs/flipbooks for chains that don't publish prices on the web (Makro, Vital, Rosental, Maxicomodín), matches them against the catalog, and an operator approves/rejects in a modal inside the Daily Review screen. Backend lives in `src/revistas/` (orchestrator runs the daily check; `/v1/revistas/*` serves the review UI). Read before touching the revista pipeline.
+- `**docs/REVISTA_REVIEW.md**` — design + frontend contract for the **magazine (revista) review** path (IMPLEMENTED): AI reads promo PDFs/flipbooks for chains that don't publish prices on the web (Makro, Vital, Rosental; Maxicomodín is seeded but deactivated — see `docs/CADENAS.md`), matches them against the catalog, and an operator approves/rejects in a modal inside the Daily Review screen. Backend lives in `src/revistas/` (orchestrator runs the daily check; `/v1/revistas/*` serves the review UI). Read before touching the revista pipeline.
 - `**docs/IN_STORE_PRICE_ENTRY.md**` — design + frontend contract for the **in-store manual price entry** path (IMPLEMENTED): a mobile web tool where a field worker starts a **visit** at a store branch (location), scans barcodes and types four fields (regular unit price, wholesale price, wholesale min-units, observations), uploads flyer photos, and finishes the visit to save & leave. Submissions are PENDING until a back-office operator approves each finished visit (daily review gate, mig 019) which materializes run-less snapshots dated the approval day only (prices publish on the day they're approved — there is no carry-forward). A worker who sees a product but can't read its price flags it **"sin precio / hay stock"** (`no_price`, mig 024) instead of typing a fake $1/$0 — it publishes as a marker snapshot (`status='no_price'`, price NULL → `Estado='En stock sin precio'`). Backend lives in `src/instore/` (`/v1/in-store/*` serves the tool; `/v1/in-store/review/*` the back-office review). Read before touching the in-store pipeline.
 - `**docs/BANK_PROMOS.md**` — design + build doc (**IMPLEMENTED** — 8 providers: Naranja X, **MODO**, **BBVA**, **Galicia**, **Macro**, **Santander**, **ICBC**, **Cuenta DNI**) for a **new isolated module** that scrapes **bank / credit-card promotions** weekly into its own tables (`promo_providers`, `promotions`, `promotion_snapshots`, migrations 029→035) and serves a **separate dashboard** under `/v1/promos/*`, gated by a new `promos` API-key scope **plus an explicit route guard** so the existing supermarket (full-access) client can't see it. Providers: **Naranja X** (direct public-JSON, paged `POST /binder/filter`); **MODO** — the aggregator hub whose public JSON API (`GET /promos/api/rewards/slots?source=hub`) yields **~26k promos across 82 banks** in one adapter, each attributed to its bank via the **`issuer`** column (mig 031); **BBVA** — the public **Go** JSON API (`GET go.bbva.com.ar/willgo/fgo/API/v3/communications?pager=N`, ~900 card promos, issuer='BBVA', mig 032); **Galicia/Macro/Santander** (mig 033) + **ICBC** (mig 034) — big issuers whose public JSON promo catalogs sit behind an **F5 BIG-IP WAF (JA3 TLS fingerprinting)** and/or a client token, so their adapters use a shared **browser-fetch helper** (`src/promos/browserFetch.ts`): a real Chromium loads the bank SPA and the API is called **in-page** (real Chrome JA3 + CORS; Macro's `apikey`, ICBC's `apikey`+`accesstoken` captured in-page); and **Cuenta DNI** (Banco Provincia, mig 035) — the only wishlist issuer **not** on MODO, a **plain-fetch ASP.NET JSON API** (no WAF/no Playwright): discover active rubro ids from the page (`filtrarPorRubro(<id>)`) → fetch each → keep current rows (~25 category-level wallet promos, issuer='Cuenta DNI'). Remaining low-value: **BNA+**, **Mercado Pago** (app-only). Mirrors revistas/instore (`src/promos/`: types/config/normalize/naranjax/modo/bbva/browserFetch/galicia/macro/santander/icbc/cuentadni/registry/store/pipeline; `npm run promos:run [--provider=modo|bbva|galicia|macro|santander|icbc|cuentadni]` / `promos:doctor`; weekly `PROMOS_CRON`, gated by `PROMOS_ENABLED`). To build the frontend see `**docs/DASHBOARD_GUIDE.md**`; to add more banks see `**docs/BANK_PROMOS_ROADMAP.md**`. Read before touching the promotions module.
 - `**summary.md**` — original problem framing (read once for context, then ignore).
@@ -259,13 +262,19 @@ All scripts that need env vars use `--env-file=.env` (Node ≥20.6 native flag).
 
 1. **Write the adapter** at `src/adapters/<id>.ts` implementing the `SupermarketAdapter` interface.
   - **VTEX stores (most of the list)**: don't copy `carrefour.ts`. Use the factory `createVtexAdapter({ id, name, host })` from `src/adapters/vtex.ts` — your adapter is ~10 lines (see `vea.ts`/`jumbo.ts`/`disco.ts`).
-  - References (pick the closest one to the new site's stack):
-    - `src/adapters/coto.ts` — single JSON API endpoint, id embedded in URL
-    - `src/adapters/lacoopeencasa.ts` — JSON API behind an Angular SPA; envelope-style `{ estado, mensaje, datos }`
-    - `src/adapters/carrefour.ts` — VTEX storefront, two-call ingestion (slug → productId pagetype, then catalog)
-    - `src/adapters/atomo.ts` — PrestaShop SSR HTML, parses `<script type="application/ld+json">`
-    - `src/adapters/maxiconsumo.ts` — Magento 2 SSR HTML, parses microdata (`itemprop=`) + inline GA4 `dataLayer`
-    - `src/adapters/maxi-carrefour.ts` — custom PHP backend returning HTML fragments, prices gated behind a session cookie
+  - References (pick the closest one to the new site's stack). The full set, with the failure modes, is `docs/CADENAS.md` — don't treat this list as exhaustive:
+    - `src/adapters/vtex.ts` — shared factory. New VTEX stores are ~10 lines, not a copy of `carrefour.ts`
+    - `src/adapters/coto.ts` — Oracle Commerce/Endeca JSON (`?format=json`)
+    - `src/adapters/mami.ts` — same Endeca family as Coto; shelf price is read from HTML because the JSON lags
+    - `src/adapters/lacoopeencasa.ts` — Be2 JSON API behind an Angular SPA; envelope `{ estado, mensaje, datos }`
+    - `src/adapters/atomo.ts` / `parodi.ts` — PrestaShop SSR HTML, JSON-LD
+    - `src/adapters/maxiconsumo.ts` — Magento 2 SSR HTML, microdata + GA4 `dataLayer`; no barcode on the page
+    - `src/adapters/california.ts` — WooCommerce Store API, SKU is the EAN
+    - `src/adapters/la-reina.ts` / `la-gallega.ts` — classic ASP HTML
+    - `src/adapters/la-genovesa.ts` — ASP.NET Razor, session cookie + barcode handler
+    - `src/adapters/la-anonima.ts` — custom HTML, sucursal cookie + residential proxy
+    - `src/adapters/mercadolibre.ts` — official API, Ecomodico seller only
+    - `src/adapters/maxi-carrefour.ts` — custom PHP, prices gated behind a seeded `PHPSESSID` (not a VTEX store)
   - Always implement `canonicalizeUrl` — strip ALL query/hash params and lowercase the host. Sites often pass tracking params in URLs (e.g. Coto's `?Dy=1&assemblerContentCollection=...`) that break the JSON endpoint if left intact.
   - Implement `resolveExternalId(url)` if the external_id can't be derived from URL alone (e.g. needs a network lookup). Steady-state daily scrapes never call this — it runs once when a URL is first ingested.
   - Throw `ScrapeError` with the right type for known failure modes (`auth_required`, `product_not_found`, `price_missing`, `selector_failed`, ...).
@@ -285,29 +294,30 @@ Some sites gate prices behind a logged-in session (Carrefour Maxi Pedido is the 
 - Fall back to a typed env var in `src/shared/env.ts` for one-off operator runs (e.g. `MAXI_CARREFOUR_PHPSESSID`).
 - Throw `ScrapeError('auth_required', ...)` with a clear message when the session is missing or expired so an alert fires and the operator knows to refresh it.
 
-#### Self-healing auth via Playwright (Maxi Carrefour pattern)
+#### Maxi Carrefour sessions (seeded cookies, not a server-side relogin)
 
-When the login form is reCAPTCHA-Enterprise-protected (so plain `fetch` can't pass it) we drive a real Chromium via Playwright to harvest a fresh cookie automatically. The flow lives in `src/adapters/maxi-carrefour-auth.ts` and is **purely event-driven — no cron**:
+Prices need a `PHPSESSID` bound to one sucursal. reCAPTCHA Enterprise scores the EC2 datacenter IP too low to mint that cookie on the server, so production does **not** self-heal inside `scrape()`. The daily path (`src/adapters/maxi-carrefour.ts`) walks the sessions already stored in `supermarkets.config`:
 
-1. `scrape()` tries the request with whatever cookie is in DB / env.
-2. If the response says "private" (auth required), it calls `refreshCookie()`.
-3. `refreshCookie()` is a process-level singleton: concurrent scrapes detecting expiry simultaneously share one Playwright run.
-4. The new cookie is written to `supermarkets.config.phpSessId` so the next run (and sibling workers) pick it up.
-5. `scrape()` retries once. Still private? → `auth_required` (login flow itself is broken or this product isn't carried by the picked sucursal).
+1. Primary: `phpSessId` + `canaryEan`.
+2. Fallbacks: `maxiSessions[]`, each bound to another sucursal (`--append` on the login script).
+3. First session that returns a numeric `data-price` wins.
+4. Every canary comes back `private` → `auth_required` (cookies are dead; re-seed from a residential IP).
+5. At least one cookie is alive and this EAN is in none of them → `product_not_found` (seed another sucursal; don't rotate the cookie).
 
-Bootstrap / debug: `npm run maxi-carrefour:login` runs the Playwright flow standalone, prints the cookie, and persists it (or `--dry-run` to skip the DB write). Useful flags:
+`maxiCarrefourLogin.autoLogin` defaults to **false**. Only when it is `true` does a miss call `refreshCookie()` (Playwright, process-level singleton, writes the new cookie back to `phpSessId`). Leave it off on EC2.
 
-- `--headed` — open a visible Chrome window (great for diagnosing reCAPTCHA blocks).
+PHP expires an idle session in ~24 minutes, and the scrape runs once a day, so the server needs a crontab every ~10 minutes running `scripts/maxi-carrefour-keepalive.ts`. That script only touches the cookie; it never logs in (a headless login from EC2 would fail reCAPTCHA and could clobber a good cookie). The crontab is in the script header and in `DEPLOY.md` → Day-2. Full card: `docs/CADENAS.md`.
+
+Bootstrap, from a residential IP: `npm run maxi-carrefour:login` (or `npx tsx --env-file=.env scripts/maxi-carrefour-login.ts`). Useful flags:
+
+- `--edge` — use the installed browser (needed for a score that passes).
+- `--headed` — open a visible window when diagnosing reCAPTCHA.
 - `--no-chrome` — fall back to bundled Playwright Chromium when system Chrome isn't installed.
-- `--region=<value> --seller=<id>` — pin a specific sucursal. Use this if the default "first available seller" doesn't carry your products.
+- `--region=<value> --seller=<id>` — pin a sucursal. Not every sucursal carries every product (seller 217 / BS AS NORTE doesn't stock the Coto-canonical lavandina).
+- `--append` — add that sucursal to `maxiSessions` instead of replacing `phpSessId`.
+- `--dry-run` — print the cookie and skip the DB write.
 
-**Seller / sucursal binding**: every PHPSESSID is bound to one sucursal, and not every sucursal carries every product (e.g. seller 217 / BS AS NORTE doesn't stock the Coto-canonical lavandina). When a freshly-harvested cookie still returns `data-price="private"`, the most common cause is sucursal mismatch — fix by re-running with `--region=…` `--seller=…` once to find a sucursal with the broadest catalog for your URLs, then pin it via `supermarkets.config.maxiCarrefourLogin = { pick: { region, seller }, ... }` so all future auto-refreshes use it.
-
-Other knobs in `supermarkets.config.maxiCarrefourLogin`:
-
-- `name`, `email`, `phone`, `numberId` — throwaway form values (any plausible-looking values work; nothing is verified server-side beyond shape).
-- `headless` — set `false` if running where Google's reCAPTCHA Enterprise rejects headless Chrome.
-- `useSystemChrome` — defaults to `true` (real Chrome scores higher with reCAPTCHA than `chromium-headless-shell`).
+`supermarkets.config.maxiCarrefourLogin` still holds the throwaway form values (`name`, `email`, `phone`, `numberId`), `headless`, `useSystemChrome` (default `true`), and `pick: { region, seller }` for when auto-login is actually turned on. `MAXI_CARREFOUR_PHPSESSID` is only an env fallback for a local run. The `db:setup` seed does not send `config` for this chain, so a deploy does not wipe the cookies.
 
 ### Note on VTEX-based supermarkets
 
@@ -335,6 +345,8 @@ Re-run the same file safely — already-imported URLs are detected and skipped. 
 The script exits non-zero if any URL failed, so the final summary log + `failures` array tell you exactly which URLs need fixing (usually a typo'd URL or a product that no longer exists on the supermarket site).
 
 ## Debugging: where to look when something fails
+
+The per-chain failure modes (WAF, sucursal cookie, seeded PHPSESSID, sales channel, HTML-vs-JSON price) are in `docs/CADENAS.md`. Read that card before treating every chain like Vea.
 
 In order:
 
@@ -375,7 +387,7 @@ Track the build phases (see `plan.md` for full breakdown):
 - **Phase 2** — Engine: orchestrator (cron + enqueue), BullMQ worker wired, alert generation/aggregation, Telegram notifications, PM2 ecosystem config. Untested at the queue level — proven in Phase 5.
 - **Phase 3** — Add a Playwright-based supermarket (deferred until next supermarket chosen)
 - **Phase 4** — Express API: all routes (`products`, `supermarkets`, `snapshots`, `runs`, `alerts`, `health`), X-API-Key auth (SHA-256 + cache), pagination, error envelope, CORS, request logging. End-to-end smoke tested. Carrefour adapter added (VTEX-based), Coto adapter refactored to expose `resolveExternalId`.
-- [~] **Phase 5** — Deploy: artifacts written (`scripts/setup-ec2.sh`, `Caddyfile`, `.github/workflows/deploy.yml`, `DEPLOY.md`). User performs AWS setup; first deploy & GitHub Actions wiring still pending.
+- [~] **Phase 5** — Deploy: artifacts written (`scripts/setup-ec2.sh`, `Caddyfile`, `.github/workflows/deploy.yml`, `DEPLOY.md`). The checklist in `plan.md` §10 was never ticked after go-live; the service runs in production for Ayudín. How it runs today is `docs/COMO_FUNCIONA.md`, not that checklist.
 - **Phase 6** — Scale: more supermarkets, monitoring tuning. **Product management** (see `docs/PRODUCT_MANAGEMENT.md`): per-mapping pause/delete, runtime-editable catalog (`catalog_extra_eans`, migration 007), async EAN discovery (`/v1/data/discover` on the `discovery` queue), pause-aware coverage, weekly coverage **sweep** (`SWEEP_CRON`, re-searches missing EANs + Telegram summary), and **EAN healing** (`PATCH /v1/supermarket-products/:id { ean }` + `GET /v1/products/missing-ean` → `src/ingest/bindEan.ts`) to fix blank export columns. **In-store manual price entry** (see `docs/IN_STORE_PRICE_ENTRY.md`): mobile web tool (`/v1/in-store/*`, `src/instore/`, migrations 009+010+024) for field workers to scan barcodes + type prices at wholesale chains (Nini, Diarco, Yaguar, Don Gastón, Oscar David + Makro/Vital/Maxiconsumo); work grouped as **visits** with branch location + flyer photos + a finish step; four capture fields (regular/wholesale/min-units/observations); **daily review gate** (mig 019, `src/instore/review.ts`): submissions are PENDING until a back-office operator approves each finished visit (per-visit, inline edits) which materializes run-less snapshots dated the approval day only (prices publish on the day they're approved — no carry-forward); a **"sin precio / hay stock"** flag (`no_price`, mig 024) records in-stock-but-price-unknown products as `status='no_price'` markers instead of fake $1/$0; review endpoints require a full-access key; scoped API keys (`api_keys.scopes`) for the field app.
 
 When completing a phase, mark it done here AND in `plan.md` (section 10).

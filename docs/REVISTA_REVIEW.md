@@ -15,9 +15,12 @@ shape of [`PUBLICATION_REVIEW.md`](./PUBLICATION_REVIEW.md) and
 > truth for the contract and is kept in sync with the routes.
 >
 > **Chains (seeded):** Makro & Vital (`html-pdf-links`), Rosental (`pubhtml5`),
-> Maxicomodín (`publuu`). Maxicomodín is seeded as a **separate** chain from the
-> retail `comodin` VTEX store on purpose — the magazine is the wholesale
-> (mayorista) pricing tier, which the retail adapter deliberately doesn't track.
+> Maxicomodín (`publuu`). Maxicomodín is a **separate** chain from the retail
+> `comodin` VTEX store on purpose — the magazine is the wholesale pricing tier,
+> which the retail adapter deliberately doesn't track. It is **deactivated**
+> (`is_active: false` in `scripts/setup-db.ts` since 2026-08-03): the daily
+> check does not process it, and a bare SQL `UPDATE` would be overwritten on
+> the next `db:setup`. Per-chain notes: `docs/CADENAS.md`.
 
 ---
 

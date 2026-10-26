@@ -28,22 +28,27 @@
  * Catalog data (name, brand, EAN, image, category) is public — no auth needed.
  *
  * **PRICE IS GATED**: when not logged in, `data-price="private"`. To see real
- * prices we need a `PHPSESSID` cookie tied to a registered seller. The login
- * form is reCAPTCHA-Enterprise-protected, so plain `fetch` can't pass it —
- * but a real Chromium driven by Playwright can. We wire that in as a
- * **self-healing** flow (no cron):
+ * prices we need a `PHPSESSID` cookie tied to one sucursal. The login form is
+ * reCAPTCHA-Enterprise-protected and the EC2 datacenter IP scores too low to
+ * pass it, so the daily scrape does NOT log in.
  *
- *   1. Try the fetch with the current cookie (DB config → env fallback).
- *   2. If `data-price === "private"`, call `refreshCookie()` — which spawns
- *      headless Chromium, fills the public "comerciante" registration form
- *      with throwaway data, lets reCAPTCHA Enterprise clear the (real)
- *      browser, harvests the new PHPSESSID, and writes it back to
- *      `supermarkets.config.phpSessId` so the next worker picks it up.
- *   3. Retry the fetch once. Still private? → `auth_required` (the login
- *      flow itself is broken — DOM changed, score too low, etc.).
+ * Production path (`scrape`):
+ *   1. Walk the sessions already stored in `supermarkets.config`
+ *      (`phpSessId` + `canaryEan`, then `maxiSessions[]`). Each cookie is one
+ *      sucursal. The first numeric `data-price` wins.
+ *   2. Every canary returns `private` → `auth_required`. Re-seed from a
+ *      residential IP (`scripts/maxi-carrefour-login.ts`). Do not relogin here.
+ *   3. A cookie is alive and this EAN is in none of the seeded sucursales →
+ *      `product_not_found`. Add a sucursal (`--append`), don't rotate the cookie.
  *
- * The cookie is only refreshed when the site rejects us. If it stays valid
- * for two weeks, we don't log in for two weeks.
+ * Playwright relogin (`refreshCookie`) runs only when
+ * `config.maxiCarrefourLogin.autoLogin === true` (default false).
+ *
+ * PHP drops an idle session after ~24 min, so the orchestrator runs the
+ * keepalive (`runMaxiKeepalive`) on a cron (`MAXI_KEEPALIVE_CRON`, default
+ * every ~10 min). It just touches every seeded cookie and never logs in
+ * (plain fetch, so it runs fine on EC2). The same logic is exposed as
+ * `scripts/maxi-carrefour-keepalive.ts` for on-demand runs. See `docs/CADENAS.md`.
  *
  * URL pattern: `/p/<EAN>` — the path component is exactly the product EAN-13.
  * `external_id` is the EAN.
@@ -590,10 +595,9 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
  *   kind:'ok'      → got a price, returns the full ScrapeResult
  *   kind:'private' → catalog visible but price gated (data-price="private")
  *
- * The caller (adapter.scrape) uses 'private' to trigger an auto-relogin and
- * retry. When `opts.throwOnPrivate` is true, the parser throws auth_required
- * directly instead of returning the sentinel — that's the post-relogin call,
- * where private means "even the fresh cookie didn't unlock prices, give up".
+ * The caller treats 'private' as "this sucursal/session didn't unlock a price"
+ * and tries the next seeded session. `throwOnPrivate` is for the opt-in
+ * Playwright relogin (`autoLogin`): after a fresh cookie, private means give up.
  */
 export type ParseOutcome =
   | { kind: 'ok'; result: ScrapeResult }

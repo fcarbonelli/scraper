@@ -16,8 +16,10 @@
  * That id is stored in supermarket_products.external_id, so daily scrapes
  * only ever do one HTTP call (the catalog lookup).
  *
- * Most other LATAM supermarkets (Disco, Jumbo, Vea, Día) also run VTEX, so
- * this adapter is a useful template — usually only the host changes.
+ * Most other LATAM supermarkets (Disco, Jumbo, Vea, Día) also run VTEX.
+ * This file predates the shared factory and is kept so its tests stay put.
+ * New VTEX stores use `createVtexAdapter` in `vtex.ts`, not a copy of this
+ * file. Operational notes for the live chains are in `docs/CADENAS.md`.
  */
 
 import { ScrapeError } from '../shared/errors.js';

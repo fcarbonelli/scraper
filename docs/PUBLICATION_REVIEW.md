@@ -7,10 +7,14 @@ This is the design + implementation spec for the "check the day, then release
 it" workflow. It covers the data model (migration `005`), the backend pipeline
 changes, the new API surface, and the operator frontend.
 
-> **Status:** backend implemented. Migration `005_publication_layer.sql`,
-> finalize → `pending_review`, `src/orchestrator/publish.ts`, the four API routes,
-> the `Estado` client field, and fixtures are all in place (typecheck passes).
-> **Frontend (§6) is pending.** Deploy the app + run the migration together.
+> **Status:** this is the production gate. A finished web run stays
+> `review_status = 'pending_review'` until an operator publishes it
+> (`src/orchestrator/publish.ts`). Migration `005_publication_layer.sql`, the
+> four API routes, the `Estado` client field, and the fixtures are in place.
+> §1 below describes the problem *before* that gate existed. §6 was the
+> frontend build spec; the operator UI lives in the separate frontend app.
+> In-store visits and revista items have their own approval, documented in
+> `docs/IN_STORE_PRICE_ENTRY.md` and `docs/REVISTA_REVIEW.md`.
 
 ---
 

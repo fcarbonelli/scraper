@@ -819,7 +819,9 @@ End-to-end queue-level testing happens in Phase 5 on EC2 (Redis runs there). Tel
 
 **Goal**: Frontend (whenever it's built) can read everything via HTTPS + API key. Smoke tested end-to-end against the real Coto product in Supabase.
 
-### Phase 5 — Deploy (~1-2 days) — IN PROGRESS
+### Phase 5 — Deploy (~1-2 days) — checklist below was not updated after go-live
+
+The service is in production (Ayudín). How it runs today — crons, the three price sources, the publish gate — is `docs/COMO_FUNCIONA.md`. The boxes under "User-driven steps" were never ticked; don't read them as "we are not deployed".
 
 Artifacts written:
 

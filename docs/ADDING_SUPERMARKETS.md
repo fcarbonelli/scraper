@@ -7,6 +7,10 @@ for the common case (**VTEX stores**, which are ~half the client list and take
 > Background reading: `AGENTS.md` → "Architecture: engine + adapters" and "How
 > to add a new supermarket". This doc is the hands-on version with the exact
 > commands, the VTEX factory, and the gotchas we've actually hit.
+>
+> Chains that already exist — stack, known breakage, env — are catalogued in
+> `docs/CADENAS.md`. Read that card before debugging a live store. This file
+> is for mapping a **new** one.
 
 ---
 
@@ -154,9 +158,12 @@ This prints `Found on site: N` and the list of matching EANs. Nothing is saved.
   (`src/adapters/zones.ts`) via a `regionId` (`src/adapters/vtex-region.ts`) when
   the default comes back missing/out-of-stock. Usually automatic; no action
   needed. For diagnosis: `npm run test:adapter -- <url> --all-zones`.
-- **EAN not exposed.** A few sites (La Coope, Maxiconsumo) don't expose EAN, so
-  master `products` can't be deduped by barcode for them. VTEX stores DO expose
-  EAN, so dedupe works.
+- **EAN on the product page.** VTEX stores expose it, so master rows dedupe by
+  barcode. La Coope's *detail* payload does not include a GTIN (discovery still
+  works: `POST /api/articulos/pagina_busqueda` indexes the barcode). Maxiconsumo's
+  HTML has no barcode; `searchByEan` is a brand+size guess and should be reviewed
+  before ingest. El Cóndor has no `searchByEan` at all (URL ingest only). The
+  per-chain truth is in `docs/CADENAS.md`.
 - **Discounts vs "promotions".** A crossed-out regular price + lower sale price
   is captured as `list_price` (regular) + `price` (sale) — NOT in the
   `promotions[]` array. `promotions[]` is only for *named* deals (payment-method
@@ -219,10 +226,18 @@ If the site isn't VTEX, write a full adapter. Pick the closest existing template
 | Template | Stack | Strategy |
 | --- | --- | --- |
 | `coto.ts` | Oracle Commerce/Endeca JSON | Append `?format=json`, parse attributes; EAN discovery via `Ntk` (see below) |
-| `lacoopeencasa.ts` | JSON API behind SPA | `{ estado, mensaje, datos }` envelope |
-| `atomo.ts` | PrestaShop SSR HTML | Parse `<script type="application/ld+json">` |
-| `maxiconsumo.ts` | Magento 2 SSR HTML | Parse microdata + inline GA4 `dataLayer` |
-| `maxi-carrefour.ts` | Custom PHP + auth | HTML fragments, Playwright self-healing cookie |
+| `mami.ts` | Endeca, same family as Coto | `?format=json`, but the shelf price is the HTML figure — the JSON `activePrice` lags. Needs the AR proxy |
+| `lacoopeencasa.ts` | JSON API behind SPA | `{ estado, mensaje, datos }` envelope. Detail has no GTIN; search does index the EAN |
+| `atomo.ts` / `parodi.ts` | PrestaShop SSR HTML | Parse `<script type="application/ld+json">`. Follow a redirect only when it's the same product |
+| `maxiconsumo.ts` | Magento 2 SSR HTML | Microdata + GA4 `dataLayer`. No barcode on the page. Needs the AR proxy |
+| `california.ts` | WooCommerce Store API | `?sku=<ean>` — the storefront search does not index the SKU. Prices are minor units |
+| `la-reina.ts` / `la-gallega.ts` | Classic ASP HTML | `productosdet.asp`. On La Reina `Pr` is the EAN; on La Gallega `Pr` is an internal id |
+| `la-genovesa.ts` | ASP.NET Razor | Session cookie + `/LectorQR/?handler=ObtenerArticuloID` |
+| `la-anonima.ts` | Custom HTML + JSON-LD | Sucursal cookie + residential proxy + branch sweep. See `docs/CADENAS.md` before touching it |
+| `mercadolibre.ts` | Official Products API | Ecomodico's offer only, never the buy box |
+| `maxi-carrefour.ts` | Custom PHP + seeded cookie | HTML fragment. Prices need a `PHPSESSID` harvested off-server; the daily run does not log in. See `docs/CADENAS.md` |
+
+Operational cards for every chain already in production (including the VTEX ones with a twist: Changomas, Josimar, El Abastecedor, Comodín) are in `docs/CADENAS.md`.
 
 Rules of thumb:
 - Implement `canonicalizeUrl` (strip all query/hash).

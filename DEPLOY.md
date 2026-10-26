@@ -455,6 +455,20 @@ pm2 logs worker --lines 200
 pm2 logs --nostream --lines 1000 > /tmp/logs.txt
 ```
 
+### Keep Carrefour Maxi Pedido's session alive
+
+Maxi prices need a `PHPSESSID` that can only be minted from a residential IP (reCAPTCHA Enterprise rejects the EC2 datacenter). Once seeded into `supermarkets.config`, that cookie *does* unlock prices from this server, but PHP drops it after ~24 minutes idle. The daily scrape is once a day, so without a touch the next morning every Maxi job is `auth_required`.
+
+**The orchestrator keeps the session warm automatically.** It runs the keepalive (`runMaxiKeepalive`) on a cron — `MAXI_KEEPALIVE_CRON`, default `*/10 * * * *` — touching every seeded cookie (primary + all `maxiSessions`) every ~10 minutes. The touch is a plain `fetch`; it never logs in, so it runs fine on EC2. Enabled by default (`MAXI_KEEPALIVE_ENABLED=true`); set it to `false` to turn it off. Nothing to install — deploying the orchestrator is enough. Watch it with:
+
+```bash
+pm2 logs orchestrator --lines 200 | grep maxi-keepalive
+```
+
+A dead session is re-seeded from a laptop with a residential IP (`scripts/maxi-carrefour-login.ts --edge`), not from this box. The full card is `docs/CADENAS.md` (Carrefour Maxi Pedido).
+
+> Optional fallback (only if you ever disable the orchestrator cron): an OS crontab running the same script every 10 minutes — `*/10 * * * * cd /home/ubuntu/scraper && /usr/bin/npx tsx --env-file=.env scripts/maxi-carrefour-keepalive.ts >> /home/ubuntu/scraper/logs/maxi-keepalive.log 2>&1` (`mkdir -p /home/ubuntu/scraper/logs` first).
+
 ### Trigger a manual scrape
 
 ```bash
