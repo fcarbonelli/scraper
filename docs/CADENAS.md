@@ -228,15 +228,17 @@ La primera que devuelve un número gana. Si el EAN no está en esa sucursal (fra
 
 Playwright **no** corre en la corrida de EC2. reCAPTCHA Enterprise le pone nota baja a la IP del datacenter. El re-login automático existe (`refreshCookie`) y solo se dispara si `supermarkets.config.maxiCarrefourLogin.autoLogin === true`. El default es `false`.
 
-La cookie se fabrica en una máquina con IP residencial y después **sí** sirve para leer precios desde EC2 (el endpoint de precio no revalida la IP). PHP tira la sesión a los ~24 minutos sin uso (`gc_maxlifetime`), y el scrape es una vez por día, así que en el server tiene que haber un cron que la toque cada ~10 minutos:
+La cookie se fabrica en una máquina con IP residencial y después **sí** sirve para leer precios desde EC2 (el endpoint de precio no revalida la IP). PHP tira la sesión a los ~24 minutos sin uso (`gc_maxlifetime`), y el scrape es una vez por día, así que algo tiene que tocar la cookie cada ~10 minutos o amanece muerta.
+
+De eso se encarga **el orchestrator**: corre `runMaxiKeepalive` en un cron (`MAXI_KEEPALIVE_CRON`, default `*/10 * * * *`, apagable con `MAXI_KEEPALIVE_ENABLED=false`) y una vez al arrancar. Toca **todas** las sesiones sembradas (primaria + `maxiSessions`), es un `fetch` plano (sin reCAPTCHA, corre bien en EC2) y nunca re-loguea. No hay que instalar nada: alcanza con deployar el orchestrator. Se mira con:
 
 ```
-*/10 * * * * cd /home/ubuntu/scraper && \
-  /usr/bin/npx tsx --env-file=.env scripts/maxi-carrefour-keepalive.ts >> \
-  /home/ubuntu/scraper/logs/maxi-keepalive.log 2>&1
+pm2 logs orchestrator --lines 200 | grep maxi-keepalive
 ```
 
-Ese script no re-loguea. Si la sesión murió, loguea y listo: un login headless en EC2 no pasa el captcha y pisaría una cookie buena. El síntoma de “Maxi entero en `auth_required`” es, casi siempre, el keepalive caído o una cookie vencida, no un cambio de HTML.
+> Antes esto era un crontab del sistema que **nunca se llegó a instalar** en EC2 — por eso las cookies se vencían de noche y Maxi amanecía en `auth_required` (perdimos 3 días en octubre 2026). Ahora vive en el código y se deploya solo. El mismo script queda como `scripts/maxi-carrefour-keepalive.ts` para correrlo a mano. Un crontab del SO sigue siendo un fallback válido sólo si se apaga el cron del orchestrator.
+
+Si la sesión igual murió (p. ej. hard cap del server, o nadie la tocó porque el orchestrator estaba caído), el keepalive sólo loguea: un login headless en EC2 no pasa el captcha y pisaría una cookie buena. El síntoma de “Maxi entero en `auth_required`” es, casi siempre, el keepalive caído o una cookie vencida, no un cambio de HTML — y se arregla **resembrando desde una IP residencial** (abajo), no tocando el adapter.
 
 Sembrar de nuevo, desde una máquina residencial (el flag `--edge` usa el navegador del sistema):
 
