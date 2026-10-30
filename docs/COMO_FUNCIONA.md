@@ -46,12 +46,13 @@ Zona horaria: `America/Argentina/Buenos_Aires` (`TZ`). Los horarios de abajo son
 | --- | --- | --- |
 | Todos los días 06:00 | Encola un job por cada producto activo de cada cadena activa que sí tiene adapter web. Crea una fila `scrape_runs` en `running`. Las cadenas `source_type` `revista` o `instore` no se encolan: no tienen adapter y fallarían todas. | `SCRAPE_CRON`, `src/orchestrator/enqueue.ts` |
 | Enseguida, en el mismo disparo | Chequeo de folletos. Primero un control de salud (config apagada, revistas trabadas en `processing`). Después el descubrimiento, que es barato: si el folleto no cambió, no hay costo de IA. Si cambió, visión + matching, con tope de 20 minutos para no colgar el orchestrator. | `REVISTA_ENABLED`, `OPENAI_API_KEY`, `src/revistas/pipeline.ts` |
-| Después del chequeo | Marcadores “fantasma” para productos que el sistema ya sabe que no va a encontrar. | `src/orchestrator/phantomMarkers.ts` |
+| 11:00 y 16:00 | Chequeo de folletos extra, mismas tres cadenas y mismo pipeline, sin corrida asociada. Makro sube sus folletos (sobre todo los de finde) después de las 06:00; sin esto entraban recién al día siguiente o con “Traer”. Si el de las 06:00 sigue corriendo, el tick se saltea. Vacío = apagado. | `REVISTA_CHECK_CRON` |
+| Después del chequeo de las 06:00 | Marcadores “fantasma” para productos que el sistema ya sabe que no va a encontrar. | `src/orchestrator/phantomMarkers.ts` |
 | Cada 1 minuto | El finalizer mira las corridas `running`. Cuando cada producto tiene un resultado final (o pasaron 6 horas), escribe stats, agrega alertas de Telegram (una por cadena, no una por producto), actualiza el health de la cadena y corre la supresión de precios anómalos. La corrida queda en `pending_review`. | `src/orchestrator/finalize.ts` |
 | Domingos 02:00 | Barrido de cobertura: vuelve a buscar EANs del catálogo que esa cadena todavía no tiene, por si volvieron a stock. | `SWEEP_CRON` |
 | Lunes 05:00 | Corrida semanal de promos bancarias, si `PROMOS_ENABLED` no está en `false`. | `PROMOS_CRON` |
 
-El cron de folletos a las 10:00 que describe [REVISTAS_PLAN.md](./REVISTAS_PLAN.md) (Parte 2) está **pendiente a propósito**. Hoy el chequeo va pegado a las 06:00. Si se pierde esa ventana, el operador usa el botón “¿qué folletos faltan?” (`POST /v1/revistas/check`), que no gasta IA.
+Además del chequeo pegado a las 06:00, `REVISTA_CHECK_CRON` (default `0 11,16 * * *`) corre el mismo chequeo dos veces más por día. Un folleto que aparece después de las 16:00 entra a las 06:00 del día siguiente; para eso sigue el botón “¿qué folletos faltan?” (`POST /v1/revistas/check`, no gasta IA) y “Traer”.
 
 El worker, al arrancar, abre una cola por cada supermercado activo, con la concurrency y el `rate_limit_ms` de esa fila. Cada ~60 segundos reconcilia: una cadena que acabás de activar con `npm run db:setup` empieza a consumir jobs sin reiniciar el proceso.
 
@@ -152,7 +153,7 @@ Leelos con el recuadro de estado que tienen arriba. Estos son los que más confu
 | --- | --- |
 | [plan.md](../plan.md) §10, fase 5 | El checklist de AWS sigue sin tildar. El servicio está en producción; este archivo es el comportamiento actual |
 | [PUBLICATION_REVIEW.md](./PUBLICATION_REVIEW.md) §1 | Describe el problema de *antes* del gate. El gate (`pending_review` → publicar) ya está en el backend |
-| [REVISTAS_PLAN.md](./REVISTAS_PLAN.md) Parte 2 | El cron propio de las 10:00 no se construyó, a propósito |
+| [REVISTAS_PLAN.md](./REVISTAS_PLAN.md) Parte 2 | El cron propio de las 10:00 no se construyó así: lo reemplaza `REVISTA_CHECK_CRON` (11:00 y 16:00, además de las 06:00) |
 | [REVISTA_REVIEW.md](./REVISTA_REVIEW.md) | El contrato de la API de folletos sí está al día. Maxicomodín figura como cadena de folleto y está desactivada en el seed |
 | `AGENTS.md`, sección de fases | El tracker histórico. La lista “Read these first” sí se mantiene |
 

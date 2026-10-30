@@ -57,6 +57,10 @@ const EnvSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  // Extra magazine checks during the day, on top of the one chained to
+  // SCRAPE_CRON. Chains (Makro above all) upload flyers after 06:00, so a single
+  // early check catches a weekend flyer only the next morning. Empty = off.
+  REVISTA_CHECK_CRON: z.string().default('0 11,16 * * *'),
 
   // Bank/card promotions module (Phase 7 — see docs/BANK_PROMOS.md). A separate,
   // isolated pipeline that scrapes bank/credit-card promotions weekly. Enabled

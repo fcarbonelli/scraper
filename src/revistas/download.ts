@@ -9,6 +9,7 @@
  */
 
 import path from 'node:path';
+import { logger } from '../shared/logger.js';
 import { fetchRetry } from './retry.js';
 import { UA } from './sources-shared.js';
 import { deriveSeriesKey } from './series.js';
@@ -122,7 +123,16 @@ function parsePdfLinksFromHtml(html: string, baseUrl: string): PdfLink[] {
  *   2. fetch a cache-busted URL (`?v=<random>` + Cache-Control: no-cache),
  * then UNION the PDF links (dedupe by URL). That way neither the stale nor the
  * fresh page alone can hide an issue.
+ *
+ * The cache-busted request goes to Makro's origin, which some afternoons takes
+ * ~145 s to answer (measured 30/10/2026) while the CDN copy answers in ~1 s.
+ * Waiting for it blew the 90 s discovery budget and failed the whole chain,
+ * even though the cached page already listed the new flyer. So the bust is
+ * best-effort with its own budget: if it's slow we go with the cached page and
+ * the next check gets another chance at the fresh one.
  */
+const CACHE_BUST_TIMEOUT_MS = 20_000;
+
 export async function findPdfLinks(offersUrl: string): Promise<PdfLink[]> {
   const headers = {
     'User-Agent': UA,
@@ -136,14 +146,26 @@ export async function findPdfLinks(offersUrl: string): Promise<PdfLink[]> {
     return u.href;
   })();
 
-  const [plainRes, bustedRes] = await Promise.all([
+  const signal = AbortSignal.timeout(CACHE_BUST_TIMEOUT_MS);
+  const [plainRes, bustedHtml] = await Promise.all([
     fetchRetry(offersUrl, { headers }, offersUrl),
-    fetchRetry(bustedUrl, { headers }, bustedUrl),
+    // The body is read inside the same budget: the origin can stall mid-body too.
+    fetchRetry(bustedUrl, { headers, signal }, bustedUrl)
+      .then(async (res) =>
+        res.ok ? { ok: true, text: await res.text() } : { ok: false, text: `HTTP ${res.status}` },
+      )
+      .catch((err: unknown) => {
+        logger.warn(
+          { offersUrl, err: err instanceof Error ? err.message : String(err) },
+          'revista: cache-busted offers page too slow, using the cached copy only',
+        );
+        return { ok: false, text: 'timeout' };
+      }),
   ]);
 
-  if (!plainRes.ok && !bustedRes.ok) {
+  if (!plainRes.ok && !bustedHtml.ok) {
     throw new Error(
-      `Could not read ${offersUrl}: HTTP ${plainRes.status} / cache-bust HTTP ${bustedRes.status}`,
+      `Could not read ${offersUrl}: HTTP ${plainRes.status} / cache-bust ${bustedHtml.text.slice(0, 40)}`,
     );
   }
 
@@ -153,8 +175,8 @@ export async function findPdfLinks(offersUrl: string): Promise<PdfLink[]> {
       byUrl.set(link.url, link);
     }
   }
-  if (bustedRes.ok) {
-    for (const link of parsePdfLinksFromHtml(await bustedRes.text(), offersUrl)) {
+  if (bustedHtml.ok) {
+    for (const link of parsePdfLinksFromHtml(bustedHtml.text, offersUrl)) {
       byUrl.set(link.url, link);
     }
   }
