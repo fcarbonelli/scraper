@@ -338,6 +338,10 @@ No tienen adapter en `src/adapters/`. El seed les pone `config.revista` y el pip
 
 Makro y Vital pueden tener varias series (un PDF por sucursal / vigencia). La serie es la unidad: hay una revista vigente por serie, no una por cadena.
 
+Makro sube sus folletos **después** del chequeo de las 06:00: los semanales (`mm`, `sponsor`, `gt`) el miércoles entre ~09:30 y 15:00, y el de finde (`ahorro-rojo-vivo`, antes `a-todo-finde-en-makro`) el jueves o viernes a la mañana. Por eso existen los chequeos extra de `REVISTA_CHECK_CRON` (11:00 y 16:00). Si no hubiera, el de finde entraba recién al día siguiente, con un día de vigencia perdido (30/10/2026).
+
+El descubrimiento lee `/ofertas/` dos veces: la copia del CDN y una cache-busted (`?v=…`) que va al origen, porque el CDN a veces sirve una copia vieja sin el PDF nuevo. El origen puede tardar **~145 s** (medido 30/10/2026, a la tarde) y antes eso reventaba el tope de 90 s del descubrimiento: `revista discovery (makro) timed out`, la cadena entera fallaba y "Traer" / "¿qué folletos faltan?" no traían nada. Ahora la cache-busted tiene un tope propio de 20 s (`src/revistas/download.ts`) y, si no llega, se sigue con la copia del CDN con un warn `cache-busted offers page too slow`.
+
 Comandos: `npm run revistas:doctor` (no gasta IA), `npm run revistas:run`. Specs: [REVISTA_REVIEW.md](./REVISTA_REVIEW.md), [REVISTA_CHECK_BUTTON.md](./REVISTA_CHECK_BUTTON.md), [REVISTA_DEBUG.md](./REVISTA_DEBUG.md).
 
 Nada de un folleto llega al cliente sin aprobación de una persona.
