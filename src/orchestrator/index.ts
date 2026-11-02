@@ -73,9 +73,27 @@ async function runScrapeWithErrorHandling(
  * vision AI, and build the human review queue. Cheap no-op on days nothing
  * changed. Isolated from the main scrape so a failure here never affects it.
  */
+let revistaCheckRunning = false;
+
 async function runRevistaCheckWithErrorHandling(
   scrapeRunId: string | null,
 ): Promise<void> {
+  // The 06:00 check and the REVISTA_CHECK_CRON ones share this 1G process. A
+  // slow morning (many new Vital flyers) must not overlap a midday tick: two
+  // PDF renders at once is exactly the OOM we already paid for.
+  if (revistaCheckRunning) {
+    logger.warn('revista check already running, skipping this tick');
+    return;
+  }
+  revistaCheckRunning = true;
+  try {
+    await runRevistaCheckUnguarded(scrapeRunId);
+  } finally {
+    revistaCheckRunning = false;
+  }
+}
+
+async function runRevistaCheckUnguarded(scrapeRunId: string | null): Promise<void> {
   // 1. Health probes BEFORE the check, because the check itself cannot report
   //    these: it early-returns without writing a single row when it is disabled
   //    or unconfigured, and a killed run leaves a magazine pinned in
@@ -257,6 +275,10 @@ async function main(): Promise<void> {
     logger.fatal({ cron: promosConfig.cron }, 'invalid PROMOS_CRON expression');
     process.exit(1);
   }
+  if (env.REVISTA_CHECK_CRON && !cron.validate(env.REVISTA_CHECK_CRON)) {
+    logger.fatal({ cron: env.REVISTA_CHECK_CRON }, 'invalid REVISTA_CHECK_CRON expression');
+    process.exit(1);
+  }
   if (env.MAXI_KEEPALIVE_ENABLED && !cron.validate(env.MAXI_KEEPALIVE_CRON)) {
     logger.fatal({ cron: env.MAXI_KEEPALIVE_CRON }, 'invalid MAXI_KEEPALIVE_CRON expression');
     process.exit(1);
@@ -266,6 +288,7 @@ async function main(): Promise<void> {
     {
       cron: env.SCRAPE_CRON,
       sweepCron: env.SWEEP_CRON,
+      revistaCheckCron: env.REVISTA_CHECK_CRON || 'disabled',
       promosCron: promosConfig.cron,
       promosEnabled: promosConfig.enabled,
       maxiKeepaliveCron: env.MAXI_KEEPALIVE_ENABLED ? env.MAXI_KEEPALIVE_CRON : 'disabled',
@@ -288,6 +311,15 @@ async function main(): Promise<void> {
         .then(() => runPhantomMarkersWithErrorHandling()),
     { timezone: env.TZ },
   );
+
+  // 1a. Extra magazine checks during the day (all chains). Known issues are
+  // skipped by hash, so a quiet tick costs a few seconds and no AI. Run-less
+  // (scrapeRunId null), same as the "Traer" button.
+  if (env.REVISTA_CHECK_CRON) {
+    cron.schedule(env.REVISTA_CHECK_CRON, () => void runRevistaCheckWithErrorHandling(null), {
+      timezone: env.TZ,
+    });
+  }
 
   // 1b. Weekly coverage sweep cron.
   cron.schedule(env.SWEEP_CRON, () => void enqueueCoverageSweep(), {

@@ -80,7 +80,8 @@ you review gaps and publish the day).
   one row per chain for a compact "last checked" view.
 
 ```
-06:00  Daily run. Magazine unchanged → nothing happens.
+06:00  Daily run (again at 11:00 and 16:00 via REVISTA_CHECK_CRON).
+       Magazine unchanged → nothing happens.
        Magazine changed → AI reads it, builds the review queue,
        creates a `revista_review` alert + a pending entry.
 
