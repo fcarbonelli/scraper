@@ -325,6 +325,8 @@ GET /DetalleProducto?ArticuloID=…&PromID=…&Tipo=…&ClienteID=…&PresID=…
 
 Nombre en `p.titulo`, EAN en `.textDescripcionDetalle`, precio en `.textPrecioUnitario` (formato `$ 5.150,00`). El `external_id` es la composición `<ArticuloID>_<Tipo>_<PresID>_<PromID>`.
 
+**Certificado TLS**: La Genovesa usa un cert DV de Sectigo a 1 año y lo dejan vencer. El 2026-11-01 venció y toda la cadena cayó con `CERT_HAS_EXPIRED` (`fetch failed`). No podemos renovar su cert, así que el adapter tolera un cert **con fechas inválidas** (`CERT_HAS_EXPIRED` / `CERT_NOT_YET_VALID`) sólo para este host: arranca con TLS estricto y, recién cuando choca con ese error, cae a un dispatcher `rejectUnauthorized:false` (undici `Agent`) y loguea un warning. Es por proceso y auto-reversible: cuando renueven el cert y reinicie el proceso, vuelve solo a verificación completa. Nunca toca TLS global ni tolera errores de hostname/CA (eso sería MITM, no un vencimiento). Si vuelve a aparecer `CERT_HAS_EXPIRED` en los logs, es que no renovaron — es cosa de ellos, no del scraper.
+
 ## Folletos
 
 No tienen adapter en `src/adapters/`. El seed les pone `config.revista` y el pipeline de `src/revistas/` las atiende en el mismo disparo de las 06:00. Estrategia y URLs están en el seed; el comportamiento de cada estrategia, en el encabezado de `src/revistas/sources.ts`.

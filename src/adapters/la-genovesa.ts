@@ -32,7 +32,9 @@
  *   `<ArticuloID>_<Tipo>_<PresID>_<PromID>`
  */
 
+import { fetch as undiciFetch, Agent } from 'undici';
 import { ScrapeError } from '../shared/errors.js';
+import { logger } from '../shared/logger.js';
 import type {
   EanSearchResult,
   ProductInfo,
@@ -84,6 +86,59 @@ interface ObtenerArticuloResult {
 const cookieJar = new Map<string, string>();
 let sessionReady = false;
 
+// ---------------------------------------------------------------------------
+// TLS: tolerate an EXPIRED server certificate, scoped to this adapter only.
+//
+// La Genovesa's cert is a 1-year Sectigo DV that they let lapse (it expired
+// 2026-11-01, which took the whole chain down with CERT_HAS_EXPIRED). We can't
+// renew their cert, so to keep scraping we fall back to a dispatcher that skips
+// cert validation — but ONLY after we actually hit a cert *date* error, and
+// ONLY for this host's requests. We never touch global TLS (no
+// NODE_TLS_REJECT_UNAUTHORIZED), and we stay strict for every other chain.
+//
+// This is deliberately self-reverting: `relaxTls` starts false and is a
+// per-process flag, so the moment they renew the cert (and this process
+// restarts) we're back to full verification with zero code changes. We only
+// relax on date errors (expired / not-yet-valid), never on hostname/CA
+// mismatches — those would be a real MITM signal, not a lapsed renewal.
+const certTolerantAgent = new Agent({ connect: { rejectUnauthorized: false } });
+let relaxTls = false;
+
+/** True when a fetch failed specifically because the cert's dates are invalid. */
+function isCertDateError(err: unknown): boolean {
+  const code =
+    (err as { cause?: { code?: string } }).cause?.code ?? (err as { code?: string }).code;
+  return code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID';
+}
+
+/**
+ * fetch wrapper that uses strict TLS by default and transparently falls back to
+ * the cert-date-tolerant dispatcher if (and only if) we hit an expired /
+ * not-yet-valid certificate. The relaxed mode sticks for the rest of the
+ * process so we don't pay a failed round-trip on every subsequent request.
+ */
+async function tlsFetch(
+  url: string,
+  init: Parameters<typeof undiciFetch>[1],
+): Promise<Awaited<ReturnType<typeof undiciFetch>>> {
+  const withDispatcher = relaxTls ? { ...init, dispatcher: certTolerantAgent } : init;
+  try {
+    return await undiciFetch(url, withDispatcher);
+  } catch (err) {
+    if (!relaxTls && isCertDateError(err)) {
+      relaxTls = true;
+      logger.warn(
+        { supermarket: 'la-genovesa', host: GENOVESA_HOST },
+        'La Genovesa TLS cert is expired/not-yet-valid — falling back to ' +
+          'cert-date-tolerant TLS for this host (revert happens automatically ' +
+          'once they renew and the process restarts)',
+      );
+      return await undiciFetch(url, { ...init, dispatcher: certTolerantAgent });
+    }
+    throw err;
+  }
+}
+
 /** Build a human-readable detail string from a fetch failure (surfaces cause). */
 function describeFetchError(err: unknown): string {
   const e = err as { message?: string; cause?: unknown };
@@ -93,7 +148,7 @@ function describeFetchError(err: unknown): string {
 }
 
 /** Merge a response's Set-Cookie headers into the jar (handles HttpOnly too). */
-function storeCookies(res: Response): void {
+function storeCookies(res: Awaited<ReturnType<typeof undiciFetch>>): void {
   const list = (res.headers as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
   for (const raw of list) {
     const pair = raw.split(';', 1)[0] ?? '';
@@ -142,7 +197,7 @@ async function request(
       const ck = cookieHeader();
       if (ck) headers.Cookie = ck;
 
-      const res = await fetch(url, { headers, redirect: 'manual', signal: controller.signal });
+      const res = await tlsFetch(url, { headers, redirect: 'manual', signal: controller.signal });
       storeCookies(res);
 
       if (res.status === 429) {
