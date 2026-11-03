@@ -248,33 +248,32 @@ async function fetchVtex<T>(
  *   - PromotionTeasers (cleaner, structured)   -> we parse
  *   - Teasers          (legacy, oddly-shaped)  -> we ignore (kept in rawData)
  *
- * We pull the % discount when present in Effects.Parameters; otherwise we just
- * keep the human-readable Name (e.g. "Tarjeta Cencosud 15%").
+ * Teasers are CONDITIONAL offers — "pay with Tarjeta Cencosud", "2do al 70%", a
+ * site-wide campaign — NOT the cash shelf price. The real unconditional cash
+ * discount is already captured by `Price` (effective) vs `ListPrice`
+ * (struck-through), so a teaser must NEVER populate the offer-price /
+ * unit-discount columns; otherwise a card/campaign teaser leaks into the export
+ * as the product's sale price. We therefore keep teasers as INFORMATIONAL
+ * promotions only (their type + Name fill Promocion_1/2) and emit no
+ * `discountPct`/`offerPrice` — mirroring Coto's payment-method convention.
  */
 function extractPromotions(offer: VtexCommertialOffer): Promotion[] {
   const out: Promotion[] = [];
   for (const teaser of offer.PromotionTeasers ?? []) {
     if (!teaser?.Name) continue;
 
-    let discountPct: number | undefined;
-    for (const p of teaser.Effects?.Parameters ?? []) {
-      if (p.Name === 'PercentualDiscount' && p.Value) {
-        const n = Number(p.Value);
-        if (Number.isFinite(n)) discountPct = n;
-      }
-    }
-
-    // Heuristic: many supermarket teasers are payment-method offers
-    // ("Tarjeta Cencosud 15%", "Banco Galicia 20%"). We mark them as such so
-    // the UI can group/filter them; otherwise it's a generic discount.
+    // Classify for the UI/forensics only — none of these set a price field.
+    //   payment_method: card/financing ("Tarjeta Cencosud 15%", "Galicia 20%")
+    //   bundle:         multi-unit ("2do al 70% …", MinimumQuantity > 1)
+    //   discount:       any other teaser (still informational — see note above)
     const isPaymentMethod = /tarjeta|cred[ií]to|d[eé]bito|prepaga|naranja|cabal|amex|visa|master|santander|galicia|bna|bsf|cencosud/i.test(
       teaser.Name,
     );
+    const isMultiUnit = (teaser.Conditions?.MinimumQuantity ?? 0) > 1;
 
     out.push({
-      type: isPaymentMethod ? 'payment_method' : 'discount',
+      type: isPaymentMethod ? 'payment_method' : isMultiUnit ? 'bundle' : 'discount',
       description: teaser.Name,
-      ...(discountPct !== undefined ? { discountPct } : {}),
       raw: teaser,
     });
   }

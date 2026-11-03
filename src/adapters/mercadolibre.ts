@@ -108,6 +108,8 @@ interface ProductDetail {
 interface EcomodicoOffer {
   itemId: string | undefined;
   price: number;
+  /** Pre-discount ("original") price when the listing is on sale; else absent. */
+  originalPrice?: number;
   currency: string;
 }
 
@@ -316,9 +318,18 @@ export async function fetchEcomodicoOffer(
   const price = typeof offer.price === 'number' ? offer.price : NaN;
   if (!Number.isFinite(price) || price <= 0) return null;
 
+  // `original_price` is the regular (struck-through) price ML returns when the
+  // listing is on sale; it is null/absent — or not above `price` — when there
+  // is no discount. Keep it only when it is a genuine higher regular price.
+  const originalPrice =
+    typeof offer.original_price === 'number' && offer.original_price > price
+      ? offer.original_price
+      : undefined;
+
   return {
     itemId: offer.item_id,
     price,
+    ...(originalPrice !== undefined ? { originalPrice } : {}),
     currency: offer.currency_id || 'ARS',
   };
 }
@@ -370,8 +381,25 @@ async function scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     /* metadata is optional — price already in hand */
   }
 
+  // When Ecomodico's listing is on sale, `original_price` is the regular
+  // (struck-through) price. Expose it as `listPrice` so the export shows
+  // Precio_Regular (regular) and Precio_c_Oferta_1 (the sale price) — matching
+  // every other chain's convention — instead of the sale price silently
+  // masquerading as the regular price with no discount recorded.
   const promotions: Promotion[] = [];
-  return {
+  let listPrice: number | undefined;
+  if (offer.originalPrice !== undefined && offer.originalPrice > offer.price) {
+    listPrice = offer.originalPrice;
+    const discountPct = Math.round((1 - offer.price / offer.originalPrice) * 100);
+    promotions.push({
+      type: 'discount',
+      description: 'Oferta MercadoLibre',
+      offerPrice: offer.price,
+      ...(discountPct > 0 ? { discountPct } : {}),
+    });
+  }
+
+  const result: ScrapeResult = {
     price: offer.price,
     // A returned offer is a live, buyable listing → in stock.
     inStock: true,
@@ -379,8 +407,15 @@ async function scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     tierUsed: 'api',
     promotions,
     productInfo,
-    rawData: { source: 'ecomodico_offer', productId: id, itemId: offer.itemId },
+    rawData: {
+      source: 'ecomodico_offer',
+      productId: id,
+      itemId: offer.itemId,
+      ...(offer.originalPrice !== undefined ? { originalPrice: offer.originalPrice } : {}),
+    },
   };
+  if (listPrice !== undefined) result.listPrice = listPrice;
+  return result;
 }
 
 /**

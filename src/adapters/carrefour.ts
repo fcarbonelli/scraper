@@ -233,33 +233,33 @@ async function fetchVtex<T>(
  *   - PromotionTeasers (cleaner, structured)   -> we parse
  *   - Teasers          (legacy, oddly-shaped)  -> we ignore (kept in rawData)
  *
- * We pull % discount when present in Effects.Parameters; otherwise we just
- * keep the human-readable Name (e.g. "Tarjeta Carrefour 15%").
+ * Teasers are CONDITIONAL offers — "pay with Tarjeta Carrefour", "2do al 70%",
+ * a site-wide CyberMonday campaign — NOT the cash shelf price. The real
+ * unconditional cash discount is already captured by `Price` (effective) vs
+ * `ListPrice` (struck-through), so a teaser must NEVER populate the offer-price
+ * / unit-discount columns; otherwise e.g. "Tarjeta Carrefour 25% Off Martes
+ * Cyber" leaks into the export as the product's sale price. We therefore keep
+ * teasers as INFORMATIONAL promotions only (their type + Name fill
+ * Promocion_1/2) and emit no `discountPct`/`offerPrice` — mirroring Coto's
+ * payment-method convention.
  */
 function extractPromotions(offer: VtexCommertialOffer): Promotion[] {
   const out: Promotion[] = [];
   for (const teaser of offer.PromotionTeasers ?? []) {
     if (!teaser?.Name) continue;
 
-    let discountPct: number | undefined;
-    for (const p of teaser.Effects?.Parameters ?? []) {
-      if (p.Name === 'PercentualDiscount' && p.Value) {
-        const n = Number(p.Value);
-        if (Number.isFinite(n)) discountPct = n;
-      }
-    }
-
-    // Heuristic: many Carrefour teasers are payment-method offers
-    // ("Tarjeta Carrefour 15%", "Tarjeta Naranja 20%"). We mark them as such
-    // so the UI can group/filter them; otherwise it's a generic discount.
+    // Classify for the UI/forensics only — none of these set a price field.
+    //   payment_method: card/financing ("Tarjeta Carrefour 15%", "Naranja 20%")
+    //   bundle:         multi-unit ("PROMO-2do al 70% …", MinimumQuantity > 1)
+    //   discount:       any other teaser (still informational — see note above)
     const isPaymentMethod = /tarjeta|cred[ií]to|d[eé]bito|prepaga|naranja|cabal|amex|visa|master|santander|galicia|bna|bsf/i.test(
       teaser.Name,
     );
+    const isMultiUnit = (teaser.Conditions?.MinimumQuantity ?? 0) > 1;
 
     out.push({
-      type: isPaymentMethod ? 'payment_method' : 'discount',
+      type: isPaymentMethod ? 'payment_method' : isMultiUnit ? 'bundle' : 'discount',
       description: teaser.Name,
-      ...(discountPct !== undefined ? { discountPct } : {}),
       raw: teaser,
     });
   }

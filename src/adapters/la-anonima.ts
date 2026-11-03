@@ -66,7 +66,7 @@
  */
 
 import { fetch as undiciFetch } from 'undici';
-import { ScrapeError } from '../shared/errors.js';
+import { ScrapeError, describeNetworkError } from '../shared/errors.js';
 import { getProxyDispatcher, getFreshProxyDispatcher, usesProxy } from '../shared/proxy.js';
 import type {
   EanSearchResult,
@@ -305,11 +305,17 @@ async function fetchLaAnonimaHtml(
             { cause: err },
           );
         }
-        throw new ScrapeError(
+        // Connection-level failure (ECONNRESET / dead proxy exit IP / proxy
+        // blip surfaced as a bare "fetch failed"). When a proxy is in use,
+        // rotate to a fresh exit IP and retry — same as a 403 WAF block —
+        // instead of failing the product on a single bad connection. Without a
+        // proxy there are no rotations, so it propagates after the loop.
+        lastBlock = new ScrapeError(
           'network_error',
-          `La Anónima request failed: ${(err as Error).message}`,
+          `La Anónima request failed: ${describeNetworkError(err)}`,
           { cause: err },
         );
+        continue;
       }
 
       // WAF block on this exit IP — remember it and rotate to a fresh IP if we
