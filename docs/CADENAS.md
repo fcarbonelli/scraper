@@ -52,7 +52,8 @@ Decisiones que ya están en la fábrica y aplican a todas, salvo que la ficha di
 - **User-Agent de Chrome.** El WAF de Cencosud (Vea, Jumbo, Disco) responde 429 al UA de un bot, en el primer request. Si una cadena nueva hace lo mismo, el problema es el WAF, no el `rate_limit_ms`.
 - **`listPrice` basura.** A veces viene un número enorme (un “99% de descuento”). Se descarta si es más de 10 veces el precio de venta (`MAX_LIST_PRICE_RATIO`).
 - **Stock por zona.** Si el canal default vuelve sin precio o sin stock, se recorren los códigos postales de `src/adapters/zones.ts` (CABA 1414, GBA, La Plata, Córdoba, Rosario, Mendoza, Mar del Plata, Bahía Blanca, Tucumán, Neuquén). Se puede achicar por cadena con `supermarkets.config.geoRetry` / `config.zones`, sin deploy.
-- **Precio tachado vs promoción.** Tachado + precio más bajo van a `list_price` y `price`. `promotions[]` es solo para promos con nombre (medio de pago, 2x1). Un `promotions: []` en un producto con descuento es lo esperado.
+- **Precio tachado vs promoción.** Tachado + precio más bajo van a `list_price` y `price`. Los `PromotionTeasers` (tarjeta, "2do al 70%", campañas) son **solo texto** en `Promocion_1/2`: nunca llenan precio de oferta ni descuento, porque son condicionales y antes se filtraban como precio de venta. Un `promotions: []` en un producto con descuento es lo esperado.
+- **Cencosud es la excepción:** sus promos no están en el catálogo VTEX. Ver la sección de abajo.
 - **Carrefour** (`src/adapters/carrefour.ts`) es la copia anterior a la fábrica. Hace lo mismo y tiene sus tests. Las cadenas nuevas no se copian de ahí: usan `createVtexAdapter`.
 
 ### Sin trampa propia
@@ -61,13 +62,30 @@ Misma fábrica, solo cambia el host. Un bug de parseo acá se arregla en `vtex.t
 
 | Id | Cadena | Host | Notas de catálogo |
 | --- | --- | --- | --- |
-| `vea` | Vea | `www.vea.com.ar` | Cencosud. WAF sensible al UA |
+| `vea` | Vea | `www.vea.com.ar` | Cencosud. WAF sensible al UA. Promos aparte (ver abajo) |
 | `jumbo` | Jumbo | `www.jumbo.com.ar` | Cencosud. Igual que Vea |
 | `disco` | Disco | `www.disco.com.ar` | Cencosud. Igual que Vea |
 | `dia` | Día | `diaonline.supermercadosdia.com.ar` | El host no es `dia.com.ar` |
 | `cordiez` | Cordiez | `www.cordiez.com.ar` | Córdoba |
 | `supertop` | Supertop | `www.supertop.com.ar` | Río Cuarto y San Luis. La marca en el sitio es “Supermercados Top” |
 | `carrefour` | Carrefour | `www.carrefour.com.ar` | Misma idea VTEX, archivo legado `carrefour.ts` |
+
+### Promos de Cencosud (Vea, Jumbo, Disco)
+
+En el catálogo VTEX de Cencosud `Price` es siempre el precio regular, `PromotionTeasers` viene vacío y `ListPrice` es basura (unas 80 veces el precio). El “-35%” de la web lo pinta el theme con un endpoint propio, por SKU (no por productId):
+
+```
+POST /_v/search-promotions   { "seller": "<seller default>", "skus": ["<skuId>"] }
+```
+
+Devuelve buckets `generic`, `jumbo_prime` y `sgc`, con una promo por SKU: `code` (“30%”, “2do al 70%”, “2x1”, “Oferta”), `discountType`, `value`, `effectiveDiscount`, `start` y `end`. El adapter lo llama después del catálogo (`cencosudPromotions` en `createVtexAdapter`, lógica en `src/adapters/cencosud-promotions.ts`):
+
+- “N%” de `generic` → precio de oferta = precio × (1 − `effectiveDiscount`), con descuento.
+- “Oferta” `fixed_price` → `value` es el precio de oferta.
+- Multi-unidad (“2do al”, “2x1”), con tarjeta (`providers`), por día (`days`) o de los buckets `jumbo_prime`/`sgc` → solo texto.
+- Cada texto lleva la vigencia (“vigente 06/11 al 08/11”). Las promos fuera de fecha se descartan.
+
+El seller es el default que el theme tiene hardcodeado: Jumbo `jumboargentinaj5202martinez`, Disco `jumboargentinad061`, Vea `jumboargentinav700cordoba700`. **Un seller inválido no da error: devuelve buckets vacíos.** Si un día las tres cadenas quedan sin promos, lo primero es buscar `defaultSeller` en el bundle `gam-banners` del sitio. Si el endpoint falla, el scrape sigue sin promos, loguea un warning y deja el error en `raw_data.cencosudPromotions`.
 
 ### Changomas (`changomas`)
 
@@ -160,6 +178,7 @@ URL: `/atomo-ecommerce/<categoria>/<id>-<slug>---<EAN>.html`. El `external_id` e
 - `brand.name` del theme viene literal como `"$shop.name"`. No se publica marca.
 - El precio a veces llega con punto de miles (`"2.276"` = 2276). Tomarlo como decimal guarda $2.28. El parser trata como miles a los grupos de exactamente 3 dígitos.
 - Desde EC2 la conexión TCP se rechaza (`fetch failed`). Va por el proxy (`atomo` está en el default).
+- Promos: el JSON `data-product` del theme trae `has_discount` y `regular_price_amount`. Con descuento real, el regular va a `list_price` y el precio del JSON-LD es la oferta. Muchas fichas dicen “¡En oferta!” (`product-on-sale` en el `<body>`) **sin** descuento (`has_discount:false`, sin tachado). Eso queda como texto “En oferta”.
 
 Búsqueda: `?controller=search&s=<ean>`, y solo se acepta un resultado cuya URL termine en `---<EAN>.html`.
 
@@ -212,6 +231,8 @@ GET /products?currentUrl=p/<EAN>&method=getProductBasicData
 La respuesta es un fragmento HTML. Nombre, marca, EAN y categoría están en `data-*` del `.cart_button` y son públicos. El precio es `data-price`. Sin sesión vale la cadena `"private"`.
 
 `external_id` y la URL (`/p/<EAN>`) son el EAN. La búsqueda no necesita un buscador: se pide ese fragmento sin cookie y se exige que el primer `data-ean` sea el EAN pedido.
+
+Promos: los productos de folleto traen `data-saleName="Folleto Maxi"` en el `.cart_button`. Algunos además muestran el regular tachado (`.p_item_card_discounted_number_price <s>$ 3.829,00</s>` y `.p_item_card_discount_percentage`). En ese caso `data-price` **ya es** el precio de promo: el tachado va a `list_price` y `data-price` queda como oferta. Sin tachado, el folleto es solo texto. Se lee solo lo que está antes de “Productos Relacionados”, porque las tarjetas relacionadas traen sus propias cucardas. “Compra mínima: 3 unidades” no es una promo.
 
 ### Cómo se consigue el precio en producción
 
@@ -297,6 +318,8 @@ Archivo: `src/adapters/la-reina.ts`. Host: `www.lareinaonline.com.ar`. ASP clás
 
 Misma familia de páginas que La Gallega, con una diferencia: acá `Pr` es el código de barras; en La Gallega `Pr` es un id interno.
 
+Sin stock: la ficha sigue mostrando precio y agrega un `<div>SIN STOCK</div>` en rojo. Eso marca `inStock: false`. Antes el stock estaba fijo en `true` y esos productos salían con precio. Promos: a noviembre de 2026 no vimos ninguna marca de promo en las fichas, así que `promotions` queda vacío.
+
 ## La Gallega (`la-gallega`)
 
 Archivo: `src/adapters/la-gallega.ts`. Host: `www.lagallega.com.ar` (Rosario). Mismo ASP que La Reina.
@@ -324,6 +347,8 @@ GET /DetalleProducto?ArticuloID=…&PromID=…&Tipo=…&ClienteID=…&PresID=…
 ```
 
 Nombre en `p.titulo`, EAN en `.textDescripcionDetalle`, precio en `.textPrecioUnitario` (formato `$ 5.150,00`). El `external_id` es la composición `<ArticuloID>_<Tipo>_<PresID>_<PromID>`.
+
+Promos: el sitio las marca con `PromID` distinto de 0. A noviembre de 2026 todos los mapeos y todo el listado de Limpieza tienen `PromID=0`, así que no hay promos para parsear. Ojo: `PromID` queda congelado en el `external_id` desde el alta. Si algún día aparecen promos, hay que releerlo del resolver en cada scrape, no del `external_id`.
 
 **Certificado TLS**: La Genovesa usa un cert DV de Sectigo a 1 año y lo dejan vencer. El 2026-11-01 venció y toda la cadena cayó con `CERT_HAS_EXPIRED` (`fetch failed`). No podemos renovar su cert, así que el adapter tolera un cert **con fechas inválidas** (`CERT_HAS_EXPIRED` / `CERT_NOT_YET_VALID`) sólo para este host: arranca con TLS estricto y, recién cuando choca con ese error, cae a un dispatcher `rejectUnauthorized:false` (undici `Agent`) y loguea un warning. Es por proceso y auto-reversible: cuando renueven el cert y reinicie el proceso, vuelve solo a verificación completa. Nunca toca TLS global ni tolera errores de hostname/CA (eso sería MITM, no un vencimiento). Si vuelve a aparecer `CERT_HAS_EXPIRED` en los logs, es que no renovaron — es cosa de ellos, no del scraper.
 

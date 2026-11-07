@@ -591,6 +591,49 @@ export const maxiCarrefourAdapter: SupermarketAdapter = {
 // =============================================================================
 
 /**
+ * Read the main product's promo from the fragment.
+ *
+ * Maxi Pedido marks flyer items with `data-saleName` on the cart button (e.g.
+ * "Folleto Maxi") and, when it publishes the regular price, renders it
+ * struck-through: `<div class="p_item_card_discounted_number_price"><s>$ 3.829,00</s>`.
+ * `data-price` is then ALREADY the promo price, so the struck price becomes
+ * `listPrice` (Precio_Regular) and `data-price` the offer. A flyer badge with
+ * no struck price is text only. Only the block before "Productos Relacionados"
+ * is read — related cards carry their own badges and prices.
+ */
+export function extractMaxiPromotions(
+  html: string,
+  price: number,
+): { promotions: Promotion[]; listPrice?: number } {
+  const relatedAt = html.indexOf('p_related_products_result_container');
+  const main = relatedAt >= 0 ? html.slice(0, relatedAt) : html;
+
+  const saleName = readCartButtonAttr(main, 'data-saleName')?.trim() || undefined;
+  const struck = main.match(
+    /p_item_card_discounted_number_price[^>]*>\s*<s>\s*([^<]+?)\s*<\/s>/i,
+  )?.[1];
+  const regular = struck ? parseMaxiCarrefourPrice(struck.replace(/[^\d.,]/g, '')) : NaN;
+
+  // Same 10x sanity guard as VTEX ListPrice: a struck price that far above the
+  // selling price is a data error, not a discount.
+  if (Number.isFinite(regular) && regular > price + 0.01 && regular <= price * 10) {
+    return {
+      listPrice: regular,
+      promotions: [
+        {
+          type: 'discount',
+          description: saleName ?? 'Precio rebajado',
+          offerPrice: price,
+          discountPct: Math.round((1 - price / regular) * 10000) / 100,
+        },
+      ],
+    };
+  }
+  if (saleName) return { promotions: [{ type: 'unknown', description: saleName }] };
+  return { promotions: [] };
+}
+
+/**
  * Outcome of parsing a fragment.
  *   kind:'ok'      → got a price, returns the full ScrapeResult
  *   kind:'private' → catalog visible but price gated (data-price="private")
@@ -662,6 +705,9 @@ export function parseMaxiCarrefourFragment(
     productInfo,
     rawData: { html: html.length > 8000 ? html.slice(0, 8000) + '…' : html },
   };
+  const { promotions, listPrice } = extractMaxiPromotions(html, price);
+  result.promotions = promotions;
+  if (listPrice !== undefined) result.listPrice = listPrice;
   // hasSession is logged for forensics; nothing to gate on at this point.
   void opts.hasSession;
   return { kind: 'ok', result };
