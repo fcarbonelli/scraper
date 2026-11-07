@@ -15,7 +15,6 @@ import type { ScrapeContext } from '../adapters/types.js';
 import type { ScrapeJobData } from '../shared/queue.js';
 import { classifyError } from './classifyError.js';
 import { decideRetry } from './retryPolicy.js';
-import { generateEarlyAlertForRunSupermarket } from '../alerts/aggregate.js';
 import {
   loadJobInput,
   recordJobStart,
@@ -133,17 +132,6 @@ export async function processJob(
       durationMs,
       isFinal: !decision.shouldRetry,
     });
-
-    if (!decision.shouldRetry) {
-      try {
-        await generateEarlyAlertForRunSupermarket(
-          jobData.scrapeRunId,
-          input.supermarket.id,
-        );
-      } catch (alertErr) {
-        log.error({ err: alertErr }, 'early alert evaluation failed');
-      }
-    }
 
     log.warn(
       {

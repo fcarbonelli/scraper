@@ -3,73 +3,99 @@
     {
       "id": "a8b9c1d2-1234-4567-89ab-cdef01234567",
       "severity": "critical",
-      "type": "supermarket_degraded",
+      "type": "supermarket_down",
       "supermarket_id": "jumbo",
       "product_id": null,
-      "title": "Jumbo degraded",
-      "message": "50/50 products failing. Top errors: selector_failed (50)",
+      "title": "Jumbo caída",
+      "message": "0/50 productos con precio (0%). Lo habitual: ~98%. Errores: selector_failed (50). El sitio cambió su HTML/JSON: hay que mirar el adapter. Detalle y muestras: npm run incidents",
       "context": {
         "run_id": "7a02d4f8-2bc1-46e2-9012-001122334455",
-        "failure_rate": "100%",
+        "kind": "down",
         "total": 50,
         "succeeded": 0,
-        "failed": 50,
-        "top_errors": "selector_failed (50)"
+        "failed": 50
       },
+      "evidence": {
+        "run_id": "7a02d4f8-2bc1-46e2-9012-001122334455",
+        "kind": "down",
+        "dominant_error": "selector_failed",
+        "success_rate": 0,
+        "baseline_success_rate": 0.98,
+        "error_counts": { "selector_failed": 50 },
+        "samples": [
+          {
+            "supermarket_product_id": "2c4f8a10-9b7e-4d3a-8f21-6e5d4c3b2a19",
+            "job_execution_id": "e1f2a3b4-5c6d-4e7f-8a9b-0c1d2e3f4a5b",
+            "error_type": "selector_failed",
+            "error_message": "productId not found in pagetype response",
+            "external_url": "https://www.jumbo.com.ar/galletitas-oreo-original-118g/p"
+          }
+        ],
+        "card": "docs/CADENAS.md (Jumbo)"
+      },
+      "fingerprint": "scrape:jumbo",
+      "occurrences": 1,
       "status": "open",
       "created_at": "2026-05-07T09:32:14.000Z",
+      "last_seen_at": "2026-05-07T09:32:14.000Z",
       "resolved_at": null
     },
     {
       "id": "b9c0d2e3-2345-4678-9abc-def012345678",
-      "severity": "warning",
-      "type": "supermarket_unstable",
-      "supermarket_id": "disco",
+      "severity": "critical",
+      "type": "supermarket_blocked",
+      "supermarket_id": "maxi-carrefour",
       "product_id": null,
-      "title": "Disco unstable",
-      "message": "28/50 products failing (56%). Top errors: rate_limited (18), network_timeout (8)",
+      "title": "Maxi Carrefour: auth_required en 160 productos",
+      "message": "52/213 productos con precio (24%). Lo habitual: ~81%. Errores: auth_required (160), product_not_found (1). Sesión, cookie o token vencido (ver la tarjeta de la cadena en docs/CADENAS.md). Detalle y muestras: npm run incidents",
       "context": {
         "run_id": "7a02d4f8-2bc1-46e2-9012-001122334455",
-        "failure_rate": "56%",
-        "total": 50,
-        "succeeded": 22,
-        "failed": 28,
-        "top_errors": "rate_limited (18), network_timeout (8)"
+        "kind": "blocked",
+        "total": 213,
+        "succeeded": 52,
+        "failed": 161
       },
+      "evidence": {
+        "run_id": "7a02d4f8-2bc1-46e2-9012-001122334455",
+        "kind": "blocked",
+        "dominant_error": "auth_required",
+        "success_rate": 0.244,
+        "baseline_success_rate": 0.81,
+        "error_counts": { "auth_required": 160, "product_not_found": 1 },
+        "samples": [],
+        "card": "docs/CADENAS.md (Maxi Carrefour)"
+      },
+      "fingerprint": "scrape:maxi-carrefour",
+      "occurrences": 3,
       "status": "acknowledged",
-      "created_at": "2026-05-07T09:33:01.000Z",
-      "resolved_at": null
-    },
-    {
-      "id": "c0d1e3f4-3456-4789-abcd-ef0123456789",
-      "severity": "info",
-      "type": "product_not_found",
-      "supermarket_id": "carrefour",
-      "product_id": "f5b53041-5ccc-4d3e-9f1c-2c0c3a45d2cf",
-      "title": "Product 404 on Carrefour",
-      "message": "Galletitas Oreo Original 118g returned 404 — possibly delisted by the supermarket",
-      "context": {
-        "external_id": "94512",
-        "external_url": "https://www.carrefour.com.ar/galletitas-oreo-original-118g/p"
-      },
-      "status": "open",
-      "created_at": "2026-05-07T09:33:42.000Z",
+      "created_at": "2026-05-05T09:33:01.000Z",
+      "last_seen_at": "2026-05-07T09:33:01.000Z",
       "resolved_at": null
     },
     {
       "id": "d1e2f4a5-4567-489a-bcde-f01234567890",
-      "severity": "critical",
-      "type": "selector_broken",
+      "severity": "warning",
+      "type": "supermarket_drop",
       "supermarket_id": "disco",
       "product_id": null,
-      "title": "Disco selector broken (resolved)",
-      "message": "selector_failed dominated yesterday's run. Adapter updated.",
-      "context": { "run_id": "8b1c5e30-3c8a-4933-8c11-eeff99887766" },
+      "title": "Disco trae muchos menos precios que lo habitual",
+      "message": "80/206 productos con precio (39%). Lo habitual: ~99%. Errores: product_not_found (126). Casi todo da \"no encontrado\": ¿cambiaron las URLs o la sucursal? Detalle y muestras: npm run incidents",
+      "context": {
+        "run_id": "8b1c5e30-3c8a-4933-8c11-eeff99887766",
+        "kind": "drop",
+        "total": 206,
+        "succeeded": 80,
+        "failed": 126
+      },
+      "evidence": {},
+      "fingerprint": "scrape:disco",
+      "occurrences": 1,
       "status": "resolved",
       "created_at": "2026-05-06T09:32:14.000Z",
-      "resolved_at": "2026-05-06T14:10:08.000Z"
+      "last_seen_at": "2026-05-06T09:32:14.000Z",
+      "resolved_at": "2026-05-07T09:31:40.000Z"
     }
   ],
-  "pagination": { "page": 1, "limit": 50, "total": 4, "totalPages": 1 },
+  "pagination": { "page": 1, "limit": 50, "total": 3, "totalPages": 1 },
   "meta": { "ts": "2026-05-07T18:30:14.679Z" }
 }

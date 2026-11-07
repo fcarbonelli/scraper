@@ -21,7 +21,7 @@ Each file is a complete response body — `data` + `meta` (and `pagination` for 
 | `supermarket-products.json` | `GET /v1/supermarkets/:id/products`       | Products mapped to a supermarket with latest snapshot                 |
 | `runs-list.json`            | `GET /v1/runs?limit=10`                   | Mix of completed and one currently-running run                        |
 | `run-detail.json`           | `GET /v1/runs/:id`                        | Run detail with per-supermarket breakdown and top errors              |
-| `alerts-list.json`          | `GET /v1/alerts`                          | 4 alerts: one critical, one warning, one info, one resolved           |
+| `alerts-list.json`          | `GET /v1/alerts`                          | 3 incidents: down (open), blocked (acknowledged), drop (resolved)     |
 | `error-401.json`            | (any auth-required endpoint with bad key) | Missing/invalid API key                                               |
 | `error-404.json`            | `GET /v1/products/<bogus-uuid>`           | Resource not found                                                    |
 | `revista-items-all.json`    | `GET /v1/revistas/items`                  | Cross-magazine approved item with chain/magazine context              |

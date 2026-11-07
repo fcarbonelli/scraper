@@ -14,6 +14,9 @@ import { logger } from '../shared/logger.js';
 import { notifyAlert, buildSupermarketAlertActions, type Severity } from './notify.js';
 
 export type AlertType =
+  | 'supermarket_down'
+  | 'supermarket_blocked'
+  | 'supermarket_drop'
   | 'supermarket_degraded'
   | 'supermarket_unstable'
   | 'selector_broken'
@@ -39,6 +42,13 @@ export interface CreateAlertArgs {
   productId?: string | null;
   /** Free-form details kept in the DB row's `context` jsonb. */
   context?: Record<string, unknown>;
+  /**
+   * Dedup key for incidents (see incidents.ts). At most one open/acknowledged
+   * row per fingerprint — enforced by a partial unique index (mig 038).
+   */
+  fingerprint?: string;
+  /** Debugging material (samples, error counts) kept out of the Telegram text. */
+  evidence?: Record<string, unknown>;
   /** Optional click-through URL added to the Telegram message. */
   url?: string;
   /** If true, skips Telegram even if severity passes the threshold. */
@@ -61,6 +71,8 @@ export async function createAlert(args: CreateAlertArgs): Promise<CreatedAlert> 
       supermarket_id: args.supermarketId ?? null,
       product_id: args.productId ?? null,
       context: args.context ?? {},
+      fingerprint: args.fingerprint ?? null,
+      evidence: args.evidence ?? {},
       status: 'open',
     })
     .select('id')
@@ -69,26 +81,7 @@ export async function createAlert(args: CreateAlertArgs): Promise<CreatedAlert> 
   if (error) throw error;
   const alertId = data.id as string;
 
-  let notified = false;
-  if (!args.silent) {
-    const notifyArgs: Parameters<typeof notifyAlert>[0] = {
-      severity: args.severity,
-      title: args.title,
-      body: args.message,
-      context: buildNotifyContext(args),
-    };
-    if (args.url !== undefined) notifyArgs.url = args.url;
-
-    // Attach action buttons when we have enough context.
-    // The alert's context column stores run_id + supermarket — the callback
-    // handler looks those up by alert_id when a button is pressed.
-    const runId = args.context?.run_id;
-    if (args.supermarketId && typeof runId === 'string') {
-      notifyArgs.actions = buildSupermarketAlertActions(alertId);
-    }
-
-    notified = await notifyAlert(notifyArgs);
-  }
+  const notified = args.silent ? false : await notifyForAlert(alertId, args);
 
   logger.info(
     {
@@ -102,6 +95,29 @@ export async function createAlert(args: CreateAlertArgs): Promise<CreatedAlert> 
   );
 
   return { id: alertId, notified };
+}
+
+/**
+ * Send the Telegram message for an existing alert row. Also used by
+ * incidents.ts when an open incident escalates.
+ */
+export async function notifyForAlert(alertId: string, args: CreateAlertArgs): Promise<boolean> {
+  const notifyArgs: Parameters<typeof notifyAlert>[0] = {
+    severity: args.severity,
+    title: args.title,
+    body: args.message,
+    context: buildNotifyContext(args),
+  };
+  if (args.url !== undefined) notifyArgs.url = args.url;
+
+  // The callback handler looks up run_id + supermarket from the alert row by
+  // alert_id when a button is pressed, so buttons need both to be present.
+  const runId = args.context?.run_id;
+  if (args.supermarketId && typeof runId === 'string') {
+    notifyArgs.actions = buildSupermarketAlertActions(alertId);
+  }
+
+  return notifyAlert(notifyArgs);
 }
 
 /**

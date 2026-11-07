@@ -46,12 +46,20 @@ const RECOVERY_DOMINANT_FRACTION = 0.5;
  * region_unavailable, auth_required, parse_failed) reflects a real content /
  * config problem that a blind retry won't fix.
  */
-const TRANSIENT_ERROR_TYPES: ReadonlySet<ErrorType | 'unknown'> = new Set<
-  ErrorType | 'unknown'
->(['network_error', 'network_timeout', 'rate_limited', 'site_server_error', 'unknown']);
+const TRANSIENT_ERROR_TYPES: ReadonlySet<string> = new Set<ErrorType | 'unknown'>([
+  'network_error',
+  'network_timeout',
+  'rate_limited',
+  'site_server_error',
+  'unknown',
+]);
 
-/** Whether an error class is transient enough to be worth an automatic retry. */
-export function isTransientErrorType(type: ErrorType | 'unknown' | null | undefined): boolean {
+/**
+ * Whether an error class is transient enough to be worth an automatic retry.
+ * Takes a plain string because run stats also carry synthetic types
+ * (e.g. `not_run`), which are never transient.
+ */
+export function isTransientErrorType(type: string | null | undefined): boolean {
   return type != null && TRANSIENT_ERROR_TYPES.has(type);
 }
 
@@ -59,7 +67,7 @@ export interface RecoveryDecisionInput {
   /** Number of failed products for this supermarket in the run. */
   failed: number;
   /** Dominant (most common) final error type among failures, if any. */
-  dominantType: ErrorType | 'unknown' | null;
+  dominantType: string | null;
   /** Fraction (0..1) of failures that share the dominant type. */
   dominantFraction: number;
   /** Whether the run being finalized is itself a recovery run. */
