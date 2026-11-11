@@ -230,8 +230,8 @@ La respuesta es un objeto con la siguiente estructura:
 | `Fecha_Creacion` | Sí | Fecha y hora de creación del registro (ISO 8601). | `"2025-10-06T09:15:00.000Z"` |
 | `Fecha_Modificacion` | Sí | Fecha y hora de última actualización del registro (ISO 8601). | `"2025-10-06T09:15:00.000Z"` |
 | `Fecha_Relevamiento` | Sí | Fecha (sin hora) en que se relevó el precio. Generalmente coincide con el día de `Fecha_Creacion`. Es el campo sobre el que operan los filtros `from` / `to`. | `"2025-10-06"` |
-| `Provincia` | Sí | Provincia asociada a la cadena/sucursal relevada. | `"MENDOZA"` |
-| `Zona` | Sí | Zona geográfica. | `"OESTE"` |
+| `Provincia` | Sí | Provincia de la sucursal relevada. En relevamiento presencial sale de la visita: la provincia cargada, o la localidad si la provincia quedó vacía (ahí el relevador anota la región, p. ej. `CHACO`). | `"MENDOZA"` |
+| `Zona` | Sí | Zona geográfica. En relevamiento presencial es la localidad/región de la visita (`CHACO`, `CUYO`, `POSADAS`…), no la zona por defecto de la cadena. | `"OESTE"` |
 | `Mes` | Sí | Mes del relevamiento en formato legible. | `"Octubre del 2025"` |
 | `Semana` | Sí | Número de semana del año. | `"40"` |
 | `Canal` | Sí | Canal comercial. | `"SPM REGIONAL"` |

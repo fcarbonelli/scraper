@@ -153,8 +153,10 @@ const SUPERMARKETS: SupermarketSeed[] = [
   // --- IN-STORE ONLY (mayorista; prices come from field workers scanning ------
   //     barcodes on-site — no web adapter, no revista). Excluded from the daily
   //     scrape; each approved price publishes on its approval day only (no
-  //     carry-forward). Geography below is a best-guess default — adjust
-  //     provincia/zona/canal as needed.
+  //     carry-forward). provincia/zona here are only the FALLBACK for a visit
+  //     that left both location fields blank. The client export (migration 039)
+  //     labels each in-store row with the visit's own localidad/provincia,
+  //     because one chain is surveyed in several regions.
   {
     id: 'diarco',
     name: 'Diarco',
