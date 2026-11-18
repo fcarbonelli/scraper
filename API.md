@@ -256,8 +256,11 @@ export type LifecycleStatus = 'active' | 'out_of_stock' | 'delisted';
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 export type AlertStatus   = 'open' | 'acknowledged' | 'resolved';
 export type AlertType =
-  | 'supermarket_degraded'
-  | 'supermarket_unstable'
+  | 'supermarket_down'
+  | 'supermarket_blocked'
+  | 'supermarket_drop'
+  | 'supermarket_degraded'      // legacy (pre-2026-11), no longer emitted
+  | 'supermarket_unstable'      // legacy (pre-2026-11), no longer emitted
   | 'selector_broken'
   | 'rate_limited'
   | 'auth_required'
@@ -423,8 +426,15 @@ export interface Alert {
   title: string;
   message: string;
   context: Record<string, unknown>;      // shape varies per alert type
+  /** Debugging material: error_counts, samples (failing URLs + messages), run_id. {} when none. */
+  evidence: Record<string, unknown>;
+  /** Incident dedup key (e.g. "scrape:vea"); null for one-off alerts. */
+  fingerprint: string | null;
+  /** Times the incident was re-detected while open (1 = first time). */
+  occurrences: number;
   status: AlertStatus;
   created_at: string;
+  last_seen_at: string;
   resolved_at: string | null;
 }
 
@@ -1485,7 +1495,7 @@ Set a product's durable lifecycle at a chain, independent of any run.
 
 ## Alerts
 
-Anything the system thinks needs human attention: a supermarket with high failure rate, a redesigned page, etc.
+Anything the system thinks needs human attention. Scrape alerts are **incidents**: one row per broken chain (keyed by `fingerprint`), refreshed while it stays broken (`occurrences`, `last_seen_at`, `evidence`) and auto-resolved by the next healthy run. Rules: [`docs/INCIDENTES.md`](./docs/INCIDENTES.md).
 
 ### `GET /v1/alerts`
 
@@ -1508,21 +1518,41 @@ List alerts.
     {
       "id": "...",
       "severity": "critical",
-      "type": "supermarket_degraded",
+      "type": "supermarket_down",
       "supermarket_id": "carrefour",
       "product_id": null,
-      "title": "Carrefour degraded",
-      "message": "97/100 products failing. Top errors: selector_failed (89), 404 (8)",
+      "title": "Carrefour caída",
+      "message": "3/100 productos con precio (3%). Lo habitual: ~97%. Errores: selector_failed (89), product_not_found (8). El sitio cambió su HTML/JSON: hay que mirar el adapter. Detalle y muestras: npm run incidents",
       "context": {
         "run_id": "...",
-        "failure_rate": "97%",
+        "kind": "down",
         "total": 100,
         "succeeded": 3,
-        "failed": 97,
-        "top_errors": "selector_failed (89), 404 (8)"
+        "failed": 97
       },
+      "evidence": {
+        "run_id": "...",
+        "kind": "down",
+        "dominant_error": "selector_failed",
+        "success_rate": 0.03,
+        "baseline_success_rate": 0.97,
+        "error_counts": { "selector_failed": 89, "product_not_found": 8 },
+        "samples": [
+          {
+            "supermarket_product_id": "...",
+            "job_execution_id": "...",
+            "error_type": "selector_failed",
+            "error_message": "price node not found",
+            "external_url": "https://www.carrefour.com.ar/…/p"
+          }
+        ],
+        "card": "docs/CADENAS.md (Carrefour)"
+      },
+      "fingerprint": "scrape:carrefour",
+      "occurrences": 2,
       "status": "open",
       "created_at": "2026-04-30T09:32:14.000Z",
+      "last_seen_at": "2026-05-01T09:31:02.000Z",
       "resolved_at": null
     }
   ],
@@ -1535,19 +1565,18 @@ List alerts.
 
 | Severity | Meaning |
 |---|---|
-| `critical` | Action required. Telegram notification fires. Site degraded. |
-| `warning` | Possible issue worth investigating. |
+| `critical` | Action required. Telegram notification fires (once per incident). |
+| `warning` | Worth investigating. Telegram fires once per incident (default `TELEGRAM_MIN_SEVERITY=warning`). |
 | `info` | Non-urgent context (price anomaly, individual stock change). |
 
 #### Alert types
 
 | Type | Trigger |
 |---|---|
-| `supermarket_degraded` | ≥80% of products failing on a supermarket |
-| `supermarket_unstable` | 30–80% failure rate |
-| `selector_broken` | High failure rate dominated by `selector_failed` errors |
-| `rate_limited` | High failure rate dominated by HTTP 429s |
-| `auth_required` | Site started requiring login |
+| `supermarket_down` | ≤10% of the chain's products came back with a price (critical) |
+| `supermarket_blocked` | ≥25% of the chain failed with `auth_required` / `selector_failed` / `parse_failed`, never finished, or kept failing transiently after the automatic retry (critical) |
+| `supermarket_drop` | Success rate fell below half of the chain's 7-run median (warning) |
+| `supermarket_degraded`, `supermarket_unstable`, `selector_broken`, `rate_limited`, `auth_required` | Legacy per-run alerts, no longer emitted (historical rows only) |
 | `product_not_found` | Individual product gone (HTTP 404) |
 | `price_missing` | Page loaded but price couldn't be parsed |
 | `price_anomaly` | Price changed >50% overnight *(reserved, not yet emitted)* |

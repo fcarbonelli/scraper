@@ -14,6 +14,9 @@ import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
 
 export const alertsRouter = Router();
 
+const ALERT_COLUMNS =
+  'id, severity, type, supermarket_id, product_id, title, message, context, evidence, fingerprint, occurrences, status, created_at, last_seen_at, resolved_at';
+
 // =============================================================================
 // GET /v1/alerts
 // =============================================================================
@@ -32,10 +35,7 @@ alertsRouter.get('/', async (req: Request, res: Response) => {
 
   let query = db
     .from('alerts')
-    .select(
-      'id, severity, type, supermarket_id, product_id, title, message, context, status, created_at, resolved_at',
-      { count: 'exact' },
-    )
+    .select(ALERT_COLUMNS, { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -79,9 +79,7 @@ alertsRouter.patch('/:id', async (req: Request, res: Response) => {
     .from('alerts')
     .update(update)
     .eq('id', req.params.id)
-    .select(
-      'id, severity, type, supermarket_id, product_id, title, message, context, status, created_at, resolved_at',
-    )
+    .select(ALERT_COLUMNS)
     .single();
   if (error) throw error;
 

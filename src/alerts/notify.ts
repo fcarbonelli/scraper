@@ -95,6 +95,17 @@ export async function notifyAlert(payload: AlertPayload): Promise<boolean> {
   return messageId !== null;
 }
 
+/**
+ * Silent "✅ back to normal" note for an incident the finalizer auto-resolved,
+ * so an open Telegram thread isn't left looking unattended. No sound.
+ */
+export async function notifyResolved(title: string, body: string): Promise<boolean> {
+  if (!isConfigured()) return false;
+  const text = `✅ <b>${escapeHtml(title)}</b>\n\n${escapeHtml(body)}`;
+  const messageId = await sendMessage(text, undefined, { silent: true });
+  return messageId !== null;
+}
+
 function isConfigured(): boolean {
   return Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID);
 }

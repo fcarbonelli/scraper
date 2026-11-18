@@ -35,6 +35,7 @@ import { vtexSearchByEan } from './vtex-search.js';
 import { runWithGeoFallback } from './geo-retry.js';
 import { resolveRegionId, withRegion } from './vtex-region.js';
 import { pickStoreOffer } from './vtex-sellers.js';
+import { loadCencosudPromotions } from './cencosud-promotions.js';
 import type { Zone } from './zones.js';
 
 // =============================================================================
@@ -248,33 +249,32 @@ async function fetchVtex<T>(
  *   - PromotionTeasers (cleaner, structured)   -> we parse
  *   - Teasers          (legacy, oddly-shaped)  -> we ignore (kept in rawData)
  *
- * We pull the % discount when present in Effects.Parameters; otherwise we just
- * keep the human-readable Name (e.g. "Tarjeta Cencosud 15%").
+ * Teasers are CONDITIONAL offers — "pay with Tarjeta Cencosud", "2do al 70%", a
+ * site-wide campaign — NOT the cash shelf price. The real unconditional cash
+ * discount is already captured by `Price` (effective) vs `ListPrice`
+ * (struck-through), so a teaser must NEVER populate the offer-price /
+ * unit-discount columns; otherwise a card/campaign teaser leaks into the export
+ * as the product's sale price. We therefore keep teasers as INFORMATIONAL
+ * promotions only (their type + Name fill Promocion_1/2) and emit no
+ * `discountPct`/`offerPrice` — mirroring Coto's payment-method convention.
  */
 function extractPromotions(offer: VtexCommertialOffer): Promotion[] {
   const out: Promotion[] = [];
   for (const teaser of offer.PromotionTeasers ?? []) {
     if (!teaser?.Name) continue;
 
-    let discountPct: number | undefined;
-    for (const p of teaser.Effects?.Parameters ?? []) {
-      if (p.Name === 'PercentualDiscount' && p.Value) {
-        const n = Number(p.Value);
-        if (Number.isFinite(n)) discountPct = n;
-      }
-    }
-
-    // Heuristic: many supermarket teasers are payment-method offers
-    // ("Tarjeta Cencosud 15%", "Banco Galicia 20%"). We mark them as such so
-    // the UI can group/filter them; otherwise it's a generic discount.
+    // Classify for the UI/forensics only — none of these set a price field.
+    //   payment_method: card/financing ("Tarjeta Cencosud 15%", "Galicia 20%")
+    //   bundle:         multi-unit ("2do al 70% …", MinimumQuantity > 1)
+    //   discount:       any other teaser (still informational — see note above)
     const isPaymentMethod = /tarjeta|cred[ií]to|d[eé]bito|prepaga|naranja|cabal|amex|visa|master|santander|galicia|bna|bsf|cencosud/i.test(
       teaser.Name,
     );
+    const isMultiUnit = (teaser.Conditions?.MinimumQuantity ?? 0) > 1;
 
     out.push({
-      type: isPaymentMethod ? 'payment_method' : 'discount',
+      type: isPaymentMethod ? 'payment_method' : isMultiUnit ? 'bundle' : 'discount',
       description: teaser.Name,
-      ...(discountPct !== undefined ? { discountPct } : {}),
       raw: teaser,
     });
   }
@@ -479,6 +479,14 @@ export interface VtexAdapterOptions {
   storeSellerFallback?: {
     /** Postal code whose branch sellers to sweep (e.g. CABA "1414"). */
     postalCode: string;
+  };
+  /**
+   * Cencosud only (Jumbo/Disco/Vea): read promos from the chain's custom
+   * `/_v/search-promotions` endpoint, since its VTEX catalog carries none.
+   * `seller` is the store theme's default branch seller. See cencosud-promotions.ts.
+   */
+  cencosudPromotions?: {
+    seller: string;
   };
 }
 
@@ -729,6 +737,53 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
     );
   }
 
+  /** Pick the catalog strategy for this store and scrape price/stock. */
+  function scrapeCatalog(ctx: ScrapeContext): Promise<ScrapeResult> {
+    // Stores that split delivery/pickup inventory across sellers (ChangoMas /
+    // masonline) can't be regionalized via regionId, so sweep branch sellers.
+    if (opts.storeSellerFallback) {
+      return scrapeWithStoreSellerFallback(ctx, opts.storeSellerFallback.postalCode);
+    }
+    // Stores that gate their catalog by SALES CHANNEL (e.g. El Abastecedor)
+    // can't be regionalized via regionId, so sweep sales channels instead.
+    if (opts.salesChannels?.length) {
+      return scrapeWithSalesChannelSweep(ctx);
+    }
+    // Otherwise VTEX regionalizes availability/price by postal code: try the
+    // default sales channel first; if the product is missing / price-less /
+    // out of stock there, runWithGeoFallback re-scrapes from other AR zones
+    // via a VTEX regionId.
+    return runWithGeoFallback({
+      logger: ctx.logger,
+      config: ctx.config.config,
+      attempt: (zone) => scrapeZone(ctx, zone),
+    });
+  }
+
+  /**
+   * Cencosud: prepend the chain's own promos for this SKU (its VTEX teasers are
+   * always empty). Best-effort — a promo-endpoint failure keeps the price.
+   */
+  async function attachCencosudPromotions(
+    ctx: ScrapeContext,
+    result: ScrapeResult,
+    seller: string,
+  ): Promise<void> {
+    const sku = result.productInfo?.metadata?.['itemId'];
+    if (typeof sku !== 'string' || !sku) return;
+    const { promotions, raw } = await loadCencosudPromotions({
+      baseUrl: base,
+      seller,
+      sku,
+      price: result.price,
+      userAgent,
+      signal: ctx.signal,
+      logger: ctx.logger,
+    });
+    result.promotions = [...promotions, ...(result.promotions ?? [])];
+    result.rawData = { ...(result.rawData ?? {}), cencosudPromotions: raw };
+  }
+
   return {
     id: opts.id,
     name: opts.name,
@@ -756,25 +811,9 @@ export function createVtexAdapter(opts: VtexAdapterOptions): SupermarketAdapter 
           `${opts.name} adapter requires external_id (productId), got empty.`,
         );
       }
-      // Stores that split delivery/pickup inventory across sellers (ChangoMas /
-      // masonline) can't be regionalized via regionId, so sweep branch sellers.
-      if (opts.storeSellerFallback) {
-        return scrapeWithStoreSellerFallback(ctx, opts.storeSellerFallback.postalCode);
-      }
-      // Stores that gate their catalog by SALES CHANNEL (e.g. El Abastecedor)
-      // can't be regionalized via regionId, so sweep sales channels instead.
-      if (opts.salesChannels?.length) {
-        return scrapeWithSalesChannelSweep(ctx);
-      }
-      // Otherwise VTEX regionalizes availability/price by postal code: try the
-      // default sales channel first; if the product is missing / price-less /
-      // out of stock there, runWithGeoFallback re-scrapes from other AR zones
-      // via a VTEX regionId.
-      return runWithGeoFallback({
-        logger: ctx.logger,
-        config: ctx.config.config,
-        attempt: (zone) => scrapeZone(ctx, zone),
-      });
+      const result = await scrapeCatalog(ctx);
+      if (opts.cencosudPromotions) await attachCencosudPromotions(ctx, result, opts.cencosudPromotions.seller);
+      return result;
     },
   };
 }

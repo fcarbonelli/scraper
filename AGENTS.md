@@ -10,6 +10,7 @@ A Node/TypeScript backend service that scrapes 100+ products across 30+ supermar
 
 - `**README.md**` — human entry point. Start here if you inherited the repo.
 - `**docs/COMO_FUNCIONA.md**` — how the system actually runs today (daily timeline, the three price sources, the publish gate, which older docs lag the code).
+- `**docs/INCIDENTES.md**` — when Telegram pings (only really-broken chains: down / blocked / sharp drop vs baseline, once per incident, auto-resolved) and the **playbook to fix the open incidents** (`npm run incidents` lists them with evidence: error counts, sample failing URLs). Read this when asked to "revisar los incidentes".
 - `**docs/CADENAS.md**` — one operational card per supermarket (stack, where the price comes from, failure modes we already hit, env/config). Open this when a chain breaks. Update the card in the same change if you change that adapter's behavior.
 - `**plan.md**` — canonical design doc (architecture, full DB schema, all key decisions, phase plan). If anything in this file conflicts with `plan.md`, `plan.md` wins; update it. The phase checklist in §10 lags production; `docs/COMO_FUNCIONA.md` is the current-behavior summary.
 - `**API.md**` — external-facing REST API reference (auth, endpoints, TypeScript types, response shapes, UI workflows). The source of truth for API consumers (frontend, partners). Keep it in sync when changing routes.
@@ -103,10 +104,12 @@ scraper/
     │   ├── queue.ts                   ← BullMQ + Redis
     │   ├── sentry.ts                  ← error tracking
     │   └── errors.ts                  ← ScrapeError + ErrorType
-    ├── alerts/
+    ├── alerts/                        ← see docs/INCIDENTES.md
     │   ├── notify.ts                  ← Telegram bot sender
     │   ├── createAlert.ts             ← DB insert + optional Telegram
-    │   └── aggregate.ts               ← per-supermarket aggregation
+    │   ├── policy.ts                  ← pure incident rules (down / blocked / drop), unit-tested
+    │   ├── incidents.ts               ← fingerprint dedupe: open / refresh / escalate / auto-resolve
+    │   └── aggregate.ts               ← per-chain run stats (paged, merged with recovery runs) → policy → incidents
     ├── ingest/
     │   ├── index.ts                   ← detect supermarket + ensure rows + optional first scrape (used by scripts AND POST /v1/products); accepts a forced `ean`
     │   └── bindEan.ts                 ← bind an EAN-less mapping to the canonical master (merge + enrich; heals blank export columns)
@@ -178,6 +181,7 @@ scraper/
 | `npm run db:setup`                | Inserts/updates supermarket rows                      | Runs automatically on deploy (idempotent). Manual only for one-offs against a fresh DB. |
 | `npm run test:adapter`            | Hits adapter directly (no DB)                         | Debug parsing changes fast                             |
 | `npm run test:telegram`           | Sends one of each severity to your bot                | Verify Telegram setup                                  |
+| `npx tsx --env-file=.env scripts/incidents.ts [--super=<id>] [--json] [--resolve=<id>[,<id>] --note="..."]` (`npm run incidents`) | List live incidents with evidence (error counts, sample failing URLs + messages); close one by hand after a fix | When a Telegram ping arrives — the agent's pending-fixes list (playbook: `docs/INCIDENTES.md`) |
 | `npm run scrape:url -- <url>`     | Full pipeline test for a single URL (bypasses queue)  | Verify a supermarket works end-to-end without Redis    |
 | `npm run scrape:bulk -- <file>`   | Bulk-import URLs from a text file (one per line)      | Add many products at once; idempotent, safe to re-run  |
 | `npx tsx --env-file=.env scripts/heal-eans.ts [--judge] [--auto] [--apply=<csv>]` | Backfill catalog EANs onto EAN-less products (fixes blank export columns); `--judge` adds an LLM adjudication pass | One-time backlog cleanup: report → (judge) → confirm CSV → apply. NB: use `npx tsx` directly — PowerShell drops `--` in `npm run … -- <flags>` |
@@ -350,6 +354,7 @@ The per-chain failure modes (WAF, sucursal cookie, seeded PHPSESSID, sales chann
 
 In order:
 
+0. `**npm run incidents**` — live incidents with sample failing URLs and error messages (see `docs/INCIDENTES.md`).
 1. `**job_executions` table** in Supabase
   ```sql
    SELECT supermarket_product_id, status, error_type, error_message, started_at
@@ -357,9 +362,9 @@ In order:
    ORDER BY started_at DESC LIMIT 20;
   ```
    Tells you what failed and the error category.
-2. `**alerts` table** for aggregated issues:
+2. `**alerts` table** for aggregated issues (one live row per `fingerprint`; `evidence` has the samples):
   ```sql
-   SELECT * FROM alerts WHERE status='open' ORDER BY created_at DESC;
+   SELECT * FROM alerts WHERE status IN ('open','acknowledged') ORDER BY last_seen_at DESC;
   ```
 3. **Sentry** (if `SENTRY_DSN` is configured) for unhandled exceptions with stack traces.
 4. **PM2 logs** in production: `pm2 logs worker --lines 1000`.

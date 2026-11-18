@@ -109,6 +109,12 @@ const TOT_PRE_TIK_RE =
 const SEO_TITLE_RE =
   /<h1[^>]*class=['"][^'"]*\bseo-title\b[^'"]*['"][^>]*>([\s\S]*?)<\/h1>/i;
 
+/**
+ * Out-of-stock products still render their price, plus a red
+ * `<div …>SIN STOCK</div>` in the product block (in-stock pages carry no such text).
+ */
+const SIN_STOCK_RE = /<div[^>]*>\s*SIN\s+STOCK\s*<\/div>/i;
+
 interface ParsedProduct {
   name: string | undefined;
   price: number;
@@ -273,7 +279,7 @@ export function parseLaReinaHtml(
 
   return {
     price: parsed.price,
-    inStock: true,
+    inStock: !SIN_STOCK_RE.test(html),
     currency: 'ARS',
     tierUsed: 'html',
     promotions: [] as Promotion[],

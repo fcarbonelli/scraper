@@ -469,15 +469,59 @@ export function parseAtomoHtml(
   if (offer?.priceValidUntil) metadata.priceValidUntil = offer.priceValidUntil;
   if (Object.keys(metadata).length > 0) productInfo.metadata = metadata;
 
-  return {
+  const { promotions, listPrice } = extractAtomoPromotions(html, price);
+  const result: ScrapeResult = {
     price,
     inStock,
     currency,
     tierUsed: 'html',
-    promotions: [] as Promotion[],
+    promotions,
     productInfo,
     rawData: { jsonLd: product },
   };
+  if (listPrice !== undefined) result.listPrice = listPrice;
+  return result;
+}
+
+/**
+ * Read the main product's promo from the PrestaShop page.
+ *
+ * The theme's `data-product` JSON (HTML-entity encoded) carries `has_discount`
+ * and `regular_price_amount`; with a real discount the JSON-LD price is already
+ * the reduced one, so the regular price becomes `listPrice`. Átomo also flags
+ * items "¡En oferta!" (`product-on-sale` on <body>) WITHOUT any reduction
+ * (`has_discount:false`, no struck price) — that is surfaced as text only.
+ */
+export function extractAtomoPromotions(
+  html: string,
+  price: number,
+): { promotions: Promotion[]; listPrice?: number } {
+  const q = `(?:&quot;|")`;
+  const hasDiscount = new RegExp(`has_discount${q}\\s*:\\s*true`).test(html);
+  const regularRaw = html.match(
+    new RegExp(`regular_price_amount${q}\\s*:\\s*${q}?([\\d.]+)`),
+  )?.[1];
+  const regular = regularRaw ? Number(regularRaw) : NaN;
+
+  if (hasDiscount && Number.isFinite(regular) && regular > price + 0.01 && regular <= price * 10) {
+    return {
+      listPrice: regular,
+      promotions: [
+        {
+          type: 'discount',
+          description: 'En oferta',
+          offerPrice: price,
+          discountPct: Math.round((1 - price / regular) * 10000) / 100,
+        },
+      ],
+    };
+  }
+
+  const bodyClass = html.match(/<body\b[^>]*\bclass=["']([^"']*)["']/i)?.[1] ?? '';
+  if (/\bproduct-on-sale\b/.test(bodyClass)) {
+    return { promotions: [{ type: 'unknown', description: 'En oferta' }] };
+  }
+  return { promotions: [] };
 }
 
 /** Hostname helper used by `detectSupermarket`. Exported for tests. */

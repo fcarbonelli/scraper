@@ -44,6 +44,37 @@ export class ScrapeError extends Error {
   }
 }
 
+/**
+ * Build a human-readable detail string for a network/fetch failure.
+ *
+ * undici surfaces connection failures as a generic `TypeError: fetch failed`
+ * and stashes the real reason on `.cause` (e.g. ECONNRESET,
+ * UND_ERR_CONNECT_TIMEOUT). When every connect attempt fails (happy-eyeballs or
+ * a dead proxy exit IP), `.cause` is an `AggregateError` whose own
+ * `.code`/`.message` are empty — so we drill into its `.errors[]` to recover
+ * the underlying code. Without this, proxy failures log as a bare "fetch
+ * failed" that can't tell a transient blip apart from an exhausted/blocked
+ * proxy.
+ */
+export function describeNetworkError(err: unknown): string {
+  const top = err as { message?: string; cause?: unknown };
+  const base = top.message ?? 'fetch failed';
+  const detail = extractErrDetail(top.cause);
+  return detail ? `${base} (${detail})` : base;
+}
+
+function extractErrDetail(e: unknown): string | undefined {
+  if (!e || typeof e !== 'object') return undefined;
+  const o = e as { code?: string; message?: string; errors?: unknown[] };
+  if (o.code) return o.code;
+  // AggregateError: every connect attempt failed; use the first child's detail.
+  if (Array.isArray(o.errors) && o.errors.length > 0) {
+    const child = extractErrDetail(o.errors[0]);
+    if (child) return child;
+  }
+  return o.message || undefined;
+}
+
 function defaultRetryable(type: ErrorType): boolean {
   switch (type) {
     case 'network_timeout':

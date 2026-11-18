@@ -26,8 +26,8 @@
  */
 
 import { fetch as undiciFetch } from 'undici';
-import { ScrapeError } from '../shared/errors.js';
-import { getProxyDispatcher } from '../shared/proxy.js';
+import { ScrapeError, describeNetworkError } from '../shared/errors.js';
+import { getProxyDispatcher, getFreshProxyDispatcher, usesProxy } from '../shared/proxy.js';
 import type {
   EanSearchResult,
   Promotion,
@@ -203,18 +203,12 @@ function findRecordNodeByEan(
 // HTTP layer
 // =============================================================================
 
-/**
- * Undici surfaces network failures as a generic `TypeError: fetch failed` and
- * stashes the real reason (ECONNRESET, ETIMEDOUT, ENOTFOUND, a TLS error, ...)
- * on `error.cause`. Surface that so logs are actionable — "fetch failed" alone
- * can't distinguish a transient blip from an IP-level block.
- */
-function describeFetchError(err: unknown): string {
-  const e = err as { message?: string; cause?: unknown };
-  const cause = e.cause as { code?: string; message?: string } | undefined;
-  const detail = cause?.code ?? cause?.message;
-  return detail ? `${e.message ?? 'fetch failed'} (${detail})` : e.message ?? String(err);
-}
+// How many extra fresh-exit-IP attempts to make after the pooled agent's when a
+// proxied connection fails outright (ECONNRESET / dead exit IP / proxy blip,
+// surfaced by undici as a bare `TypeError: fetch failed`). Rotating residential
+// proxies hand out a new IP per fresh connection, so one bad exit IP no longer
+// fails the product. No-op without a proxy (a direct connection can't rotate).
+const MAX_PROXY_ROTATIONS = 3;
 
 async function fetchMamiText(
   url: string,
@@ -222,67 +216,86 @@ async function fetchMamiText(
   timeoutMs: number,
   accept = 'application/json,text/plain,*/*',
 ): Promise<string> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  if (signal) {
-    signal.addEventListener('abort', () => controller.abort(), { once: true });
-  }
+  const maxRotations = usesProxy('mami') ? MAX_PROXY_ROTATIONS : 0;
+  let lastError: ScrapeError | undefined;
 
-  // Super Mami's CDN drops non-AR/datacenter IPs, so route via the AR proxy
-  // when one is configured (no-op/undefined otherwise — direct connection).
-  const dispatcher = getProxyDispatcher('mami');
-
-  let res: Awaited<ReturnType<typeof undiciFetch>>;
-  try {
-    res = await undiciFetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: accept,
-        'Accept-Language': 'es-AR,es;q=0.9',
-      },
-      signal: controller.signal,
-      ...(dispatcher ? { dispatcher } : {}),
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new ScrapeError(
-        'network_timeout',
-        `Super Mami request timed out after ${timeoutMs}ms`,
-        { cause: err },
-      );
+  for (let attempt = 0; attempt <= maxRotations; attempt++) {
+    // Attempt 0 uses the shared pooled agent (keep-alive); later attempts each
+    // spin a fresh agent (new exit IP) and close it right after.
+    let fresh: ReturnType<typeof getFreshProxyDispatcher>;
+    let dispatcher = getProxyDispatcher('mami');
+    if (attempt > 0) {
+      fresh = getFreshProxyDispatcher('mami');
+      dispatcher = fresh?.dispatcher;
     }
-    throw new ScrapeError(
-      'network_error',
-      `Super Mami request failed: ${describeFetchError(err)}`,
-      { cause: err },
-    );
-  } finally {
-    clearTimeout(timeoutId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = (): void => controller.abort();
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      let res: Awaited<ReturnType<typeof undiciFetch>>;
+      try {
+        res = await undiciFetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': USER_AGENT,
+            Accept: accept,
+            'Accept-Language': 'es-AR,es;q=0.9',
+          },
+          signal: controller.signal,
+          ...(dispatcher ? { dispatcher } : {}),
+        });
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new ScrapeError(
+            'network_timeout',
+            `Super Mami request timed out after ${timeoutMs}ms`,
+            { cause: err },
+          );
+        }
+        // Connection-level failure — rotate to a fresh exit IP and retry when a
+        // proxy is in use; otherwise it propagates after the loop.
+        lastError = new ScrapeError(
+          'network_error',
+          `Super Mami request failed: ${describeNetworkError(err)}`,
+          { cause: err },
+        );
+        continue;
+      }
+
+      if (res.status === 404) {
+        throw new ScrapeError('product_not_found', `Super Mami returned 404 for ${url}`, {
+          httpStatus: 404,
+        });
+      }
+      if (res.status === 429) {
+        throw new ScrapeError('rate_limited', `Super Mami returned 429`, {
+          httpStatus: 429,
+        });
+      }
+      if (res.status >= 500) {
+        throw new ScrapeError('site_server_error', `Super Mami returned ${res.status}`, {
+          httpStatus: res.status,
+        });
+      }
+      if (!res.ok) {
+        throw new ScrapeError('unknown', `Super Mami returned status ${res.status}`, {
+          httpStatus: res.status,
+        });
+      }
+
+      // Read the body BEFORE `finally` closes a fresh agent's sockets.
+      return await res.text();
+    } finally {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      await fresh?.close();
+    }
   }
 
-  if (res.status === 404) {
-    throw new ScrapeError('product_not_found', `Super Mami returned 404 for ${url}`, {
-      httpStatus: 404,
-    });
-  }
-  if (res.status === 429) {
-    throw new ScrapeError('rate_limited', `Super Mami returned 429`, {
-      httpStatus: 429,
-    });
-  }
-  if (res.status >= 500) {
-    throw new ScrapeError('site_server_error', `Super Mami returned ${res.status}`, {
-      httpStatus: res.status,
-    });
-  }
-  if (!res.ok) {
-    throw new ScrapeError('unknown', `Super Mami returned status ${res.status}`, {
-      httpStatus: res.status,
-    });
-  }
-
-  return res.text();
+  throw lastError ?? new ScrapeError('network_error', `Super Mami request failed for ${url}`);
 }
 
 /** Fetch a Super Mami URL and parse it as JSON (the `?format=json` payload). */

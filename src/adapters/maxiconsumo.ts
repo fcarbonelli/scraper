@@ -23,8 +23,8 @@
  */
 
 import { fetch as undiciFetch } from 'undici';
-import { ScrapeError } from '../shared/errors.js';
-import { getProxyDispatcher } from '../shared/proxy.js';
+import { ScrapeError, describeNetworkError } from '../shared/errors.js';
+import { getProxyDispatcher, getFreshProxyDispatcher, usesProxy } from '../shared/proxy.js';
 import { TAXONOMY_BY_EAN, type TaxonomyEntry } from '../shared/taxonomy.js';
 import type {
   EanSearchResult,
@@ -73,76 +73,103 @@ function extractProductIdFromUrl(canonicalUrl: string): string | null {
 // HTTP layer
 // =============================================================================
 
+// How many extra fresh-exit-IP attempts to make after the pooled agent's when a
+// proxied connection fails outright (ECONNRESET / dead exit IP / proxy blip,
+// surfaced by undici as a bare `TypeError: fetch failed`). Rotating residential
+// proxies hand out a new IP per fresh connection, so one bad exit IP no longer
+// fails the product. No-op without a proxy (a direct connection can't rotate).
+const MAX_PROXY_ROTATIONS = 3;
+
 async function fetchMaxiconsumoHtml(
   url: string,
   signal: AbortSignal | undefined,
 ): Promise<string> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  if (signal) {
-    signal.addEventListener('abort', () => controller.abort(), { once: true });
-  }
+  const maxRotations = usesProxy('maxiconsumo') ? MAX_PROXY_ROTATIONS : 0;
+  let lastError: ScrapeError | undefined;
 
-  // Maxiconsumo's Azion edge drops non-AR/datacenter IPs, so route via the AR
-  // proxy when one is configured (undefined otherwise — direct connection).
-  const dispatcher = getProxyDispatcher('maxiconsumo');
-
-  let res: Awaited<ReturnType<typeof undiciFetch>>;
-  try {
-    res = await undiciFetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml,*/*',
-        'Accept-Language': 'es-AR,es;q=0.9',
-      },
-      signal: controller.signal,
-      ...(dispatcher ? { dispatcher } : {}),
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new ScrapeError(
-        'network_timeout',
-        `Maxiconsumo request timed out after ${REQUEST_TIMEOUT_MS}ms`,
-        { cause: err },
-      );
+  for (let attempt = 0; attempt <= maxRotations; attempt++) {
+    // Attempt 0 uses the shared pooled agent (keep-alive); later attempts each
+    // spin a fresh agent (new exit IP) and close it right after.
+    let fresh: ReturnType<typeof getFreshProxyDispatcher>;
+    let dispatcher = getProxyDispatcher('maxiconsumo');
+    if (attempt > 0) {
+      fresh = getFreshProxyDispatcher('maxiconsumo');
+      dispatcher = fresh?.dispatcher;
     }
-    throw new ScrapeError(
-      'network_error',
-      `Maxiconsumo request failed: ${(err as Error).message}`,
-      { cause: err },
-    );
-  } finally {
-    clearTimeout(timeoutId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const onAbort = (): void => controller.abort();
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      let res: Awaited<ReturnType<typeof undiciFetch>>;
+      try {
+        res = await undiciFetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': USER_AGENT,
+            Accept: 'text/html,application/xhtml+xml,*/*',
+            'Accept-Language': 'es-AR,es;q=0.9',
+          },
+          signal: controller.signal,
+          ...(dispatcher ? { dispatcher } : {}),
+        });
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new ScrapeError(
+            'network_timeout',
+            `Maxiconsumo request timed out after ${REQUEST_TIMEOUT_MS}ms`,
+            { cause: err },
+          );
+        }
+        // Connection-level failure — rotate to a fresh exit IP and retry when a
+        // proxy is in use; otherwise it propagates after the loop.
+        lastError = new ScrapeError(
+          'network_error',
+          `Maxiconsumo request failed: ${describeNetworkError(err)}`,
+          { cause: err },
+        );
+        continue;
+      }
+
+      if (res.status === 404) {
+        throw new ScrapeError(
+          'product_not_found',
+          `Maxiconsumo returned 404 for ${url}`,
+          { httpStatus: 404 },
+        );
+      }
+      if (res.status === 429) {
+        throw new ScrapeError('rate_limited', `Maxiconsumo returned 429`, {
+          httpStatus: 429,
+        });
+      }
+      if (res.status >= 500) {
+        throw new ScrapeError(
+          'site_server_error',
+          `Maxiconsumo returned ${res.status}`,
+          { httpStatus: res.status },
+        );
+      }
+      if (!res.ok) {
+        throw new ScrapeError(
+          'unknown',
+          `Maxiconsumo returned unexpected status ${res.status}`,
+          { httpStatus: res.status },
+        );
+      }
+
+      // Read the body BEFORE `finally` closes a fresh agent's sockets.
+      return await res.text();
+    } finally {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      await fresh?.close();
+    }
   }
 
-  if (res.status === 404) {
-    throw new ScrapeError(
-      'product_not_found',
-      `Maxiconsumo returned 404 for ${url}`,
-      { httpStatus: 404 },
-    );
-  }
-  if (res.status === 429) {
-    throw new ScrapeError('rate_limited', `Maxiconsumo returned 429`, {
-      httpStatus: 429,
-    });
-  }
-  if (res.status >= 500) {
-    throw new ScrapeError(
-      'site_server_error',
-      `Maxiconsumo returned ${res.status}`,
-      { httpStatus: res.status },
-    );
-  }
-  if (!res.ok) {
-    throw new ScrapeError(
-      'unknown',
-      `Maxiconsumo returned unexpected status ${res.status}`,
-      { httpStatus: res.status },
-    );
-  }
-  return res.text();
+  throw lastError ?? new ScrapeError('network_error', `Maxiconsumo request failed for ${url}`);
 }
 
 // =============================================================================

@@ -132,6 +132,8 @@ CREATE INDEX ON price_snapshots (supermarket_product_id, scraped_at DESC);
 -- (pending instore_price_entries, which have no snapshot yet); migration 026
 -- gives that pending branch a stable synthetic bigint ID (md5(entry uuid)) so
 -- the preview file never shows a blank "ID" column for hand-entered rows;
+-- migration 039 labels in-store rows with the visit's branch (localidad/provincia
+-- captured on the PDV) instead of the chain's seeded CAPITAL Y GBA default;
 -- EAN-required guard in 021 — both
 -- views drop EAN-less products so no blank-EAN row ever reaches export/API;
 -- Spanish `Estado` labels in 022, extended in 024 — the internal status code is
@@ -220,6 +222,10 @@ alerts (
   status          text       -- "open" | "acknowledged" | "resolved"
   created_at      timestamptz
   resolved_at     timestamptz
+  fingerprint     text       -- incident dedup key, e.g. "scrape:vea" (mig 038); unique among open/acknowledged
+  occurrences     integer    -- times the incident was detected while live
+  last_seen_at    timestamptz
+  evidence        jsonb      -- error counts, sample failing URLs/messages, job_execution ids
 )
 
 -- API access keys
@@ -594,23 +600,17 @@ const retryPolicy = {
 
 Smarter than blanket "2 retries 2hr apart" — different errors deserve different responses.
 
-### Alert aggregation
+### Alert aggregation → incidents
 
-After each scrape run finishes, the orchestrator runs:
+> Superseded design: absolute failure-rate bands (≥30% warning / ≥80% critical) plus mid-run "early" alerts paged every morning, because several chains are *permanently* 30–80% `product_not_found`. Current behavior: **`docs/INCIDENTES.md`**.
 
-```ts
-for (const supermarket of supermarkets) {
-  const failureRate = computeFailureRate(supermarket, run);
-  if (failureRate > 0.8) {
-    createAlert('critical', 'supermarket_degraded', supermarket);
-    suppressIndividualProductAlerts(supermarket);  // collapse 80 alerts into 1
-  } else if (failureRate > 0.3) {
-    createAlert('warning', 'supermarket_unstable', supermarket);
-  }
-}
-```
+After each scrape run finalizes, `src/alerts/aggregate.ts` computes per-chain stats (persisted in `scrape_runs.metadata.stats_by_supermarket`; recovery runs merged onto their source run) and applies `src/alerts/policy.ts`:
 
-You never get spammed. You get **one** alert: "SuperZ is degraded, 97/100 failing, top 3 errors: ...".
+- **down** — success rate ≤ 10% → critical
+- **blocked** — ≥ 25% of the chain hit `auth_required` / `selector_failed` / `parse_failed` / `not_run` (or, in a recovery run, a transient error the retry didn't fix) → critical
+- **drop** — success rate < ½ of the chain's 7-run median → warning
+
+Transient-dominated failures first get one automatic recovery run (no ping). Each incident is one `alerts` row keyed by `fingerprint = scrape:<supermarket>`: Telegram on open/escalation only, repeats just bump `occurrences`, a later healthy run auto-resolves it (silent ✅).
 
 ### Telegram notifications
 

@@ -253,7 +253,8 @@ function cleanSaleName(raw: string | undefined): string | undefined {
  * Regular (crossed-out) price and the offer badge for the main product.
  *
  * Related-product cards further down the fragment repeat the same classes, so
- * only the block before "Productos Relacionados" counts. A list price is kept
+ * only the block before "Productos Relacionados" (or
+ * `p_related_products_result_container`) counts. A list price is kept
  * when it sits above today's price and under 10× it — the same sentinel guard
  * the VTEX adapters use for garbage list prices.
  */

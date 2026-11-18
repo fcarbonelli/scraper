@@ -48,7 +48,7 @@ Zona horaria: `America/Argentina/Buenos_Aires` (`TZ`). Los horarios de abajo son
 | Enseguida, en el mismo disparo | Chequeo de folletos. Primero un control de salud (config apagada, revistas trabadas en `processing`). Después el descubrimiento, que es barato: si el folleto no cambió, no hay costo de IA. Si cambió, visión + matching, con tope de 20 minutos para no colgar el orchestrator. | `REVISTA_ENABLED`, `OPENAI_API_KEY`, `src/revistas/pipeline.ts` |
 | 11:00 y 16:00 | Chequeo de folletos extra, mismas tres cadenas y mismo pipeline, sin corrida asociada. Makro sube sus folletos (sobre todo los de finde) después de las 06:00; sin esto entraban recién al día siguiente o con “Traer”. Si el de las 06:00 sigue corriendo, el tick se saltea. Vacío = apagado. | `REVISTA_CHECK_CRON` |
 | Después del chequeo de las 06:00 | Marcadores “fantasma” para productos que el sistema ya sabe que no va a encontrar. | `src/orchestrator/phantomMarkers.ts` |
-| Cada 1 minuto | El finalizer mira las corridas `running`. Cuando cada producto tiene un resultado final (o pasaron 6 horas), escribe stats, agrega alertas de Telegram (una por cadena, no una por producto), actualiza el health de la cadena y corre la supresión de precios anómalos. La corrida queda en `pending_review`. | `src/orchestrator/finalize.ts` |
+| Cada 1 minuto | El finalizer mira las corridas `running`. Cuando cada producto tiene un resultado final (o pasaron 6 horas), escribe stats (también por cadena, en `metadata.stats_by_supermarket`), evalúa incidentes (Telegram solo si la cadena está realmente rota y una sola vez por incidente: ver [INCIDENTES.md](./INCIDENTES.md)), actualiza el health de la cadena y corre la supresión de precios anómalos. La corrida queda en `pending_review`. | `src/orchestrator/finalize.ts` |
 | Domingos 02:00 | Barrido de cobertura: vuelve a buscar EANs del catálogo que esa cadena todavía no tiene, por si volvieron a stock. | `SWEEP_CRON` |
 | Lunes 05:00 | Corrida semanal de promos bancarias, si `PROMOS_ENABLED` no está en `false`. | `PROMOS_CRON` |
 
@@ -94,7 +94,7 @@ El adapter tira `ScrapeError`. El worker guarda el intento en `job_executions` (
 | `region_unavailable` | ninguno | — | El adapter ya recorrió las zonas/sucursales y no hay precio |
 | `auth_required` | ninguno | — | Falta cookie o token. No se reintenta solo |
 
-Telegram avisa a partir de severidad `warning` (`TELEGRAM_MIN_SEVERITY`), agrupado por cadena.
+Telegram avisa solo por **incidentes**: una cadena caída (≤10% con precio), bloqueada (≥25% con `auth_required` / `selector_failed` / `parse_failed`, jobs que nunca corrieron, o errores transitorios que sobrevivieron al reintento automático) o con una caída fuerte contra su propia mediana de 7 días. Un mensaje al abrir, nada mientras sigue abierto, un "✅" silencioso cuando se resuelve solo. Los faltantes de todos los días (`product_not_found`, `region_unavailable`) no avisan. Reglas y playbook: [INCIDENTES.md](./INCIDENTES.md).
 
 ## Dónde está cada cosa
 
@@ -116,7 +116,7 @@ scripts/setup-db.ts el seed de cadenas (id, zona, is_active, config de revista/t
 
 ## Cuando se rompe una cadena
 
-1. La alerta dice el `supermarket_id`.
+1. `npm run incidents`: el incidente abierto con conteo de errores y URLs de muestra (o pedile a un agente que siga [INCIDENTES.md](./INCIDENTES.md)).
 2. En `job_executions`, el `error_type` y el `error_message` del intento.
 3. La ficha de esa cadena en [CADENAS.md](./CADENAS.md): ahí está el modo de fallo que ya vimos (WAF, sucursal, cookie, JSON atrasado).
 4. Reproducir sin base ni Redis:

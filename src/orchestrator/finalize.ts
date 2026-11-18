@@ -5,8 +5,9 @@
  *   1. Decide whether the run is "done": every planned product has a final
  *      latest outcome (success or failed), and no product's latest outcome is
  *      still retrying.
- *   2. Compute final stats from job_executions and write them to scrape_runs.
- *   3. Run alert aggregation (creates supermarket-level alerts as needed).
+ *   2. Compute final stats from job_executions and write them to scrape_runs
+ *      (totals + per-chain `metadata.stats_by_supermarket`).
+ *   3. Evaluate incidents per chain (src/alerts/aggregate.ts + policy.ts).
  *   4. Update each supermarket's `health_status`.
  *
  * Why poll instead of triggering off the worker? Two reasons:
@@ -17,7 +18,13 @@
 
 import { db } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
-import { generateAlertsForRun, updateSupermarketHealth } from '../alerts/aggregate.js';
+import {
+  generateAlertsForRun,
+  loadEffectiveRunStats,
+  recordRunStats,
+  updateSupermarketHealth,
+  type RunStats,
+} from '../alerts/aggregate.js';
 import { loadRunDiagnostics, type RunProgress } from '../shared/runDiagnostics.js';
 import { runAnomalySuppression } from '../shared/priceAnomaly.js';
 
@@ -113,29 +120,33 @@ async function finalizeRun(
     log.error({ err }, 'price-anomaly suppression failed (run still finalized)');
   }
 
-  // 2. Generate aggregated alerts (1 per supermarket, max). Transient
-  //    whole-site failures schedule a delayed recovery run instead of alerting;
-  //    a recovery run that still fails alerts directly (no further recovery).
-  const isRecoveryRun = run.metadata?.recovery === true;
+  // 2. Per-chain stats (merged with the source run for recovery runs),
+  //    persisted as history for the incident baseline.
+  let runStats: RunStats | null = null;
   try {
-    const result = await generateAlertsForRun(run.id, { isRecoveryRun });
-    log.info(
-      {
-        alertsCreated: result.alertsCreated,
-        recoveriesScheduled: result.recoveriesScheduled,
-        isRecoveryRun,
-      },
-      'generated run alerts',
-    );
+    runStats = await loadEffectiveRunStats(run.id);
+    if (runStats) await recordRunStats(runStats);
   } catch (err) {
-    log.error({ err }, 'alert generation failed (run still finalized)');
+    log.error({ err }, 'run stats failed (run still finalized, no alerts/health)');
   }
 
-  // 3. Update supermarket health flags
-  try {
-    await updateSupermarketHealth(run.id);
-  } catch (err) {
-    log.error({ err }, 'health update failed (run still finalized)');
+  if (runStats) {
+    // 3. Incidents: only really-broken chains reach Telegram, once per
+    //    incident. Transient whole-site failures get a delayed recovery run
+    //    first; that run is evaluated on its own finalize.
+    try {
+      const result = await generateAlertsForRun(runStats);
+      log.info({ ...result, isRecoveryRun: runStats.isRecovery }, 'evaluated run incidents');
+    } catch (err) {
+      log.error({ err }, 'incident evaluation failed (run still finalized)');
+    }
+
+    // 4. Update supermarket health flags
+    try {
+      await updateSupermarketHealth(runStats.stats);
+    } catch (err) {
+      log.error({ err }, 'health update failed (run still finalized)');
+    }
   }
 
   log.info(

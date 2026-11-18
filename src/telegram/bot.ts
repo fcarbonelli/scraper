@@ -44,12 +44,14 @@ export function parseCallbackData(data: string): { action: string; args: string[
 }
 
 /**
- * Send a message with an optional inline keyboard.
+ * Send a message with an optional inline keyboard. `silent` delivers it
+ * without sound/vibration (Telegram's disable_notification).
  * Returns the Telegram message_id so we can edit it later.
  */
 export async function sendMessage(
   text: string,
   keyboard?: InlineKeyboard,
+  opts: { silent?: boolean } = {},
 ): Promise<number | null> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return null;
 
@@ -59,6 +61,7 @@ export async function sendMessage(
     parse_mode: 'HTML',
     disable_web_page_preview: true,
   };
+  if (opts.silent) body.disable_notification = true;
   if (keyboard && keyboard.length > 0) {
     body.reply_markup = { inline_keyboard: keyboard };
   }

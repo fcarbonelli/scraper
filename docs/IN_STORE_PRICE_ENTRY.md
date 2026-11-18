@@ -45,6 +45,11 @@ fixtures in [`examples/api/`](../examples/api/) (`in-store-*.json`).
 - A **visit** groups the work: one worker at one **store branch** on one occasion.
   It holds the branch **location** (address / locality / province — a chain has
   many branches) and owns the product entries and flyer photos taken there.
+  That location is what the client base exports as `Provincia` / `Zona` for the
+  approved prices (migration 039). The chain's own geography is only a fallback
+  when the visit left both fields blank. Workers type the region in **Localidad**
+  (`CHACO`, `CUYO`, `POSADAS`…); when Provincia is empty, that value fills both
+  columns.
 
 ---
 
