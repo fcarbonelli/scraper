@@ -15,11 +15,19 @@
  * It returns an HTML *fragment* (not JSON, not a full page) with all metadata
  * baked into `data-*` attributes on the cart button:
  *
+ *   <div class="p_item_card_number_price">$ 2.990,00</div>
+ *   <div class="p_item_card_discounted_number_price"><s>$ 3.737,50</s></div>
  *   <div class="cart_button"
  *        data-ean="42277071"
  *        data-description="..."
+ *        data-saleName="Ahorro al Máximo"
  *        data-price="private"|"<number>"
  *        data-section="..." data-category="..." ...>
+ *
+ * `data-price` is what the customer pays today. On a markdown the crossed-out
+ * regular price is the `<s>` inside `.p_item_card_discounted_number_price`,
+ * and the red badge text is `data-saleName`. Without a session `data-price`
+ * is the string "private".
  *
  *   <div class="p_item_card_brand">Nivea</div>
  *   <img class="p_principal_img" src="https://carrefourar.vteximg.com.br/...">
@@ -231,6 +239,56 @@ export function parseMaxiCarrefourPrice(raw: string): number {
   }
   const n = Number(normalized);
   return n;
+}
+
+/** Drop a blank or the literal "null" the PHP template emits when there's no mechanic. */
+function cleanSaleName(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const text = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text || /^(null|undefined)$/i.test(text)) return undefined;
+  return text;
+}
+
+/**
+ * Regular (crossed-out) price and the offer badge for the main product.
+ *
+ * Related-product cards further down the fragment repeat the same classes, so
+ * only the block before "Productos Relacionados" counts. A list price is kept
+ * when it sits above today's price and under 10× it — the same sentinel guard
+ * the VTEX adapters use for garbage list prices.
+ */
+export function extractMaxiCarrefourOffer(
+  html: string,
+  sellingPrice: number,
+): { listPrice?: number; saleName?: string } {
+  const main = html.split(/Productos Relacionados|p_related_products/i)[0] ?? html;
+
+  let listPrice: number | undefined;
+  const struck = main.match(
+    /class=["'][^"']*\bp_item_card_discounted_number_price\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+  );
+  const money = struck?.[1]?.replace(/<[^>]+>/g, ' ').match(/\d[\d.,]*/)?.[0];
+  if (money) {
+    const regular = parseMaxiCarrefourPrice(money);
+    if (
+      Number.isFinite(regular) &&
+      regular > sellingPrice + 0.01 &&
+      regular <= sellingPrice * 10
+    ) {
+      listPrice = regular;
+    }
+  }
+
+  const saleName =
+    cleanSaleName(readCartButtonAttr(main, 'data-saleName')) ??
+    cleanSaleName(
+      main.match(/class=["'][^"']*\bsale_name\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1],
+    );
+
+  return {
+    ...(listPrice !== undefined ? { listPrice } : {}),
+    ...(saleName ? { saleName } : {}),
+  };
 }
 
 function readImage(html: string): string | undefined {
@@ -646,6 +704,14 @@ export function parseMaxiCarrefourFragment(
     );
   }
 
+  // data-price is today's selling price. On a markdown the crossed-out
+  // regular lives in a separate element; without it the export would publish
+  // the offer as Precio_Regular (COALESCE(list_price, price)).
+  const offer = extractMaxiCarrefourOffer(html, price);
+  const promotions: Promotion[] = offer.saleName
+    ? [{ type: 'discount', description: offer.saleName }]
+    : [];
+
   // -- Catalog data --------------------------------------------------------
   // Same extractor used by `probe()` — the public fragment has full
   // metadata regardless of price gating, so we can keep one source of truth.
@@ -658,10 +724,11 @@ export function parseMaxiCarrefourFragment(
     inStock: true,
     currency: 'ARS',
     tierUsed: 'html',
-    promotions: [] as Promotion[],
+    promotions,
     productInfo,
     rawData: { html: html.length > 8000 ? html.slice(0, 8000) + '…' : html },
   };
+  if (offer.listPrice !== undefined) result.listPrice = offer.listPrice;
   // hasSession is logged for forensics; nothing to gate on at this point.
   void opts.hasSession;
   return { kind: 'ok', result };

@@ -209,7 +209,7 @@ GET /products?currentUrl=p/<EAN>&method=getProductBasicData
 
 `currentUrl` va **sin** barra inicial. Con barra, el server ignora el parámetro y devuelve recomendaciones: el primer botón es siempre el mismo producto y se guardaba metadata cruzada.
 
-La respuesta es un fragmento HTML. Nombre, marca, EAN y categoría están en `data-*` del `.cart_button` y son públicos. El precio es `data-price`. Sin sesión vale la cadena `"private"`.
+La respuesta es un fragmento HTML. Nombre, marca, EAN y categoría están en `data-*` del `.cart_button` y son públicos. `data-price` es el precio que se paga hoy. Si hay oferta, el regular tachado está en `.p_item_card_discounted_number_price` (`list_price`) y la etiqueta en `data-saleName` (por ejemplo "Ahorro al Máximo"). Sin sesión `data-price` vale la cadena `"private"`.
 
 `external_id` y la URL (`/p/<EAN>`) son el EAN. La búsqueda no necesita un buscador: se pide ese fragmento sin cookie y se exige que el primer `data-ean` sea el EAN pedido.
 

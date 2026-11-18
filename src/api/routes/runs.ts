@@ -26,6 +26,7 @@ import {
   FLAGGABLE_STATUSES,
 } from '../../orchestrator/publish.js';
 import { computeRunPriceOutliers } from '../../shared/priceOutliers.js';
+import { computeRunPromoHealth } from '../../shared/promoHealthQuery.js';
 
 export const runsRouter = Router();
 
@@ -507,6 +508,38 @@ runsRouter.get('/:id/price-outliers', async (req: Request, res: Response) => {
     ...(q.threshold !== undefined ? { threshold: q.threshold } : {}),
     ...(q.window !== undefined ? { windowDays: q.window } : {}),
     ...(q.min_history !== undefined ? { minHistory: q.min_history } : {}),
+  });
+
+  res.json(success(result));
+});
+
+// =============================================================================
+// GET /v1/runs/:id/promo-health
+//
+// Pre-publish operator panel: chains whose priced rows today carry no offers,
+// or far fewer than that chain's own prior week. Same raw-snapshot scope as
+// price-outliers (run + recovery runs, including an unpublished day). A chain
+// that rarely promotes is not flagged.
+// =============================================================================
+
+const PromoHealthQuery = z.object({
+  window: z.coerce.number().int().min(1).max(30).optional(),
+  drop_pct: z.coerce.number().min(0).max(100).optional(),
+  min_baseline_pct: z.coerce.number().min(0).max(100).optional(),
+  min_priced: z.coerce.number().int().min(1).max(100_000).optional(),
+  min_days: z.coerce.number().int().min(1).max(30).optional(),
+});
+
+runsRouter.get('/:id/promo-health', async (req: Request, res: Response) => {
+  const runId = pathParam(req, 'id');
+  const q = parseQuery(req, PromoHealthQuery);
+
+  const result = await computeRunPromoHealth(runId, {
+    ...(q.window !== undefined ? { windowDays: q.window } : {}),
+    ...(q.drop_pct !== undefined ? { dropThresholdPct: q.drop_pct } : {}),
+    ...(q.min_baseline_pct !== undefined ? { minBaselineSharePct: q.min_baseline_pct } : {}),
+    ...(q.min_priced !== undefined ? { minPriced: q.min_priced } : {}),
+    ...(q.min_days !== undefined ? { minDays: q.min_days } : {}),
   });
 
   res.json(success(result));
