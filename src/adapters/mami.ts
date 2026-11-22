@@ -25,9 +25,13 @@
  *     build URLs with a slug derived from the product name.
  */
 
-import { fetch as undiciFetch } from 'undici';
+import { fetch as undiciFetch, Agent, type Dispatcher } from 'undici';
 import { ScrapeError, describeNetworkError } from '../shared/errors.js';
 import { getProxyDispatcher, getFreshProxyDispatcher, usesProxy } from '../shared/proxy.js';
+import {
+  SECTIGO_PUBLIC_SERVER_AUTH_CA_DV_R36,
+  tlsCaWithIntermediates,
+} from '../shared/tlsIntermediates.js';
 import type {
   EanSearchResult,
   Promotion,
@@ -210,6 +214,26 @@ function findRecordNodeByEan(
 // fails the product. No-op without a proxy (a direct connection can't rotate).
 const MAX_PROXY_ROTATIONS = 3;
 
+/**
+ * Since 2026-11-20 supermami.com.ar serves its leaf cert WITHOUT the Sectigo
+ * DV R36 intermediate, which Node can't fetch on its own
+ * (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`). Supplying it keeps full verification —
+ * the chain must still reach Sectigo's root in Node's store. Harmless once
+ * they fix their server.
+ */
+const MAMI_TLS = { ca: tlsCaWithIntermediates(SECTIGO_PUBLIC_SERVER_AUTH_CA_DV_R36) };
+
+// Pooled direct agent (no proxy configured) carrying MAMI_TLS.
+let directAgent: Agent | undefined;
+
+/** Pooled dispatcher for Mami: the AR proxy when enabled, else a direct agent. */
+function mamiDispatcher(): Dispatcher {
+  const proxied = getProxyDispatcher('mami', MAMI_TLS);
+  if (proxied) return proxied;
+  if (!directAgent) directAgent = new Agent({ connect: MAMI_TLS });
+  return directAgent;
+}
+
 async function fetchMamiText(
   url: string,
   signal: AbortSignal | undefined,
@@ -223,9 +247,9 @@ async function fetchMamiText(
     // Attempt 0 uses the shared pooled agent (keep-alive); later attempts each
     // spin a fresh agent (new exit IP) and close it right after.
     let fresh: ReturnType<typeof getFreshProxyDispatcher>;
-    let dispatcher = getProxyDispatcher('mami');
+    let dispatcher: Dispatcher | undefined = mamiDispatcher();
     if (attempt > 0) {
-      fresh = getFreshProxyDispatcher('mami');
+      fresh = getFreshProxyDispatcher('mami', MAMI_TLS);
       dispatcher = fresh?.dispatcher;
     }
 

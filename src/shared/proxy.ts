@@ -22,7 +22,7 @@
  * and behaviour is identical to before (direct connection).
  */
 
-import { ProxyAgent, type Dispatcher } from 'undici';
+import { ProxyAgent, type Dispatcher, type buildConnector } from 'undici';
 
 const PROXY_URL = process.env.AR_PROXY_URL?.trim();
 
@@ -40,14 +40,20 @@ const proxiedIds = new Set(
     : DEFAULT_PROXIED,
 );
 
-// Build the ProxyAgent once and reuse it so connections are pooled (creating a
-// new agent per request would leak sockets and defeat keep-alive).
-let agent: ProxyAgent | undefined;
+/**
+ * TLS options for the tunnelled connection to the TARGET site (not the proxy),
+ * e.g. `{ ca }` with a missing intermediate (see tlsIntermediates.ts).
+ */
+export type TargetTlsOptions = buildConnector.BuildOptions;
 
-function proxyAgent(): ProxyAgent | undefined {
-  if (!PROXY_URL) return undefined;
-  if (!agent) agent = new ProxyAgent(PROXY_URL);
-  return agent;
+// Build the ProxyAgent once and reuse it so connections are pooled (creating a
+// new agent per request would leak sockets and defeat keep-alive). Callers
+// that pass target TLS options get their own pooled agent, keyed by supermarket.
+let agent: ProxyAgent | undefined;
+const tlsAgents = new Map<string, ProxyAgent>();
+
+function newProxyAgent(requestTls?: TargetTlsOptions): ProxyAgent {
+  return new ProxyAgent(requestTls ? { uri: PROXY_URL!, requestTls } : PROXY_URL!);
 }
 
 /**
@@ -57,9 +63,21 @@ function proxyAgent(): ProxyAgent | undefined {
  * Adapters pass the result as `fetch(url, { dispatcher })`; passing `undefined`
  * is a no-op, so callers don't need to branch.
  */
-export function getProxyDispatcher(supermarketId: string): Dispatcher | undefined {
+export function getProxyDispatcher(
+  supermarketId: string,
+  requestTls?: TargetTlsOptions,
+): Dispatcher | undefined {
   if (!PROXY_URL || !proxiedIds.has(supermarketId)) return undefined;
-  return proxyAgent();
+  if (requestTls) {
+    let a = tlsAgents.get(supermarketId);
+    if (!a) {
+      a = newProxyAgent(requestTls);
+      tlsAgents.set(supermarketId, a);
+    }
+    return a;
+  }
+  if (!agent) agent = newProxyAgent();
+  return agent;
 }
 
 /** Whether an AR proxy is configured AND enabled for this supermarket. */
@@ -86,9 +104,12 @@ export interface FreshDispatcher {
  * supermarket, or `undefined` when no proxy is configured/enabled (callers then
  * just retry the direct connection). Always `close()` the result when done.
  */
-export function getFreshProxyDispatcher(supermarketId: string): FreshDispatcher | undefined {
+export function getFreshProxyDispatcher(
+  supermarketId: string,
+  requestTls?: TargetTlsOptions,
+): FreshDispatcher | undefined {
   if (!PROXY_URL || !proxiedIds.has(supermarketId)) return undefined;
-  const fresh = new ProxyAgent(PROXY_URL);
+  const fresh = newProxyAgent(requestTls);
   return { dispatcher: fresh, close: () => fresh.close().catch(() => undefined) };
 }
 

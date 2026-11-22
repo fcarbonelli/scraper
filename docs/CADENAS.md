@@ -143,6 +143,8 @@ Diferencias que ya mordieron:
 - **El precio que ve el cliente está en el HTML, no en el JSON.** `sku.activePrice` atrasa en las dos direcciones: a veces sigue en el precio viejo cuando ya hay oferta, a veces sigue en oferta cuando la oferta terminó. El número grande del PDP es `price`. El regular es el máximo entre la línea “antes” (si está) y el `activePrice`, cuando ese es mayor que el HTML. Si el fetch del HTML falla, se usa solo el JSON.
 - El WAF responde 403 al UA default de Node. El adapter manda un UA de browser.
 - Sale por el proxy residencial (default de `AR_PROXY_SUPERMARKETS`). Sin proxy, desde EC2 la conexión se cae hasta el timeout (`fetch failed`).
+- **Cadena TLS incompleta (desde 2026-11-20).** El sitio sirve el certificado `*.supermami.com.ar` sin el intermedio *Sectigo Public Server Authentication CA DV R36*. El browser lo baja solo (AIA) y Node no, así que todo falla con `fetch failed (UNABLE_TO_VERIFY_LEAF_SIGNATURE)`. El adapter agrega ese intermedio al CA (`src/shared/tlsIntermediates.ts`) tanto en el agente directo como en el `requestTls` del proxy. La verificación sigue completa: la cadena todavía tiene que llegar a la raíz de Sectigo del store de Node. Si Sectigo rota el intermedio y vuelve el error, bajar el nuevo de la URL "CA Issuers" del certificado (`openssl s_client -connect www.supermami.com.ar:443`) y agregarlo ahí. No usar `NODE_TLS_REJECT_UNAUTHORIZED`.
+- Un 503 en todo con la página "Estamos trabajando para mejorar tu experiencia" es mantenimiento del sitio, no un bug nuestro: esperar y reintentar los fallidos.
 
 ## La Anónima (`la-anonima`)
 
