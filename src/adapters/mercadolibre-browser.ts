@@ -9,23 +9,27 @@
  * disagrees with the client hints gets the login wall).
  *
  * The first page of a context hits a JS interstitial ("Continuar") that sets a
- * bypass cookie and redirects after ~3 s; later pages in the same context skip
- * it. So one browser + context is kept per process and reused across jobs,
- * closed after a short idle period to free memory.
+ * bypass cookie and redirects; later pages in the same context skip it. The
+ * cookie is bound to the exit IP that earned it, so each context gets its own
+ * sticky proxy session (one exit IP for all its connections). One browser +
+ * context is kept per process and reused across jobs, closed after a short
+ * idle period to free memory.
  */
 
 import { chromium, type Browser, type BrowserContext, type LaunchOptions } from 'playwright';
 import { ScrapeError } from '../shared/errors.js';
 import type { Logger } from '../shared/logger.js';
-import { getPlaywrightProxy } from '../shared/proxy.js';
+import { getPlaywrightProxy, newProxySessionId } from '../shared/proxy.js';
 import { isMlBlockPage } from './mercadolibre-pdp.js';
 
 const IDLE_CLOSE_MS = 120_000;
 const MAX_CONCURRENT_PAGES = 2;
 const NAV_TIMEOUT_MS = 30_000;
-/** How long to wait for the priced PDP (interstitial included). */
-const READY_TIMEOUT_MS = 25_000;
+/** How long to wait for the priced PDP, interstitial included (slow via proxy). */
+const READY_TIMEOUT_MS = 35_000;
 const POLL_MS = 500;
+/** Sticky proxy session length; a daily run of ~90 products takes minutes. */
+const PROXY_SESSION_MINUTES = 30;
 /**
  * Images are switched off with a Blink flag rather than `context.route()`:
  * routing disables Chromium's HTTP cache, so every page would re-download
@@ -42,12 +46,24 @@ const BROWSER_ARGS = [
 export interface MlPage {
   html: string;
   finalUrl: string;
-  /** Whether the JS interstitial had to be cleared on this load. */
+  title: string;
+  /** Whether the JS interstitial showed up on this load. */
   challenged: boolean;
 }
 
+/**
+ * A browser context plus how many pages are using it. A walled context is
+ * marked `stale` and replaced for new loads, but only closed once its
+ * in-flight pages finish — closing it outright killed sibling loads.
+ */
+interface ContextSlot {
+  context: Promise<BrowserContext>;
+  pages: number;
+  stale: boolean;
+}
+
 let browserPromise: Promise<Browser> | undefined;
-let contextPromise: Promise<BrowserContext> | undefined;
+let current: ContextSlot | undefined;
 let idleTimer: NodeJS.Timeout | undefined;
 let activePages = 0;
 const waiters: Array<() => void> = [];
@@ -56,20 +72,15 @@ const waiters: Array<() => void> = [];
  * Launch headless Chromium. Installed Edge/Chrome first (local runs), then the
  * full Playwright Chromium via `channel: 'chromium'` (EC2), and the bundled
  * headless-shell last — that one is usually walled, but it is better than not
- * starting at all.
+ * starting at all. The proxy is set per context, not here.
  */
 async function launchBrowser(log: Logger): Promise<Browser> {
-  const proxy = getPlaywrightProxy('mercadolibre');
-  const base: LaunchOptions = {
-    headless: true,
-    args: BROWSER_ARGS,
-    ...(proxy ? { proxy } : {}),
-  };
+  const base: LaunchOptions = { headless: true, args: BROWSER_ARGS };
   let lastErr: unknown;
   for (const channel of ['msedge', 'chrome', 'chromium', undefined]) {
     try {
       const browser = await chromium.launch({ ...base, ...(channel ? { channel } : {}) });
-      log.info({ channel: channel ?? 'headless-shell', proxied: Boolean(proxy) }, 'mercadolibre browser launched');
+      log.info({ channel: channel ?? 'headless-shell' }, 'mercadolibre browser launched');
       return browser;
     } catch (err) {
       lastErr = err;
@@ -91,42 +102,59 @@ async function cleanUserAgent(browser: Browser): Promise<string> {
   }
 }
 
-async function getContext(log: Logger): Promise<BrowserContext> {
+function getBrowser(log: Logger): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = launchBrowser(log).catch((err: unknown) => {
       browserPromise = undefined;
       throw err;
     });
   }
-  if (!contextPromise) {
-    contextPromise = (async () => {
-      const browser = await browserPromise!;
-      return browser.newContext({
-        locale: 'es-AR',
-        timezoneId: 'America/Argentina/Buenos_Aires',
-        userAgent: await cleanUserAgent(browser),
-        viewport: { width: 1366, height: 900 },
-      });
-    })().catch((err: unknown) => {
-      contextPromise = undefined;
-      throw err;
-    });
-  }
-  return contextPromise;
+  return browserPromise;
 }
 
-/** Drop the context (cookies + proxy connections) so the next load starts clean. */
-async function resetContext(): Promise<void> {
-  const current = contextPromise;
-  contextPromise = undefined;
-  if (current) await current.then((c) => c.close()).catch(() => undefined);
+/** A fresh context with its own sticky proxy session (new exit IP). */
+function openContextSlot(log: Logger): ContextSlot {
+  const context = (async () => {
+    const browser = await getBrowser(log);
+    const proxy = getPlaywrightProxy('mercadolibre', {
+      stickySession: newProxySessionId(),
+      lifetimeMinutes: PROXY_SESSION_MINUTES,
+    });
+    log.info({ proxied: Boolean(proxy) }, 'mercadolibre browser context opened');
+    return browser.newContext({
+      locale: 'es-AR',
+      timezoneId: 'America/Argentina/Buenos_Aires',
+      userAgent: await cleanUserAgent(browser),
+      viewport: { width: 1366, height: 900 },
+      ...(proxy ? { proxy } : {}),
+    });
+  })();
+  const slot: ContextSlot = { context, pages: 0, stale: false };
+  context.catch(() => {
+    if (current === slot) current = undefined;
+  });
+  return slot;
+}
+
+function closeSlot(slot: ContextSlot): void {
+  void slot.context.then((c) => c.close()).catch(() => undefined);
+}
+
+/** Retire the context after an anti-bot wall: new loads get a fresh one. */
+function retireSlot(slot: ContextSlot): void {
+  slot.stale = true;
+  if (current === slot) current = undefined;
+  if (slot.pages === 0) closeSlot(slot);
 }
 
 async function closeAll(): Promise<void> {
-  await resetContext();
-  const current = browserPromise;
+  if (current) {
+    closeSlot(current);
+    current = undefined;
+  }
+  const b = browserPromise;
   browserPromise = undefined;
-  if (current) await current.then((b) => b.close()).catch(() => undefined);
+  if (b) await b.then((x) => x.close()).catch(() => undefined);
 }
 
 async function acquireSlot(): Promise<void> {
@@ -158,15 +186,17 @@ function releaseSlot(): void {
 /**
  * Load a MercadoLibre PDP and return its rendered HTML once the priced page is
  * up (or the wait runs out — the caller's parser then decides what is missing).
- * Throws `rate_limited` on the anti-bot wall, after resetting the context.
+ * Throws `rate_limited` on the anti-bot wall, after retiring the context.
  */
 export async function loadMlPage(
   url: string,
   opts: { signal?: AbortSignal; logger: Logger },
 ): Promise<MlPage> {
   await acquireSlot();
+  const slot = current ?? (current = openContextSlot(opts.logger));
+  slot.pages++;
   try {
-    const context = await getContext(opts.logger);
+    const context = await slot.context;
     const page = await context.newPage();
     const onAbort = (): void => void page.close().catch(() => undefined);
     opts.signal?.addEventListener('abort', onAbort, { once: true });
@@ -190,14 +220,25 @@ export async function loadMlPage(
 
       const html = await page.content();
       const finalUrl = page.url();
+      const title = await page.title().catch(() => '');
       if (isMlBlockPage(html, finalUrl)) {
-        await resetContext();
+        retireSlot(slot);
         throw new ScrapeError(
           'rate_limited',
           'MercadoLibre showed its anti-bot wall (login / error page) instead of the product',
         );
       }
-      return { html, finalUrl, challenged };
+      const stuckOnInterstitial =
+        (await page.locator('meta[itemprop="price"]').count()) === 0 &&
+        (await page.locator('#continue-button').count()) > 0;
+      if (stuckOnInterstitial) {
+        retireSlot(slot);
+        throw new ScrapeError(
+          'rate_limited',
+          `MercadoLibre anti-bot interstitial did not clear within ${READY_TIMEOUT_MS / 1000}s`,
+        );
+      }
+      return { html, finalUrl, title, challenged };
     } catch (err: unknown) {
       if (err instanceof ScrapeError) throw err;
       const name = (err as { name?: string }).name;
@@ -214,6 +255,8 @@ export async function loadMlPage(
       await page.close().catch(() => undefined);
     }
   } finally {
+    slot.pages--;
+    if (slot.stale && slot.pages === 0) closeSlot(slot);
     releaseSlot();
   }
 }

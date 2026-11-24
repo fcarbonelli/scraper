@@ -381,7 +381,12 @@ async function scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
   const page = await loadMlPage(url, { logger: ctx.logger, ...(ctx.signal ? { signal: ctx.signal } : {}) });
   const parsed = parseMlPdp(page.html);
   if (!parsed) {
-    throw new ScrapeError('selector_failed', `MercadoLibre PDP had no priced offer: ${url}`);
+    const path = page.finalUrl.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
+    throw new ScrapeError(
+      'selector_failed',
+      `MercadoLibre PDP had no priced offer: ${url} (landed on ${path}, title "${page.title.slice(0, 60)}", ` +
+        `challenged=${page.challenged})`,
+    );
   }
   if (parsed.sellerId !== ECOMODICO_SELLER_ID) {
     throw new ScrapeError(

@@ -121,18 +121,50 @@ export interface PlaywrightProxy {
 }
 
 /**
+ * Options for {@link getPlaywrightProxy}. `stickySession` pins every connection
+ * of a browser context to ONE exit IP for `lifetimeMinutes` (iProyal syntax:
+ * `_session-<id>_lifetime-<n>m` appended to the password). A rotating exit per
+ * connection breaks sites whose anti-bot cookie is bound to the IP that earned
+ * it (MercadoLibre's interstitial). Ignored for other providers, or when the
+ * configured password already pins a session.
+ */
+export interface PlaywrightProxyOptions {
+  stickySession?: string;
+  lifetimeMinutes?: number;
+}
+
+/** Random iProyal session id (8 alphanumerics). */
+export function newProxySessionId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let id = '';
+  for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
+  return id;
+}
+
+/**
  * Return a Playwright `proxy` launch/context option for the given supermarket,
  * or `undefined` to connect directly. Playwright wants the credentials split
  * out of the URL, so we parse `AR_PROXY_URL` (http://user:pass@host:port) into
  * `{ server, username, password }`.
  */
-export function getPlaywrightProxy(supermarketId: string): PlaywrightProxy | undefined {
+export function getPlaywrightProxy(
+  supermarketId: string,
+  opts: PlaywrightProxyOptions = {},
+): PlaywrightProxy | undefined {
   if (!PROXY_URL || !proxiedIds.has(supermarketId)) return undefined;
   try {
     const u = new URL(PROXY_URL);
     const proxy: PlaywrightProxy = { server: `${u.protocol}//${u.host}` };
     if (u.username) proxy.username = decodeURIComponent(u.username);
     if (u.password) proxy.password = decodeURIComponent(u.password);
+    if (
+      opts.stickySession &&
+      proxy.password !== undefined &&
+      u.hostname.includes('iproyal') &&
+      !proxy.password.includes('_session-')
+    ) {
+      proxy.password += `_session-${opts.stickySession}_lifetime-${opts.lifetimeMinutes ?? 30}m`;
+    }
     return proxy;
   } catch {
     return undefined;
