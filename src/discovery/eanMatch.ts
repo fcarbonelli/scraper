@@ -162,11 +162,15 @@ export interface MatchInput {
  *
  * When the name is a placeholder ("Unknown product"), we fall back to the URL
  * slug — which usually still encodes the product on slug-based sites.
+ *
+ * `accept` restricts the candidates (e.g. to catalog EANs only) BEFORE ranking,
+ * so the runner-up margin is measured among eligible EANs.
  */
 export function suggestEansFromIndex(
   index: Map<string, EanIndexEntry>,
   input: MatchInput,
   topN = 3,
+  accept?: (ean: string) => boolean,
 ): EanSuggestion[] {
   const orphanTokens = isPlaceholderName(input.name)
     ? (input.url ? urlTokens(input.url) : [])
@@ -175,6 +179,7 @@ export function suggestEansFromIndex(
 
   const scored: Array<{ ean: string; score: number; description: string }> = [];
   for (const [ean, entry] of index) {
+    if (accept && !accept(ean)) continue;
     let shared = 0;
     for (const t of orphanTokens) if (entry.tokens.has(t)) shared++;
     const score = shared / orphanTokens.length;

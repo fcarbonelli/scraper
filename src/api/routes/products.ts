@@ -19,6 +19,7 @@ import { ApiError } from '../lib/apiError.js';
 import { paginated, success } from '../lib/envelope.js';
 import { parseBody, parseQuery, PaginationQuery } from '../lib/parseQuery.js';
 import { buildEanIndex, suggestEansFromIndex } from '../../discovery/eanMatch.js';
+import { catalogWarningFor, type CatalogWarning } from '../../ingest/catalogWarning.js';
 
 export const productsRouter = Router();
 
@@ -32,7 +33,10 @@ const BULK_IMPORT_MAX_URLS = 25;
  * API, matching the convention used by the rest of the routes (DB-derived
  * fields are snake_case).
  */
-function ingestResultToResponse(r: IngestResult): {
+function ingestResultToResponse(
+  r: IngestResult,
+  catalogWarning: CatalogWarning | null,
+): {
   url: string;
   canonical_url: string;
   supermarket_id: string;
@@ -40,6 +44,7 @@ function ingestResultToResponse(r: IngestResult): {
   external_id: string;
   already_existed: boolean;
   scrape: { status: 'success' | 'failed' | 'retry_scheduled' } | null;
+  catalog_warning: CatalogWarning | null;
 } {
   return {
     url: r.url,
@@ -49,6 +54,7 @@ function ingestResultToResponse(r: IngestResult): {
     external_id: r.externalId,
     already_existed: r.alreadyExisted,
     scrape: r.scrape ? { status: r.scrape.status } : null,
+    catalog_warning: catalogWarning,
   };
 }
 
@@ -165,8 +171,9 @@ productsRouter.post('/', async (req: Request, res: Response) => {
     logger.warn({ err, url: body.url }, 'POST /v1/products ingest failed');
     throw ApiError.badRequest(message);
   }
+  const warning = await catalogWarningFor(result.supermarketProductId, result.canonicalUrl);
   res.status(result.alreadyExisted ? 200 : 201).json(
-    success(ingestResultToResponse(result)),
+    success(ingestResultToResponse(result, warning)),
   );
 });
 
@@ -210,7 +217,9 @@ productsRouter.post('/bulk-import', async (req: Request, res: Response) => {
         skipScrapeIfExists: true,
         mappingSource: 'manual_url',
       });
-      results.push(ingestResultToResponse(r));
+      results.push(
+        ingestResultToResponse(r, await catalogWarningFor(r.supermarketProductId, r.canonicalUrl)),
+      );
       if (r.alreadyExisted) skipped++;
       else imported++;
     } catch (err) {

@@ -6,7 +6,8 @@
     "supermarket_product_id": "8e9bcc71-2e2f-4cf1-9b59-3a0f8e7d1c22",
     "external_id": "00012345-00012345-200",
     "already_existed": false,
-    "scrape": null
+    "scrape": null,
+    "catalog_warning": null
   },
   "meta": { "ts": "2026-05-09T15:42:11.082Z" }
 }

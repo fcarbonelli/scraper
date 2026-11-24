@@ -1,0 +1,728 @@
+[
+  {
+    "supermarket_product_id": "18078027-2ba0-4f1b-96d6-b2da15af71c3",
+    "old_product_id": "1e1c7d00-8d36-45e3-bedd-7564631b262a",
+    "old_product": {
+      "id": "1e1c7d00-8d36-45e3-bedd-7564631b262a",
+      "ean": "7790520029089",
+      "name": "Insecticida Raid Repele Mosquitos En Espiral 12un",
+      "unit": "un",
+      "brand": "RAID",
+      "format": null,
+      "variety": null,
+      "category": "INSECTICIDAS",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/insecticida-raid-repele-mosquitos-en-espiral-12un-2/p",
+        "itemId": "7460",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/224794/front-view-19857.jpg?v=637855393181800000",
+        "linkText": "insecticida-raid-repele-mosquitos-en-espiral-12un-2",
+        "categoryPath": "/Insecticidas/Aparatos Y Espirales/"
+      },
+      "created_at": "2026-06-12T23:31:00.599781+00:00",
+      "updated_at": "2026-08-04T19:01:50.614993+00:00",
+      "subcategory": null,
+      "manufacturer": "S.C. JOHNSON Y SON S.A.I.C.",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "1ac5fef3-e09b-45b7-970b-1eee166f05e6",
+    "old_product_id": "4f341f3b-17a5-451b-9a38-5568f6a99ec1",
+    "old_product": {
+      "id": "4f341f3b-17a5-451b-9a38-5568f6a99ec1",
+      "ean": "7793253001896",
+      "name": "POETT LIQ.SOLO PARA TIx900ml",
+      "unit": null,
+      "brand": null,
+      "format": null,
+      "variety": null,
+      "category": null,
+      "metadata": {
+        "imageUrl": "https://www.lagenovesadigital.com.ar/Images/Productos/L/7793253001896.jpg"
+      },
+      "created_at": "2026-10-14T15:48:06.826131+00:00",
+      "updated_at": "2026-10-14T15:48:06.826131+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "383b610a-7652-4bdb-b8b6-1b7dd720d7cf",
+    "old_product_id": "d1fb8cc4-0e01-4bf1-baf0-21513d51b4de",
+    "old_product": {
+      "id": "d1fb8cc4-0e01-4bf1-baf0-21513d51b4de",
+      "ean": "7791130144544",
+      "name": "Limpiador Antigrasa Procenex Repuesto Económico  420 Ml",
+      "unit": "lt",
+      "brand": "Procenex",
+      "format": null,
+      "variety": null,
+      "category": "Botellas Desengrasante",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/limpiador-antigrasa-procenex-repuesto-economico-420-ml-2/p",
+        "itemId": "33083",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/232640/front-view-27944.jpg?v=637859706385600000",
+        "linkText": "limpiador-antigrasa-procenex-repuesto-economico-420-ml-2",
+        "categoryPath": "/Cocina/Desengrasantes De Cocina Y Horno/Botellas Desengrasante/"
+      },
+      "created_at": "2026-06-11T16:12:41.95754+00:00",
+      "updated_at": "2026-07-06T20:59:17.054164+00:00",
+      "subcategory": null,
+      "manufacturer": "RECKITT BENCKISER",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "457d671d-91f7-4f4c-ac83-130c04b81401",
+    "old_product_id": "11c7873d-ddb0-448f-b64d-d5ff1112839a",
+    "old_product": {
+      "id": "11c7873d-ddb0-448f-b64d-d5ff1112839a",
+      "ean": "7793253005801",
+      "name": "Lavandina En Gel  Ayudin Original 700 Ml",
+      "unit": "lt",
+      "brand": "Ayudin",
+      "format": null,
+      "variety": null,
+      "category": "Gel",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/lavandina-en-gel-ayudin-original-700-ml-2/p",
+        "itemId": "162608",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/332703/0779325300379-02-1146.jpg?v=638606505874130000",
+        "linkText": "lavandina-en-gel-ayudin-original-700-ml-2",
+        "categoryPath": "/Lavandinas/Gel/"
+      },
+      "created_at": "2026-06-15T21:42:39.787015+00:00",
+      "updated_at": "2026-07-06T20:59:22.038063+00:00",
+      "subcategory": null,
+      "manufacturer": "GRUPO AYUDIN",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "4ac95157-f835-4744-97a9-7b234e63e2c9",
+    "old_product_id": "43fcc01f-f3a0-4f13-8bf8-cc101e688ebd",
+    "old_product": {
+      "id": "43fcc01f-f3a0-4f13-8bf8-cc101e688ebd",
+      "ean": "7793253179274",
+      "name": "Limpiador De Baño Ayudín Limpieza Activa (Envase Económico) 900 Ml",
+      "unit": "kg",
+      "brand": "Ayudin",
+      "format": null,
+      "variety": null,
+      "category": "Desinfectantes De Baño",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/limpiador-de-bano-ayudin-limpieza-activa-envase-economico-900-ml-2/p",
+        "itemId": "166002",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/213147/0779325300529-02-1177.jpg?v=637853429328100000",
+        "linkText": "limpiador-de-bano-ayudin-limpieza-activa-envase-economico-900-ml-2",
+        "categoryPath": "/Limpieza de Baño/Desinfectantes De Baño/"
+      },
+      "created_at": "2026-06-10T18:19:31.205343+00:00",
+      "updated_at": "2026-07-06T20:59:24.405301+00:00",
+      "subcategory": null,
+      "manufacturer": "GRUPO AYUDIN",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "4afc93d5-6146-4be0-a455-bd190ae4a873",
+    "old_product_id": "ac12e1f9-bd1d-4b92-9639-b313c06e3df6",
+    "old_product": {
+      "id": "ac12e1f9-bd1d-4b92-9639-b313c06e3df6",
+      "ean": "7791905000679",
+      "name": "LAVANDINA ODEX LAVANDAx2L",
+      "unit": null,
+      "brand": null,
+      "format": null,
+      "variety": null,
+      "category": null,
+      "metadata": {
+        "imageUrl": "https://www.lagenovesadigital.com.ar/Images/Productos/L/7791905000679.jpg"
+      },
+      "created_at": "2026-10-14T15:45:04.959479+00:00",
+      "updated_at": "2026-10-14T15:45:04.959479+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "5a3b81b8-6edc-4765-af3a-d09f22333a7f",
+    "old_product_id": "765bed29-ca91-4073-b7e3-d533c1ca547b",
+    "old_product": {
+      "id": "765bed29-ca91-4073-b7e3-d533c1ca547b",
+      "ean": "7791290786394",
+      "name": "Lavandina En Gel VIM Original 700 ml",
+      "unit": null,
+      "brand": "Vim",
+      "format": null,
+      "variety": null,
+      "category": "Lavandinas",
+      "metadata": {
+        "link": "https://www.comodinencasa.com.ar/lavandina-gel-vim-original-700-ml/p",
+        "itemId": "13500",
+        "imageUrl": "https://alberdisa.vteximg.com.br/arquivos/ids/181889/lavandina_gel_vim_700ml.png?v=638913840522170000",
+        "linkText": "lavandina-gel-vim-original-700-ml",
+        "categoryPath": "/Limpieza/Lavandinas/"
+      },
+      "created_at": "2026-10-05T20:03:25.704768+00:00",
+      "updated_at": "2026-10-05T20:03:25.704768+00:00",
+      "subcategory": null,
+      "manufacturer": "UNILEVER",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "5e9f376b-7da0-4f4b-8133-03fa06d67f07",
+    "old_product_id": "e403c468-e262-4db9-a640-f921775d70ef",
+    "old_product": {
+      "id": "e403c468-e262-4db9-a640-f921775d70ef",
+      "ean": "7790520014177",
+      "name": "Desinfectante De Ambientes Y Elimina Olores Lysoform Original En Aerosol 360ml",
+      "unit": "lt",
+      "brand": "LYSOFORM",
+      "format": null,
+      "variety": null,
+      "category": "Desinfectantes",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/lysoform-aero-original-360cc-2/p",
+        "itemId": "166274",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/256701/0779052099528-02-9945.jpg?v=638790361905430000",
+        "linkText": "lysoform-aero-original-360cc-2",
+        "categoryPath": "/Desodorante De Ambientes/Desodorantes Y Desinfectantes/Desinfectantes/"
+      },
+      "created_at": "2026-06-10T15:32:25.582551+00:00",
+      "updated_at": "2026-08-04T18:51:56.980011+00:00",
+      "subcategory": null,
+      "manufacturer": "S.C. JOHNSON Y SON S.A.I.C.",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "5ebf2362-1059-439b-8fe5-0343e5c3c667",
+    "old_product_id": "6ef8f6d4-9b1d-4887-9072-3e43d0f4ec39",
+    "old_product": {
+      "id": "6ef8f6d4-9b1d-4887-9072-3e43d0f4ec39",
+      "ean": "7793253005849",
+      "name": "Lavandina En Gel Ayudín Lavanda 700 Ml",
+      "unit": "lt",
+      "brand": "Ayudin",
+      "format": null,
+      "variety": null,
+      "category": "Gel",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/lavandina-en-gel-ayudin-lavanda-700-ml-2/p",
+        "itemId": "162604",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/332699/0779325300383-02-1150.jpg?v=638606505858100000",
+        "linkText": "lavandina-en-gel-ayudin-lavanda-700-ml-2",
+        "categoryPath": "/Lavandinas/Gel/"
+      },
+      "created_at": "2026-06-15T21:43:40.71569+00:00",
+      "updated_at": "2026-07-06T20:59:22.625381+00:00",
+      "subcategory": null,
+      "manufacturer": "GRUPO AYUDIN",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "61883a26-4284-402f-8ca7-192b9486e291",
+    "old_product_id": "c59d6180-4884-492e-9e30-2619d776dba0",
+    "old_product": {
+      "id": "c59d6180-4884-492e-9e30-2619d776dba0",
+      "ean": "7793253000998",
+      "name": "AYUDIN GEL ORIGINALx700ml",
+      "unit": null,
+      "brand": null,
+      "format": null,
+      "variety": null,
+      "category": null,
+      "metadata": {
+        "imageUrl": "https://www.lagenovesadigital.com.ar/Images/Productos/L/7793253000998.jpg"
+      },
+      "created_at": "2026-10-14T15:26:10.486383+00:00",
+      "updated_at": "2026-10-14T15:26:10.486383+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "63125687-bdbf-420c-8e2f-6b73174d7f3b",
+    "old_product_id": "11c7873d-ddb0-448f-b64d-d5ff1112839a",
+    "old_product": {
+      "id": "11c7873d-ddb0-448f-b64d-d5ff1112839a",
+      "ean": "7793253005801",
+      "name": "Lavandina En Gel  Ayudin Original 700 Ml",
+      "unit": "lt",
+      "brand": "Ayudin",
+      "format": null,
+      "variety": null,
+      "category": "Gel",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/lavandina-en-gel-ayudin-original-700-ml-2/p",
+        "itemId": "162608",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/332703/0779325300379-02-1146.jpg?v=638606505874130000",
+        "linkText": "lavandina-en-gel-ayudin-original-700-ml-2",
+        "categoryPath": "/Lavandinas/Gel/"
+      },
+      "created_at": "2026-06-15T21:42:39.787015+00:00",
+      "updated_at": "2026-07-06T20:59:22.038063+00:00",
+      "subcategory": null,
+      "manufacturer": "GRUPO AYUDIN",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "67be652b-efb5-4349-a481-c780ed9d670f",
+    "old_product_id": "15b37bbf-b34f-4667-a212-9347927b4a91",
+    "old_product": {
+      "id": "15b37bbf-b34f-4667-a212-9347927b4a91",
+      "ean": "7793253004439",
+      "name": "Lavandina Ayudin Clásica 1 Lt",
+      "unit": null,
+      "brand": "Ayudin",
+      "format": null,
+      "variety": null,
+      "category": "Lavandinas",
+      "metadata": {
+        "link": "https://www.comodinencasa.com.ar/lavandina-ayudin-clasica-1-lt/p",
+        "itemId": "14988",
+        "imageUrl": "https://alberdisa.vteximg.com.br/arquivos/ids/166708/Lavandina-Ayudin-Clasica-1-Lt.png?v=637629075368600000",
+        "linkText": "lavandina-ayudin-clasica-1-lt",
+        "categoryPath": "/Limpieza/Lavandinas/"
+      },
+      "created_at": "2026-10-05T19:45:34.669379+00:00",
+      "updated_at": "2026-10-05T19:45:34.669379+00:00",
+      "subcategory": null,
+      "manufacturer": "GRUPO AYUDIN",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "6ff7fb31-e632-438a-8b40-a9b7fdd6dd2b",
+    "old_product_id": "1e1c7d00-8d36-45e3-bedd-7564631b262a",
+    "old_product": {
+      "id": "1e1c7d00-8d36-45e3-bedd-7564631b262a",
+      "ean": "7790520029089",
+      "name": "Insecticida Raid Repele Mosquitos En Espiral 12un",
+      "unit": "un",
+      "brand": "RAID",
+      "format": null,
+      "variety": null,
+      "category": "INSECTICIDAS",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/insecticida-raid-repele-mosquitos-en-espiral-12un-2/p",
+        "itemId": "7460",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/224794/front-view-19857.jpg?v=637855393181800000",
+        "linkText": "insecticida-raid-repele-mosquitos-en-espiral-12un-2",
+        "categoryPath": "/Insecticidas/Aparatos Y Espirales/"
+      },
+      "created_at": "2026-06-12T23:31:00.599781+00:00",
+      "updated_at": "2026-08-04T19:01:50.614993+00:00",
+      "subcategory": null,
+      "manufacturer": "S.C. JOHNSON Y SON S.A.I.C.",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "8c552ab6-3222-4617-9ce1-1476ce2d09dc",
+    "old_product_id": "efa72fcd-3de2-4a61-8a90-799a8eb8fa13",
+    "old_product": {
+      "id": "efa72fcd-3de2-4a61-8a90-799a8eb8fa13",
+      "ean": "779325300471",
+      "name": "Limpiador Desinfectante Ayudín Lavanda 4 Lt",
+      "unit": null,
+      "brand": "A Balanza",
+      "format": null,
+      "variety": null,
+      "category": "Pisos y muebles",
+      "metadata": {
+        "link": "https://www.abastecedor.com.ar/limpiador-desinfectante-ayudin-lavanda-x4lt/p",
+        "itemId": "4979",
+        "imageUrl": "https://elabastecedorar.vteximg.com.br/arquivos/ids/160342/151430.webp?v=639162790906830000",
+        "linkText": "limpiador-desinfectante-ayudin-lavanda-x4lt",
+        "categoryPath": "/Limpieza y hogar/Pisos y muebles/"
+      },
+      "created_at": "2026-10-08T19:50:48.139723+00:00",
+      "updated_at": "2026-10-08T19:50:48.139723+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "a42d658e-f1ab-461d-9a4b-25a509069035",
+    "old_product_id": "68c964d9-f3de-4da9-af40-093643066218",
+    "old_product": {
+      "id": "68c964d9-f3de-4da9-af40-093643066218",
+      "ean": "7790520004918",
+      "name": "FUYI M.M.M.x360cc",
+      "unit": null,
+      "brand": null,
+      "format": null,
+      "variety": null,
+      "category": null,
+      "metadata": {
+        "imageUrl": "https://www.lagenovesadigital.com.ar/Images/Productos/L/7790520004918.jpg"
+      },
+      "created_at": "2026-10-14T15:34:16.169534+00:00",
+      "updated_at": "2026-10-14T15:34:16.169534+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "a9fdf75f-681f-4955-bd82-7e8fdfc9cb09",
+    "old_product_id": "cbd4fdc8-e7b9-4632-97bd-dc4499fd01eb",
+    "old_product": {
+      "id": "cbd4fdc8-e7b9-4632-97bd-dc4499fd01eb",
+      "ean": "7791290794436",
+      "name": "Limpiador Cif Baño Biodegra DP 900ml",
+      "unit": null,
+      "brand": "Cif",
+      "format": null,
+      "variety": null,
+      "category": "Limpiadores",
+      "metadata": {
+        "link": "https://www.comodinencasa.com.ar/limpiador-cif-bano-biodegra-dp-900ml/p",
+        "itemId": "14224",
+        "imageUrl": "https://alberdisa.vteximg.com.br/arquivos/ids/165342/Limpiador-Cif-Baño-Biodegra-DP-900ml.jpg?v=637523633075570000",
+        "linkText": "limpiador-cif-bano-biodegra-dp-900ml",
+        "categoryPath": "/Limpieza/Limpieza de Cocina/Limpiadores/"
+      },
+      "created_at": "2026-10-05T19:49:33.758804+00:00",
+      "updated_at": "2026-10-05T19:49:33.758804+00:00",
+      "subcategory": null,
+      "manufacturer": "UNILEVER",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "aaf8608e-c0e9-4672-8469-ef8e2dc808e1",
+    "old_product_id": "9ab8ba0c-639b-4966-993a-107336561883",
+    "old_product": {
+      "id": "9ab8ba0c-639b-4966-993a-107336561883",
+      "ean": "7790520997937",
+      "name": "Insecticida Cucarachas Raid Exterminador 360ml",
+      "unit": null,
+      "brand": "Raid",
+      "format": null,
+      "variety": null,
+      "category": "Aerosoles",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/insecticida-raid-cucarachas-exterminador-360ml-2/p",
+        "itemId": "215622",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/306435/Insecticida-Raid-Cucarachas-Exterminador-360ml-1-50760.jpg?v=639261993619900000",
+        "linkText": "insecticida-raid-cucarachas-exterminador-360ml-2",
+        "categoryPath": "/Insecticidas/Aerosoles/"
+      },
+      "created_at": "2026-10-05T19:30:45.769077+00:00",
+      "updated_at": "2026-10-05T19:30:45.769077+00:00",
+      "subcategory": null,
+      "manufacturer": "S.C. JOHNSON Y SON S.A.I.C.",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "b5ba76c3-cc63-4bdf-9f39-bb90884d088f",
+    "old_product_id": "6bac5293-934f-4628-a420-13fa9b0b419b",
+    "old_product": {
+      "id": "6bac5293-934f-4628-a420-13fa9b0b419b",
+      "ean": "7793253004446",
+      "name": "AYUDINx2L LAVANDINA ORIGINAL",
+      "unit": null,
+      "brand": null,
+      "format": null,
+      "variety": null,
+      "category": null,
+      "metadata": {
+        "imageUrl": "https://www.lagenovesadigital.com.ar/Images/Productos/L/7793253004446.jpg"
+      },
+      "created_at": "2026-10-14T15:23:44.207433+00:00",
+      "updated_at": "2026-10-14T15:23:44.207433+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "b87624ef-6db3-4149-9c9c-a032cac6e2e3",
+    "old_product_id": "114b3029-bb85-49b8-a3b6-75c03a8722d9",
+    "old_product": {
+      "id": "114b3029-bb85-49b8-a3b6-75c03a8722d9",
+      "ean": "7791905000662",
+      "name": "LAVANDINA ODEXx1L LAVANDA",
+      "unit": null,
+      "brand": null,
+      "format": null,
+      "variety": null,
+      "category": null,
+      "metadata": {
+        "imageUrl": "https://www.lagenovesadigital.com.ar/Images/Productos/L/7791905000662.jpg"
+      },
+      "created_at": "2026-10-14T15:44:32.135885+00:00",
+      "updated_at": "2026-10-14T15:44:32.135885+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "b9c268e2-2a5d-4e93-8a1f-b7da2561f49b",
+    "old_product_id": "1e1c7d00-8d36-45e3-bedd-7564631b262a",
+    "old_product": {
+      "id": "1e1c7d00-8d36-45e3-bedd-7564631b262a",
+      "ean": "7790520029089",
+      "name": "Insecticida Raid Repele Mosquitos En Espiral 12un",
+      "unit": "un",
+      "brand": "RAID",
+      "format": null,
+      "variety": null,
+      "category": "INSECTICIDAS",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/insecticida-raid-repele-mosquitos-en-espiral-12un-2/p",
+        "itemId": "7460",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/224794/front-view-19857.jpg?v=637855393181800000",
+        "linkText": "insecticida-raid-repele-mosquitos-en-espiral-12un-2",
+        "categoryPath": "/Insecticidas/Aparatos Y Espirales/"
+      },
+      "created_at": "2026-06-12T23:31:00.599781+00:00",
+      "updated_at": "2026-08-04T19:01:50.614993+00:00",
+      "subcategory": null,
+      "manufacturer": "S.C. JOHNSON Y SON S.A.I.C.",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "bad898b0-5b38-4bb6-a07f-c70912a9d87d",
+    "old_product_id": "8ef50f2b-fa08-442b-be5a-6a9851483393",
+    "old_product": {
+      "id": "8ef50f2b-fa08-442b-be5a-6a9851483393",
+      "ean": "7791290786400",
+      "name": "Lavandina En Gel VIM Lavanda 700 ml",
+      "unit": null,
+      "brand": "Vim",
+      "format": null,
+      "variety": null,
+      "category": "Lavandinas",
+      "metadata": {
+        "link": "https://www.comodinencasa.com.ar/lavandina-gel-vim-lavanda-700-ml/p",
+        "itemId": "13098",
+        "imageUrl": "https://alberdisa.vteximg.com.br/arquivos/ids/168060/7791290786400.jpg?v=637651503218630000",
+        "linkText": "lavandina-gel-vim-lavanda-700-ml",
+        "categoryPath": "/Limpieza/Lavandinas/"
+      },
+      "created_at": "2026-07-01T12:47:18.1863+00:00",
+      "updated_at": "2026-07-06T20:59:18.780512+00:00",
+      "subcategory": null,
+      "manufacturer": "UNILEVER",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "be0cfb7c-7937-48ba-949c-9ba28a79feb1",
+    "old_product_id": "a9b9a591-cb34-4bf2-9e82-3257e4c27f44",
+    "old_product": {
+      "id": "a9b9a591-cb34-4bf2-9e82-3257e4c27f44",
+      "ean": "37791130683525",
+      "name": "Limpiador Liquido Lavanda Procenex 900 ml",
+      "unit": null,
+      "brand": "Procenex",
+      "format": null,
+      "variety": null,
+      "category": "Limpiadores Piso",
+      "metadata": {
+        "link": "https://www.josimar.com.ar/limpiador-liquido-procenex-lavanda-900ml/p",
+        "itemId": "2071",
+        "imageUrl": "https://arjosimarprod.vteximg.com.br/arquivos/ids/170265/Limpiador-Liquido-Lavanda-Procenex-900-ml-1-3237.jpg?v=638568273672000000",
+        "linkText": "limpiador-liquido-procenex-lavanda-900ml",
+        "categoryPath": "/Limpieza/Limpieza Piso y Superficies/Limpiadores Piso/"
+      },
+      "created_at": "2026-10-08T22:07:13.774253+00:00",
+      "updated_at": "2026-10-08T22:07:13.774253+00:00",
+      "subcategory": null,
+      "manufacturer": "RECKITT BENCKISER",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "c20547d7-9c58-46ce-930d-d11bd2beaab4",
+    "old_product_id": "16816fe5-ccca-402c-8c14-c35f2aeb2ffc",
+    "old_product": {
+      "id": "16816fe5-ccca-402c-8c14-c35f2aeb2ffc",
+      "ean": "7793253005627",
+      "name": "Lavandina Ayudin Original 4l",
+      "unit": null,
+      "brand": "Ayudin",
+      "format": null,
+      "variety": null,
+      "category": "Líquidas",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/lavandina-ayudin-original-4l/p",
+        "itemId": "230434",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/347149/Lavandina-Ayudin-Original-4l-0779325300671-1.jpg?v=638749805011600000",
+        "linkText": "lavandina-ayudin-original-4l",
+        "categoryPath": "/Lavandinas/Líquidas/"
+      },
+      "created_at": "2026-06-14T00:59:48.421332+00:00",
+      "updated_at": "2026-07-06T20:59:21.80614+00:00",
+      "subcategory": null,
+      "manufacturer": "GRUPO AYUDIN",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "c9a499d6-0d9a-4b70-bd42-4e4fb810e317",
+    "old_product_id": "ac81fa54-ca1c-4c8a-8e2d-6b57ad428153",
+    "old_product": {
+      "id": "ac81fa54-ca1c-4c8a-8e2d-6b57ad428153",
+      "ean": "7793253001865",
+      "name": "POETT LIQ.LAVANDAx900ml",
+      "unit": null,
+      "brand": null,
+      "format": null,
+      "variety": null,
+      "category": null,
+      "metadata": {
+        "imageUrl": "https://www.lagenovesadigital.com.ar/Images/Productos/L/7793253001865.jpg"
+      },
+      "created_at": "2026-10-14T15:48:25.67922+00:00",
+      "updated_at": "2026-10-14T15:48:25.67922+00:00",
+      "subcategory": null,
+      "manufacturer": null,
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "d97be7e1-6d7d-4c9e-b59a-834c8a945185",
+    "old_product_id": "765bed29-ca91-4073-b7e3-d533c1ca547b",
+    "old_product": {
+      "id": "765bed29-ca91-4073-b7e3-d533c1ca547b",
+      "ean": "7791290786394",
+      "name": "Lavandina En Gel VIM Original 700 ml",
+      "unit": null,
+      "brand": "Vim",
+      "format": null,
+      "variety": null,
+      "category": "Lavandinas",
+      "metadata": {
+        "link": "https://www.comodinencasa.com.ar/lavandina-gel-vim-original-700-ml/p",
+        "itemId": "13500",
+        "imageUrl": "https://alberdisa.vteximg.com.br/arquivos/ids/181889/lavandina_gel_vim_700ml.png?v=638913840522170000",
+        "linkText": "lavandina-gel-vim-original-700-ml",
+        "categoryPath": "/Limpieza/Lavandinas/"
+      },
+      "created_at": "2026-10-05T20:03:25.704768+00:00",
+      "updated_at": "2026-10-05T20:03:25.704768+00:00",
+      "subcategory": null,
+      "manufacturer": "UNILEVER",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "e32fbc47-8f51-4d4b-b3fd-fb2336c49555",
+    "old_product_id": "211667c1-a999-427f-aa4f-16546bade3df",
+    "old_product": {
+      "id": "211667c1-a999-427f-aa4f-16546bade3df",
+      "ean": "7791130145510",
+      "name": "Limpiador Baño Procenex Repuesto Económico  420 Ml",
+      "unit": "lt",
+      "brand": "Procenex",
+      "format": null,
+      "variety": null,
+      "category": "(Old)",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/limpiador-bano-procenex-repuesto-economico-420-ml-2/p",
+        "itemId": "36253",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/232651/front-view-4571.jpg?v=637859706421900000",
+        "linkText": "limpiador-bano-procenex-repuesto-economico-420-ml-2",
+        "categoryPath": "/Baño/(Old)/"
+      },
+      "created_at": "2026-10-05T19:27:03.172378+00:00",
+      "updated_at": "2026-10-05T19:27:03.172378+00:00",
+      "subcategory": null,
+      "manufacturer": "RECKITT BENCKISER",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "f71962fa-6210-45fa-a171-88f52d046f4e",
+    "old_product_id": "6eb73cd4-b91a-465b-9766-716026591243",
+    "old_product": {
+      "id": "6eb73cd4-b91a-465b-9766-716026591243",
+      "ean": "7793253041014",
+      "name": "Aromatizante De Ambiente Intense Lavanda (repuesto) 9 Gr Poett",
+      "unit": null,
+      "brand": "POETT",
+      "format": null,
+      "variety": null,
+      "category": "Aromatizantes",
+      "metadata": {
+        "link": "https://www.jumbo.com.ar/aromatizante-de-ambiente-intense-lavanda-repuesto-9-gr-poett/p",
+        "itemId": "19850",
+        "imageUrl": "https://jumboargentina.vteximg.com.br/arquivos/ids/565804/Repuesto-Aromatizador-De-Ambiente-Poett-Intense-Lavanda-9-Gr-1-20604.jpg?v=637130136547200000",
+        "linkText": "aromatizante-de-ambiente-intense-lavanda-repuesto-9-gr-poett",
+        "categoryPath": "/Limpieza/Desodorantes de Ambiente/Aromatizantes/"
+      },
+      "created_at": "2026-06-12T20:39:07.176007+00:00",
+      "updated_at": "2026-07-06T20:59:23.108054+00:00",
+      "subcategory": null,
+      "manufacturer": "GRUPO AYUDIN",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "f9db9b86-12ed-454a-9437-590ec214ccb3",
+    "old_product_id": "293b63e7-f6d0-4315-87b9-51e910c08b94",
+    "old_product": {
+      "id": "293b63e7-f6d0-4315-87b9-51e910c08b94",
+      "ean": "7790520014191",
+      "name": "Desinfectante De Ambientes Y Elimina Olores Lysoform Bebé En Aerosol 360ml",
+      "unit": "lt",
+      "brand": "LYSOFORM",
+      "format": null,
+      "variety": null,
+      "category": "Desinfectantes",
+      "metadata": {
+        "link": "https://www.masonline.com.ar/lysoform-aero-bebe-360cc-2/p",
+        "itemId": "166272",
+        "imageUrl": "https://masonlineprod.vteximg.com.br/arquivos/ids/217901/0779052099530-02-19896.jpg?v=638790382135230000",
+        "linkText": "lysoform-aero-bebe-360cc-2",
+        "categoryPath": "/Desodorante De Ambientes/Desodorantes Y Desinfectantes/Desinfectantes/"
+      },
+      "created_at": "2026-06-10T15:34:04.261448+00:00",
+      "updated_at": "2026-08-04T18:51:57.283384+00:00",
+      "subcategory": null,
+      "manufacturer": "S.C. JOHNSON Y SON S.A.I.C.",
+      "description_forms": null
+    }
+  },
+  {
+    "supermarket_product_id": "fcb121e7-f6e8-4626-bbda-a918a870d762",
+    "old_product_id": "8620ab7f-0ef9-48dd-8808-94f560d145b1",
+    "old_product": {
+      "id": "8620ab7f-0ef9-48dd-8808-94f560d145b1",
+      "ean": "7791130015004",
+      "name": "Vanish Quitamanchas Prelavado Rosa 400ml",
+      "unit": null,
+      "brand": "VANISH",
+      "format": null,
+      "variety": null,
+      "category": "Quitamanchas",
+      "metadata": {
+        "link": "https://www.vea.com.ar/vanish-quitamanchas-prelavado-rosa-400ml/p",
+        "itemId": "5867",
+        "imageUrl": "https://jumboargentina.vteximg.com.br/arquivos/ids/720227/Quitamanchas-Vanish-Pre-wash-400-Ml-1-6532.jpg?v=637992095838000000",
+        "linkText": "vanish-quitamanchas-prelavado-rosa-400ml",
+        "categoryPath": "/Limpieza/Cuidado Para La Ropa/Quitamanchas/"
+      },
+      "created_at": "2026-06-14T16:16:49.155705+00:00",
+      "updated_at": "2026-07-06T20:59:16.320428+00:00",
+      "subcategory": null,
+      "manufacturer": "RECKITT BENCKISER",
+      "description_forms": null
+    }
+  }
+]

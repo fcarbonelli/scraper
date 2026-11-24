@@ -14,16 +14,30 @@
         "supermarket_product_id": "1f2bca34-9817-4d20-b6f1-d0e7e3cf90a1",
         "external_id": "00045678-00045678-200",
         "already_existed": false,
-        "scrape": null
+        "scrape": null,
+        "catalog_warning": null
       },
       {
-        "url": "https://www.carrefour.com.ar/aceite-de-girasol-natura-900ml/p",
-        "canonical_url": "https://www.carrefour.com.ar/aceite-de-girasol-natura-900ml/p",
-        "supermarket_id": "carrefour",
+        "url": "https://www.josimar.com.ar/lavandina-en-gel-original-ayudin-700cc/p",
+        "canonical_url": "https://www.josimar.com.ar/lavandina-en-gel-original-ayudin-700cc/p",
+        "supermarket_id": "josimar",
         "supermarket_product_id": "63cf01d2-8a31-4c70-a42e-9b4a7d2fa0e4",
         "external_id": "8472",
         "already_existed": false,
-        "scrape": null
+        "scrape": null,
+        "catalog_warning": {
+          "code": "ean_not_in_catalog",
+          "ean": "7793253005801",
+          "message": "EAN 7793253005801 is not in the client catalog; the product will export with blank labels until it is bound to a catalog EAN.",
+          "suggestions": [
+            {
+              "ean": "7793253003791",
+              "score": 0.857,
+              "confidence": "high",
+              "description": "LAVANDINAS GEL AYUDÍN 700 ORIGINAL"
+            }
+          ]
+        }
       },
       {
         "url": "https://www.cotodigital.com.ar/sitios/cdigi/productos/lavandina-original-ayudin-2l/_/R-00591050-00591050-200",
@@ -32,7 +46,8 @@
         "supermarket_product_id": "8e9bcc71-aaaa-4cf1-9b59-3a0f8e7d1c22",
         "external_id": "00591050-00591050-200",
         "already_existed": true,
-        "scrape": null
+        "scrape": null,
+        "catalog_warning": null
       }
     ],
     "failures": [

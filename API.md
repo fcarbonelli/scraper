@@ -345,6 +345,19 @@ export interface IngestResult {
   external_id: string;
   already_existed: boolean;              // true => idempotent re-add
   scrape: { status: 'success' | 'failed' | 'retry_scheduled' } | null;
+  catalog_warning: CatalogWarning | null; // null => product has a catalog EAN (labels will fill)
+}
+
+export interface CatalogWarning {
+  code: 'ean_not_in_catalog' | 'missing_ean';
+  ean: string | null;                    // EAN on the product now (null when the page exposes none)
+  message: string;
+  suggestions: Array<{                   // up to 3 catalog EANs that look like the same product
+    ean: string;
+    score: number;                       // 0..1
+    confidence: 'high' | 'medium' | 'low';
+    description: string;                 // catalog "descripción para forms"
+  }>;
 }
 
 export interface BulkImportResult {
@@ -632,13 +645,27 @@ The endpoint is **idempotent**: re-posting an already-imported URL returns `alre
     "supermarket_product_id": "8e9bcc71-...",
     "external_id": "00012345-00012345-200",
     "already_existed": false,
-    "scrape": null
+    "scrape": null,
+    "catalog_warning": null
   },
   "meta": { "ts": "..." }
 }
 ```
 
 When `scrape_immediately: true`, the `scrape` field is an object like `{ "status": "success" }` (other values: `"failed"`, `"retry_scheduled"`).
+
+`catalog_warning` is **non-blocking**: the URL is registered either way. It is set when the product's EAN is not in the client catalog (`ean_not_in_catalog`, typically an alternate/old barcode of a catalog product — the row exports with blank Categoría/Marca/Descripción para forms) or the page exposes no EAN (`missing_ean`, the row is left out of the export). The UI should show the `suggestions` and let the operator pick one, then bind it with `PATCH /v1/supermarket-products/:id { "ean": "<suggested>" }` (or re-add with `ean`). Example:
+
+```json
+"catalog_warning": {
+  "code": "ean_not_in_catalog",
+  "ean": "7793253005801",
+  "message": "EAN 7793253005801 is not in the client catalog; the product will export with blank labels until it is bound to a catalog EAN.",
+  "suggestions": [
+    { "ean": "7793253003791", "score": 0.857, "confidence": "high", "description": "LAVANDINAS GEL AYUDÍN 700 ORIGINAL" }
+  ]
+}
+```
 
 #### Errors
 
@@ -690,7 +717,8 @@ URLs are **deduped** within the request and processed **sequentially** so we res
         "supermarket_product_id": "...",
         "external_id": "...",
         "already_existed": false,
-        "scrape": null
+        "scrape": null,
+        "catalog_warning": null
       }
     ],
     "failures": [
@@ -701,7 +729,7 @@ URLs are **deduped** within the request and processed **sequentially** so we res
 }
 ```
 
-`results` contains every URL that *registered successfully* (whether new or already existed). `failures` holds the rejects with the underlying error message.
+`results` contains every URL that *registered successfully* (whether new or already existed), each with its own `catalog_warning` (same meaning as on the single-URL endpoint). `failures` holds the rejects with the underlying error message.
 
 #### Errors
 
