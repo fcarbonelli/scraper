@@ -339,11 +339,12 @@ const SUPERMARKETS: SupermarketSeed[] = [
     id: 'mercadolibre',
     name: 'Super MercadoLibre',
     base_url: 'https://www.mercadolibre.com.ar',
-    rate_limit_ms: 500,
-    concurrency: 3,
-    // Active: tracks ONLY the ECOMODICO seller's offers via the official API
-    // (no browser/proxy). Run `npm run prune-ecomodico -- --apply` after
-    // deploying to deactivate any products Ecomodico doesn't sell.
+    rate_limit_ms: 1000,
+    concurrency: 2,
+    // Active: tracks ONLY the ECOMODICO seller's offers. Since 2026-11-24 the
+    // price comes from Ecomodico's pinned PDP in a headless browser through the
+    // AR proxy (the API closed third-party listing reads), so keep concurrency
+    // at the browser's page limit (mercadolibre-browser.ts).
     is_active: true,
     provincia: 'BUENOS AIRES',
     zona: 'CAPITAL Y GBA',

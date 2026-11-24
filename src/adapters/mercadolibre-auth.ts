@@ -221,6 +221,19 @@ function isExpired(tokens: MlTokens): boolean {
 }
 
 /**
+ * Recover from a failed refresh when ANOTHER process (worker vs api vs an
+ * operator script) already spent our refresh token: the rotated pair is in the
+ * DB, so adopt it (refreshing it if it is expired too). Rethrows the original
+ * error when the DB holds nothing newer.
+ */
+async function adoptTokensRotatedElsewhere(current: MlTokens, err: unknown): Promise<MlTokens> {
+  const stored = await readTokensFromDb();
+  if (!stored || stored.refreshToken === current.refreshToken) throw err;
+  cached = stored;
+  return isExpired(stored) ? refreshTokens(stored) : stored;
+}
+
+/**
  * Return a valid access token, refreshing transparently when needed.
  *
  * @param force  When true, refresh even if the cached token looks valid (used
@@ -243,9 +256,11 @@ export async function getAccessToken(force = false): Promise<string> {
   // parallel refreshes would invalidate each other.
   if (!refreshInFlight) {
     const current = cached;
-    refreshInFlight = refreshTokens(current).finally(() => {
-      refreshInFlight = undefined;
-    });
+    refreshInFlight = refreshTokens(current)
+      .catch((err: unknown) => adoptTokensRotatedElsewhere(current, err))
+      .finally(() => {
+        refreshInFlight = undefined;
+      });
   }
   const refreshed = await refreshInFlight;
   return refreshed.accessToken;

@@ -31,7 +31,7 @@ No pasan por el validador de `src/shared/env.ts`. Se leen en `src/shared/proxy.t
 | Variable | Qué es |
 | --- | --- |
 | `AR_PROXY_URL` | `http://user:pass@host:port` |
-| `AR_PROXY_SUPERMARKETS` | Lista opcional de ids. Si falta, el default es `mami`, `maxiconsumo`, `la-anonima`, `atomo` |
+| `AR_PROXY_SUPERMARKETS` | Lista opcional de ids. Si falta, el default es `mami`, `maxiconsumo`, `la-anonima`, `atomo`, `mercadolibre` (este último solo para su navegador) |
 
 Mercado Libre no va por el proxy: usa la API oficial, que responde desde EC2.
 
@@ -275,17 +275,48 @@ Otra sucursal, sin pisar la primaria: `--append --region="<REGION>" --seller=<ID
 
 ## Mercado Libre (`mercadolibre`)
 
-Archivo: `src/adapters/mercadolibre.ts`, tokens en `mercadolibre-auth.ts`. Se trackea **únicamente** al vendedor Ecomodico (`seller_id` 179907718, tienda `ecomodico`). El precio de la buy box es de quien esté ganando, y casi nunca es Ecomodico, así que no se lee.
+Archivos: `src/adapters/mercadolibre.ts`, el navegador en `mercadolibre-browser.ts`, el parser en `mercadolibre-pdp.ts` y los tokens en `mercadolibre-auth.ts`. Se trackea **únicamente** al vendedor Ecomodico (`seller_id` 179907718, tienda `ecomodico`). El precio de la buy box es de quien esté ganando, y casi nunca es Ecomodico, así que no se lee.
 
-Todo sale de `api.mercadolibre.com` con OAuth. Sin browser y sin proxy.
+- `external_id`: el id de catálogo (`MLA…`). La `external_url` guarda la publicación de Ecomodico: `https://www.mercadolibre.com.ar/p/<catalogId>?item_id=<itemId>`.
+- **Precio (desde el 2026-11-24):** se carga esa página en un Chromium headless y se parsea:
+  - El bloque `"item_id":…,"catalog_product_id":…,"seller_id":N` dice qué oferta muestra la página.
+  - El JSON-LD `offers` trae precio, moneda y stock.
+  - `"price":X,"original_price":Y` trae el tachado. Solo se toma si `X` es el precio del JSON-LD.
+- Si la publicación de Ecomodico ya no existe, ML ignora el `item_id` y muestra a otro vendedor. Por eso, si el `seller_id` mostrado no es Ecomodico, el resultado es `product_not_found`.
+- La metadata (marca, EAN) sigue saliendo de la API: `GET /products/<id>` funciona.
+- No hay descubrimiento por EAN (`searchByEan`). Sin el endpoint de ofertas no hay forma de confirmar que Ecomodico vende un producto de catálogo, así que el descubrimiento y el barrido semanal saltean esta cadena.
 
-- Descubrimiento: `GET /products/search?status=active&site_id=MLA&product_identifier=<ean>`. Devuelve como mucho un producto de catálogo (`MLA…`). Se guarda solo si Ecomodico lo ofrece.
-- Precio: `GET /products/<catalogId>/items?seller_id=179907718`. 404 = Ecomodico no lo vende.
-- `external_id`: el id de catálogo. URL: `https://www.mercadolibre.com.ar/p/<id>`.
+**Por qué el navegador: la API cerró la lectura de publicaciones de otro vendedor (2026-11-24).**
+
+Con un token válido (`/users/me` y `/products/<id>` dan 200), estas son las respuestas:
+
+| Endpoint | Respuesta |
+| --- | --- |
+| `/products/<id>/items` | 403 `PA_UNAUTHORIZED_RESULT_FROM_POLICIES` (PolicyAgent) |
+| `/items/<id>`, `/items/<id>/prices`, `/items/<id>/sale_price` | 403 `access_denied` |
+| `/items?ids=` | "Resource deprecated - client no longer allowed to consume this resource" |
+| Búsqueda por vendedor | bloqueada |
+
+La app ya tiene el scope `publish-sync` de lectura, así que no se arregla con permisos. Un 403 con esas marcas ahora se clasifica `selector_failed`, con un mensaje que dice "blocked … by policy (not the token)". Si vuelve a aparecer `auth_required`, sí es el token. `scripts/prune-ecomodico.ts` usaba ese endpoint y hoy no sirve.
+
+**Lo que aprendimos del anti-bot de la vidriera:**
+- `fetch` cae en `gz/account-verification` ("Para continuar, ingresa a tu cuenta"), incluso desde una IP residencial.
+- El headless-shell de Playwright cae en "Hubo un error accediendo a esta pagina".
+- **Pasa** el navegador completo en headless nuevo (Edge/Chrome instalado, o `channel: 'chromium'` en EC2) con su **propio** user agent sin la palabra "Headless".
+- Un UA inventado con otra versión que la real no coincide con los client hints y cae en el muro de login.
+- La primera página de un contexto pasa por un desafío JavaScript ("Continuar") que deja una cookie y redirige solo a los ~3 s. Las páginas siguientes del mismo contexto lo saltean (~2 s por producto). Por eso el browser y el contexto se reutilizan entre jobs y se cierran a los 2 min sin uso.
+- **No bloquear scripts ni XHR**: el desafío los necesita, y una prueba que solo dejaba pasar el documento hizo que ML marcara la IP por un rato.
+- Las imágenes se apagan con `--blink-settings=imagesEnabled=false` y no con `context.route()`, porque `route` desactiva la caché HTTP y cada página volvía a bajar ~2 MB de scripts por el proxy.
+- Ante el muro (`rate_limited`) se descarta el contexto, así el reintento sale con cookies y conexión nuevas (otra IP del proxy rotativo).
+- `articulo.mercadolibre.com.ar/MLA-<item>` redirige al catálogo y pierde el `item_id`: muestra a otro vendedor. No usarlo.
+
+En EC2 el navegador sale por `AR_PROXY_URL` (`mercadolibre` está en `DEFAULT_PROXIED`; si `AR_PROXY_SUPERMARKETS` está seteado en el `.env` del server, agregarlo ahí). Las llamadas a la API siguen directas. La concurrencia en `setup-db` es 2, igual al límite de páginas del browser.
 
 El Client ID y el secret van en `ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `ML_REDIRECT_URI` (tienen que coincidir con el DevCenter). Los tokens no son env: `npm run ml:auth` los crea y quedan en `supermarkets.config.mlTokens`, y se rotan solos con el refresh token.
 
-Después de activar, `npm run prune-ecomodico -- --apply` (o el tsx directo) apaga productos que Ecomodico no vende. Si quedaron maestros llamados “Unknown product”, fue porque en el alta todavía no había token y la API de catálogo de estos productos no trae GTIN: `scripts/heal-ml.ts` completa nombre y marca, y después `heal-eans` puede pegarles un EAN del catálogo.
+Los tokens los comparten varios procesos (worker, api, scripts). Si uno rota el refresh token, otro que tenga el viejo en memoria va a fallar al renovar. `getAccessToken` cubre ese caso: si la renovación falla, relee `supermarkets.config.mlTokens` y adopta el par que haya rotado el otro proceso.
+
+Si quedaron maestros llamados “Unknown product”, fue porque en el alta todavía no había token y la API de catálogo de estos productos no trae GTIN: `scripts/heal-ml.ts` completa nombre y marca, y después `heal-eans` puede pegarles un EAN del catálogo.
 
 ## California (`california`)
 
