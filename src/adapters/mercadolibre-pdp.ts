@@ -97,10 +97,17 @@ export function parseMlPdp(html: string): MlPdpOffer | null {
   return offer;
 }
 
-/** True when the HTML is ML's anti-bot login wall or its generic error page. */
+/**
+ * True when the load landed on an anti-bot wall instead of a product page:
+ * the login wall, the generic error page, or the captcha wall (`/captcha/wall`,
+ * title "Seguridad"). The captcha wall does not show the "Continuar" button, so
+ * the caller must treat the URL itself as the signal and drop the context —
+ * that exit IP is burned and every later page on it fails the same way.
+ */
 export function isMlBlockPage(html: string, url: string): boolean {
   return (
     url.includes('/gz/account-verification') ||
+    url.includes('/captcha/wall') ||
     html.includes('Hubo un error accediendo a esta pagina') ||
     html.includes('Para continuar, ingresa a tu cuenta')
   );

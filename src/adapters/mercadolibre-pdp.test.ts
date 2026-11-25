@@ -82,6 +82,12 @@ describe('parseMlPdp', () => {
 describe('isMlBlockPage', () => {
   it('detects the login wall and the error page', () => {
     expect(isMlBlockPage('', 'https://www.mercadolibre.com.ar/gz/account-verification?go=x')).toBe(true);
+    expect(
+      isMlBlockPage(
+        '<title>Seguridad — Mercado Libre</title>',
+        'https://www.mercadolibre.com.ar/captcha/wall?go_url=https%3A%2F%2Fwww.mercadolibre.com.ar%2Fp%2FMLA1',
+      ),
+    ).toBe(true);
     expect(isMlBlockPage('<p>Hubo un error accediendo a esta pagina...</p>', 'https://www.mercadolibre.com.ar/p/MLA1')).toBe(true);
     expect(isMlBlockPage(pdp({ price: 1 }), 'https://www.mercadolibre.com.ar/x/p/MLA60125032')).toBe(false);
   });

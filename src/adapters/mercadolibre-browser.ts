@@ -207,7 +207,11 @@ export async function loadMlPage(
       const deadline = Date.now() + READY_TIMEOUT_MS;
       while (Date.now() < deadline) {
         if ((await page.locator('meta[itemprop="price"]').count()) > 0) break;
-        if (page.url().includes('/gz/account-verification')) break;
+        // Login wall and captcha wall never grow a price. Stop at once so a
+        // burned exit IP is retired instead of sitting out the full wait, and
+        // so the next product opens a fresh sticky session.
+        const landed = page.url();
+        if (landed.includes('/gz/account-verification') || landed.includes('/captcha/wall')) break;
         const button = page.locator('#continue-button');
         if ((await button.count()) > 0) {
           challenged = true;
@@ -223,9 +227,10 @@ export async function loadMlPage(
       const title = await page.title().catch(() => '');
       if (isMlBlockPage(html, finalUrl)) {
         retireSlot(slot);
+        const path = finalUrl.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
         throw new ScrapeError(
           'rate_limited',
-          'MercadoLibre showed its anti-bot wall (login / error page) instead of the product',
+          `MercadoLibre showed its anti-bot wall instead of the product (landed on ${path})`,
         );
       }
       const stuckOnInterstitial =
