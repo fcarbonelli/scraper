@@ -201,30 +201,50 @@ export async function loadMlPage(
     const onAbort = (): void => void page.close().catch(() => undefined);
     opts.signal?.addEventListener('abort', onAbort, { once: true });
     try {
+      // A failed document navigation (proxy tunnel drop, aborted load) leaves
+      // the tab on Chrome's error page. Remember why, so the error isn't just
+      // "no priced offer".
+      const navFailures: string[] = [];
+      page.on('requestfailed', (req) => {
+        if (!req.isNavigationRequest()) return;
+        const reason = req.failure()?.errorText;
+        if (reason) navFailures.push(reason);
+      });
+
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
 
       let challenged = false;
       const deadline = Date.now() + READY_TIMEOUT_MS;
       while (Date.now() < deadline) {
+        const landed = page.url();
+        if (landed.startsWith('chrome-error:')) break;
         if ((await page.locator('meta[itemprop="price"]').count()) > 0) break;
         // Login wall and captcha wall never grow a price. Stop at once so a
         // burned exit IP is retired instead of sitting out the full wait, and
         // so the next product opens a fresh sticky session.
-        const landed = page.url();
         if (landed.includes('/gz/account-verification') || landed.includes('/captcha/wall')) break;
-        const button = page.locator('#continue-button');
-        if ((await button.count()) > 0) {
+        if ((await page.locator('#continue-button').count()) > 0) {
+          // The interstitial redirects itself after a few seconds. Do not click
+          // it: a click on every poll (or one click while that redirect is in
+          // flight) aborts the navigation and the tab dies on
+          // chrome-error://chromewebdata/. Through the proxy that was every
+          // product.
           challenged = true;
-          if (await button.isEnabled().catch(() => false)) {
-            await button.click({ timeout: 2_000 }).catch(() => undefined);
-          }
         }
         await page.waitForTimeout(POLL_MS);
       }
 
-      const html = await page.content();
       const finalUrl = page.url();
       const title = await page.title().catch(() => '');
+      if (finalUrl.startsWith('chrome-error:')) {
+        retireSlot(slot);
+        const why = navFailures.at(-1) ?? 'chrome network error';
+        throw new ScrapeError(
+          'network_error',
+          `MercadoLibre navigation failed (${why}; challenged=${challenged})`,
+        );
+      }
+      const html = await page.content();
       if (isMlBlockPage(html, finalUrl)) {
         retireSlot(slot);
         const path = finalUrl.replace(/^https?:\/\/[^/]+/, '').slice(0, 80);
